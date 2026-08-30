@@ -1,0 +1,7 @@
+# Local agent configuration and working documents
+/.agents/
+/AGENTS.md
+/agent-docs/
+
+# Rust build output
+/target/
