@@ -2,7 +2,7 @@
 
 Stickies is a fast, local scratchpad that lives on the edge of a Linux desktop. It is built for thoughts that are too small to justify opening a full notes application.
 
-The planned interaction is simple. Recent or pinned notes sit as thin indicators at the screen edge. Hovering fans them out, clicking opens a note, and edits save automatically. Closing the note returns it to the edge.
+The planned interaction is simple. Recent or pinned notes sit at the screen edge. Hovering reveals title-only tabs, clicking a title opens the full note, and closing returns it to the edge.
 
 ## Project goals
 
@@ -16,7 +16,7 @@ GNOME and X11 support are outside the initial release plan.
 
 ## Status
 
-Stickies is in early development. The current prototype creates a small right-edge Layer Shell marker on Hyprland. Note cards, editing, and persistence are not implemented yet.
+Stickies is in early development. The current prototype has a right-edge Layer Shell marker, title tabs, an editable note, session-only Keep open behavior, and in-memory note state. Persistence is not implemented, so edits disappear when the app exits.
 
 Planned work includes the edge interaction, application state, SQLite persistence, an all-notes window, desktop integration, multi-monitor behavior, Markdown export, and packaging.
 
