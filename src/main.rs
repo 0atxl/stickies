@@ -165,7 +165,10 @@ impl PrototypeUi {
         self.cancel_inactivity_timeout();
 
         let state = self.state.borrow();
-        if !matches!(state.deck(), DeckState::Open(_)) || state.keep_open() {
+        if !matches!(state.deck(), DeckState::Open(_))
+            || state.keep_open()
+            || !self.window.is_active()
+        {
             return;
         }
         drop(state);
@@ -195,6 +198,8 @@ impl PrototypeUi {
     }
 
     fn schedule_focus_loss_collapse(&self) {
+        self.cancel_inactivity_timeout();
+
         let state = self.state.borrow();
         if !matches!(state.deck(), DeckState::Open(_)) || state.keep_open() {
             return;
