@@ -18,8 +18,8 @@ const TAB_WIDTH: i32 = 160;
 const TAB_HEIGHT: i32 = 42;
 const TAB_INPUT_WIDTH: i32 = 180;
 const TAB_INPUT_HEIGHT: i32 = 220;
-const COLLAPSE_DELAY_MS: u64 = 250;
-const FOCUS_LOSS_DELAY_MS: u64 = 500;
+const COLLAPSE_DELAY_MS: u64 = 500;
+const OPEN_FOCUS_LOSS_DELAY_SECONDS: u64 = 2 * 60;
 const INACTIVITY_TIMEOUT_SECONDS: u64 = 5 * 60;
 const REVEAL_DURATION_MS: u64 = 180;
 const TAB_STAGGER_MS: u64 = 35;
@@ -204,17 +204,20 @@ impl PrototypeUi {
         let generation = self.focus_loss_generation.get().wrapping_add(1);
         self.focus_loss_generation.set(generation);
         let ui = self.clone();
-        glib::timeout_add_local_once(Duration::from_millis(FOCUS_LOSS_DELAY_MS), move || {
-            let state = ui.state.borrow();
-            let should_collapse = ui.focus_loss_generation.get() == generation
-                && matches!(state.deck(), DeckState::Open(_))
-                && !state.keep_open();
-            drop(state);
+        glib::timeout_add_local_once(
+            Duration::from_secs(OPEN_FOCUS_LOSS_DELAY_SECONDS),
+            move || {
+                let state = ui.state.borrow();
+                let should_collapse = ui.focus_loss_generation.get() == generation
+                    && matches!(state.deck(), DeckState::Open(_))
+                    && !state.keep_open();
+                drop(state);
 
-            if should_collapse {
-                ui.collapse_now();
-            }
-        });
+                if should_collapse {
+                    ui.collapse_now();
+                }
+            },
+        );
     }
 
     fn cancel_focus_loss_collapse(&self) {
