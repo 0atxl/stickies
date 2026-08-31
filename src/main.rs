@@ -1,4 +1,5 @@
 mod app;
+mod storage;
 
 use std::{cell::Cell, cell::RefCell, rc::Rc, time::Duration};
 
@@ -7,6 +8,7 @@ use gtk::gdk::Display;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use storage::Storage;
 
 const APPLICATION_ID: &str = "dev.stickies.Stickies";
 const LAYER_NAMESPACE: &str = "stickies";
@@ -21,6 +23,7 @@ const TAB_INPUT_HEIGHT: i32 = 220;
 const COLLAPSE_DELAY_MS: u64 = 500;
 const OPEN_FOCUS_LOSS_DELAY_SECONDS: u64 = 2 * 60;
 const INACTIVITY_TIMEOUT_SECONDS: u64 = 5 * 60;
+const AUTOSAVE_DELAY_MS: u64 = 750;
 const REVEAL_DURATION_MS: u64 = 180;
 const TAB_STAGGER_MS: u64 = 35;
 
@@ -33,9 +36,12 @@ struct PrototypeUi {
     editor_body: gtk::TextView,
     keep_open_button: gtk::ToggleButton,
     state: Rc<RefCell<AppState>>,
+    storage: Option<Rc<Storage>>,
     animation_generation: Rc<Cell<u64>>,
     focus_loss_generation: Rc<Cell<u64>>,
     inactivity_source: Rc<RefCell<Option<glib::SourceId>>>,
+    autosave_source: Rc<RefCell<Option<glib::SourceId>>>,
+    autosave_pending: Rc<Cell<bool>>,
 }
 
 impl PrototypeUi {
@@ -86,6 +92,7 @@ impl PrototypeUi {
     }
 
     fn start_collapse(&self, generation: u64) {
+        self.flush_autosave();
         self.cancel_inactivity_timeout();
         self.cancel_focus_loss_collapse();
         self.state.borrow_mut().dispatch(Action::CollapseDeck);
@@ -158,6 +165,64 @@ impl PrototypeUi {
             if !self.window.is_active() {
                 self.schedule_focus_loss_collapse();
             }
+        }
+    }
+
+    fn update_open_note_body(&self, body: String) {
+        let event = self
+            .state
+            .borrow_mut()
+            .dispatch(Action::UpdateOpenNoteBody(body));
+        if matches!(event, Some(Event::NoteEdited(_))) {
+            self.schedule_autosave();
+        }
+    }
+
+    fn schedule_autosave(&self) {
+        if self.storage.is_none() {
+            return;
+        }
+
+        if let Some(source) = self.autosave_source.borrow_mut().take() {
+            source.remove();
+        }
+        self.autosave_pending.set(true);
+
+        let ui = self.clone();
+        let source =
+            glib::timeout_add_local_once(Duration::from_millis(AUTOSAVE_DELAY_MS), move || {
+                ui.autosave_source.borrow_mut().take();
+                ui.save_pending_note();
+            });
+        self.autosave_source.replace(Some(source));
+    }
+
+    fn flush_autosave(&self) {
+        if let Some(source) = self.autosave_source.borrow_mut().take() {
+            source.remove();
+        }
+        self.save_pending_note();
+    }
+
+    fn save_pending_note(&self) {
+        if !self.autosave_pending.get() {
+            return;
+        }
+
+        let note = {
+            let state = self.state.borrow();
+            let DeckState::Open(note_id) = state.deck() else {
+                return;
+            };
+            state.note(note_id).cloned()
+        };
+        let (Some(storage), Some(note)) = (self.storage.as_ref(), note) else {
+            return;
+        };
+
+        match storage.update_note(&note) {
+            Ok(()) => self.autosave_pending.set(false),
+            Err(error) => eprintln!("Stickies could not save the open note: {error}"),
         }
     }
 
@@ -291,7 +356,8 @@ fn main() -> glib::ExitCode {
 }
 
 fn build_edge_surface(application: &gtk::Application) {
-    let state = Rc::new(RefCell::new(AppState::new(initial_notes())));
+    let (notes, storage) = load_notes();
+    let state = Rc::new(RefCell::new(AppState::new(notes)));
 
     let window = gtk::ApplicationWindow::builder()
         .application(application)
@@ -389,17 +455,6 @@ fn build_edge_surface(application: &gtk::Application) {
     editor_body.set_top_margin(12);
     editor_body.set_bottom_margin(12);
 
-    {
-        let state = state.clone();
-        editor_body.buffer().connect_changed(move |buffer| {
-            let (start, end) = buffer.bounds();
-            let body = buffer.text(&start, &end, true).to_string();
-            state
-                .borrow_mut()
-                .dispatch(Action::UpdateOpenNoteBody(body));
-        });
-    }
-
     let editor_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vexpand(true)
@@ -431,10 +486,22 @@ fn build_edge_surface(application: &gtk::Application) {
         editor_body,
         keep_open_button: keep_open_button.clone(),
         state,
+        storage,
         animation_generation: Rc::new(Cell::new(0)),
         focus_loss_generation: Rc::new(Cell::new(0)),
         inactivity_source: Rc::new(RefCell::new(None)),
+        autosave_source: Rc::new(RefCell::new(None)),
+        autosave_pending: Rc::new(Cell::new(false)),
     };
+
+    {
+        let ui = ui.clone();
+        ui.editor_body.buffer().connect_changed(move |buffer| {
+            let (start, end) = buffer.bounds();
+            let body = buffer.text(&start, &end, true).to_string();
+            ui.update_open_note_body(body);
+        });
+    }
 
     for (button, note_id) in tab_buttons {
         let ui = ui.clone();
@@ -509,9 +576,30 @@ fn build_edge_surface(application: &gtk::Application) {
         window.connect_map(move |_| ui.set_edge_input_region(DORMANT_WIDTH, DORMANT_HEIGHT));
     }
 
+    {
+        let ui = ui.clone();
+        application.connect_shutdown(move |_| ui.flush_autosave());
+    }
+
     install_styles();
     window.set_child(Some(&root));
     window.present();
+}
+
+fn load_notes() -> (Vec<Note>, Option<Rc<Storage>>) {
+    let initial_notes = initial_notes();
+    let result = Storage::open(&storage::database_path()).and_then(|mut storage| {
+        let notes = storage.load_or_seed(&initial_notes)?;
+        Ok((notes, storage))
+    });
+
+    match result {
+        Ok((notes, storage)) => (notes, Some(Rc::new(storage))),
+        Err(error) => {
+            eprintln!("Stickies could not open local storage: {error}");
+            (initial_notes, None)
+        }
+    }
 }
 
 fn install_styles() {

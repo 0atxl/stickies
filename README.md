@@ -16,15 +16,16 @@ GNOME and X11 support are outside the initial release plan.
 
 ## Status
 
-Stickies is in early development. The current prototype has a right-edge Layer Shell marker, title tabs, an editable note, session-only Keep open behavior, and in-memory note state. Persistence is not implemented, so edits disappear when the app exits.
+Stickies is in early development. The current prototype has a right-edge Layer Shell marker, title tabs, an editable note, session-only Keep open behavior, and local SQLite persistence. Body edits save after 750 ms of quiet time and load again when the app restarts.
 
-Planned work includes the edge interaction, application state, SQLite persistence, an all-notes window, desktop integration, multi-monitor behavior, Markdown export, and packaging.
+Planned work includes note creation and archiving, an all-notes window, desktop integration, multi-monitor behavior, Markdown export, and packaging.
 
 ## Requirements
 
 - A Wayland compositor with Layer Shell support. Hyprland is the current target.
 - Rust and Cargo.
 - GTK4 and gtk4-layer-shell development libraries.
+- SQLite development library.
 - `pkg-config`.
 
 Confirm the native libraries are available:
@@ -32,6 +33,7 @@ Confirm the native libraries are available:
 ```bash
 pkg-config --modversion gtk4
 pkg-config --modversion gtk4-layer-shell-0
+pkg-config --modversion sqlite3
 ```
 
 ## Build and run
