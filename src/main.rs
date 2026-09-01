@@ -19,7 +19,8 @@ const EDITOR_HEIGHT: i32 = 420;
 const TAB_WIDTH: i32 = 160;
 const TAB_HEIGHT: i32 = 42;
 const TAB_INPUT_WIDTH: i32 = 180;
-const TAB_INPUT_HEIGHT: i32 = 220;
+const TAB_INPUT_HEIGHT: i32 = 310;
+const MAX_VISIBLE_NOTES: usize = 5;
 const COLLAPSE_DELAY_MS: u64 = 500;
 const OPEN_FOCUS_LOSS_DELAY_SECONDS: u64 = 2 * 60;
 const INACTIVITY_TIMEOUT_SECONDS: u64 = 5 * 60;
@@ -31,8 +32,9 @@ const TAB_STAGGER_MS: u64 = 35;
 struct PrototypeUi {
     window: gtk::ApplicationWindow,
     stack: gtk::Stack,
-    tab_revealers: Vec<gtk::Revealer>,
-    editor_title: gtk::Label,
+    tabs: gtk::Box,
+    tab_revealers: Rc<RefCell<Vec<gtk::Revealer>>>,
+    editor_title: gtk::Entry,
     editor_body: gtk::TextView,
     keep_open_button: gtk::ToggleButton,
     state: Rc<RefCell<AppState>>,
@@ -62,7 +64,7 @@ impl PrototypeUi {
         self.stack.set_visible_child_name("tabs");
         self.stack.set_visible(true);
 
-        for (index, revealer) in self.tab_revealers.iter().cloned().enumerate() {
+        for (index, revealer) in self.tab_revealers.borrow().iter().cloned().enumerate() {
             let animation_generation = self.animation_generation.clone();
             glib::timeout_add_local_once(
                 Duration::from_millis(index as u64 * TAB_STAGGER_MS),
@@ -100,7 +102,7 @@ impl PrototypeUi {
         self.window.set_keyboard_mode(KeyboardMode::None);
         gtk::prelude::RootExt::set_focus(&self.window, None::<&gtk::Widget>);
 
-        for revealer in &self.tab_revealers {
+        for revealer in self.tab_revealers.borrow().iter() {
             revealer.set_reveal_child(false);
         }
         self.stack.set_visible_child_name("tabs");
@@ -108,6 +110,7 @@ impl PrototypeUi {
         let ui = self.clone();
         glib::timeout_add_local_once(Duration::from_millis(REVEAL_DURATION_MS), move || {
             if ui.animation_generation.get() == generation {
+                ui.refresh_tabs();
                 ui.stack.set_visible(false);
                 ui.set_edge_input_region(DORMANT_WIDTH, DORMANT_HEIGHT);
             }
@@ -119,7 +122,7 @@ impl PrototypeUi {
         self.start_collapse(generation);
     }
 
-    fn open_editor(&self, note_id: NoteId) {
+    fn open_editor(&self, note_id: NoteId, focus_title: bool) {
         let note = {
             let mut state = self.state.borrow_mut();
             let event = state.dispatch(Action::OpenNote(note_id));
@@ -142,10 +145,18 @@ impl PrototypeUi {
         self.window.set_keyboard_mode(KeyboardMode::OnDemand);
         self.reset_inactivity_timeout();
 
-        let editor_body = self.editor_body.clone();
-        glib::idle_add_local_once(move || {
-            let _ = editor_body.grab_focus();
-        });
+        if focus_title {
+            let editor_title = self.editor_title.clone();
+            glib::idle_add_local_once(move || {
+                let _ = editor_title.grab_focus();
+                editor_title.select_region(0, -1);
+            });
+        } else {
+            let editor_body = self.editor_body.clone();
+            glib::idle_add_local_once(move || {
+                let _ = editor_body.grab_focus();
+            });
+        }
     }
 
     fn set_keep_open(&self, keep_open: bool) {
@@ -176,6 +187,171 @@ impl PrototypeUi {
         if matches!(event, Some(Event::NoteEdited(_))) {
             self.schedule_autosave();
         }
+    }
+
+    fn update_open_note_title(&self, title: String) {
+        let event = self
+            .state
+            .borrow_mut()
+            .dispatch(Action::UpdateOpenNoteTitle(title));
+        if matches!(event, Some(Event::NoteEdited(_))) {
+            self.schedule_autosave();
+        }
+    }
+
+    fn create_note(&self) {
+        let note = if let Some(storage) = self.storage.as_ref() {
+            match storage.create_note("Untitled note", "", NoteColor::Yellow) {
+                Ok(note) => note,
+                Err(error) => {
+                    eprintln!("Stickies could not create a note: {error}");
+                    return;
+                }
+            }
+        } else {
+            Note::new(
+                self.state.borrow().next_note_id(),
+                "Untitled note",
+                "",
+                NoteColor::Yellow,
+            )
+        };
+
+        let note_id = note.id;
+        if self.state.borrow_mut().dispatch(Action::AddNote(note))
+            != Some(Event::NoteAdded(note_id))
+        {
+            return;
+        }
+        self.open_editor(note_id, true);
+    }
+
+    fn archive_open_note(&self) {
+        self.remove_open_note(false);
+    }
+
+    fn confirm_delete_open_note(&self) {
+        let title = {
+            let state = self.state.borrow();
+            let DeckState::Open(note_id) = state.deck() else {
+                return;
+            };
+            state
+                .note(note_id)
+                .map_or_else(|| "this note".to_owned(), |note| note.title.clone())
+        };
+        let dialog = gtk::MessageDialog::builder()
+            .transient_for(&self.window)
+            .modal(true)
+            .message_type(gtk::MessageType::Question)
+            .buttons(gtk::ButtonsType::Cancel)
+            .text("Delete note?")
+            .secondary_text(format!("Delete \"{title}\"? This cannot be undone yet."))
+            .build();
+        dialog.add_button("Delete", gtk::ResponseType::Accept);
+
+        let ui = self.clone();
+        dialog.run_async(move |dialog, response| {
+            if response == gtk::ResponseType::Accept {
+                ui.remove_open_note(true);
+            }
+            dialog.close();
+        });
+    }
+
+    fn remove_open_note(&self, delete: bool) {
+        self.flush_autosave();
+        if self.autosave_pending.get() {
+            return;
+        }
+
+        let note_id = match self.state.borrow().deck() {
+            DeckState::Open(note_id) => note_id,
+            _ => return,
+        };
+        if let Some(storage) = self.storage.as_ref() {
+            let result = if delete {
+                storage.delete_note(note_id)
+            } else {
+                storage.archive_note(note_id)
+            };
+            if let Err(error) = result {
+                eprintln!("Stickies could not remove the note: {error}");
+                return;
+            }
+        }
+
+        let action = if delete {
+            Action::DeleteOpenNote
+        } else {
+            Action::ArchiveOpenNote
+        };
+        self.state.borrow_mut().dispatch(action);
+        self.reload_deck_notes();
+        self.collapse_now();
+    }
+
+    fn reload_deck_notes(&self) {
+        let Some(storage) = self.storage.as_ref() else {
+            return;
+        };
+        match storage.load_deck_notes(MAX_VISIBLE_NOTES) {
+            Ok(notes) => self.state.borrow_mut().replace_notes(notes),
+            Err(error) => eprintln!("Stickies could not refresh the edge notes: {error}"),
+        }
+    }
+
+    fn refresh_tabs(&self) {
+        while let Some(child) = self.tabs.first_child() {
+            self.tabs.remove(&child);
+        }
+        self.tab_revealers.borrow_mut().clear();
+
+        let notes = self.state.borrow().notes().to_vec();
+        for note in notes.into_iter().take(MAX_VISIBLE_NOTES) {
+            let tab = gtk::Button::new();
+            tab.add_css_class("note-tab");
+            tab.add_css_class(match note.color {
+                NoteColor::Yellow => "note-yellow",
+                NoteColor::Blue => "note-blue",
+                NoteColor::Purple => "note-purple",
+                NoteColor::Green => "note-green",
+            });
+            tab.set_size_request(TAB_WIDTH, TAB_HEIGHT);
+            tab.set_focus_on_click(false);
+            tab.set_tooltip_text(Some(&format!("Open {}", note.title)));
+
+            let visible_title = if note.title.trim().is_empty() {
+                "Untitled note"
+            } else {
+                &note.title
+            };
+            let title_label = gtk::Label::new(Some(visible_title));
+            title_label.add_css_class("tab-title");
+            title_label.set_xalign(0.0);
+            tab.set_child(Some(&title_label));
+
+            let ui = self.clone();
+            let note_id = note.id;
+            tab.connect_clicked(move |_| ui.open_editor(note_id, false));
+            self.append_tab_widget(&tab);
+        }
+
+        let create_button = gtk::Button::with_label("+");
+        create_button.add_css_class("create-note");
+        create_button.set_tooltip_text(Some("Create note"));
+        let ui = self.clone();
+        create_button.connect_clicked(move |_| ui.create_note());
+        self.append_tab_widget(&create_button);
+    }
+
+    fn append_tab_widget(&self, widget: &impl IsA<gtk::Widget>) {
+        let revealer = gtk::Revealer::new();
+        revealer.set_transition_type(gtk::RevealerTransitionType::SlideLeft);
+        revealer.set_transition_duration(REVEAL_DURATION_MS as u32);
+        revealer.set_child(Some(widget));
+        self.tabs.append(&revealer);
+        self.tab_revealers.borrow_mut().push(revealer);
     }
 
     fn schedule_autosave(&self) {
@@ -396,56 +572,34 @@ fn build_edge_surface(application: &gtk::Application) {
     tabs.set_width_request(TAB_WIDTH);
     tabs.set_halign(gtk::Align::End);
     tabs.set_valign(gtk::Align::Center);
-    let notes = state.borrow().notes().to_vec();
-    let mut tab_revealers = Vec::with_capacity(notes.len());
-    let mut tab_buttons = Vec::with_capacity(notes.len());
-
-    for note in notes {
-        let tab = gtk::Button::new();
-        tab.add_css_class("note-tab");
-        tab.add_css_class(match note.color {
-            NoteColor::Yellow => "note-yellow",
-            NoteColor::Blue => "note-blue",
-            NoteColor::Purple => "note-purple",
-            NoteColor::Green => "note-green",
-        });
-        tab.set_size_request(TAB_WIDTH, TAB_HEIGHT);
-        tab.set_focus_on_click(false);
-        tab.set_tooltip_text(Some(&format!("Open {}", note.title)));
-
-        let title_label = gtk::Label::new(Some(&note.title));
-        title_label.add_css_class("tab-title");
-        title_label.set_xalign(0.0);
-        tab.set_child(Some(&title_label));
-
-        let revealer = gtk::Revealer::new();
-        revealer.set_transition_type(gtk::RevealerTransitionType::SlideLeft);
-        revealer.set_transition_duration(REVEAL_DURATION_MS as u32);
-        revealer.set_child(Some(&tab));
-        tabs.append(&revealer);
-
-        tab_revealers.push(revealer);
-        tab_buttons.push((tab, note.id));
-    }
 
     let editor = gtk::Box::new(gtk::Orientation::Vertical, 12);
     editor.add_css_class("editor-card");
 
     let editor_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let editor_title = gtk::Label::new(None);
+    let editor_title = gtk::Entry::new();
     editor_title.add_css_class("editor-title");
-    editor_title.set_xalign(0.0);
     editor_title.set_hexpand(true);
+    editor_title.set_placeholder_text(Some("Note title"));
+
+    let close_hint = gtk::Label::new(Some("Esc to close"));
+    close_hint.add_css_class("close-hint");
+    editor_header.append(&editor_title);
+    editor_header.append(&close_hint);
+
+    let editor_actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
 
     let keep_open_button = gtk::ToggleButton::with_label("Keep open");
     keep_open_button.add_css_class("keep-open");
     keep_open_button.set_tooltip_text(Some("Keep this note open while using other windows"));
 
-    let close_hint = gtk::Label::new(Some("Esc to close"));
-    close_hint.add_css_class("close-hint");
-    editor_header.append(&editor_title);
-    editor_header.append(&keep_open_button);
-    editor_header.append(&close_hint);
+    let archive_button = gtk::Button::with_label("Archive");
+    archive_button.add_css_class("archive-note");
+    let delete_button = gtk::Button::with_label("Delete");
+    delete_button.add_css_class("delete-note");
+    editor_actions.append(&keep_open_button);
+    editor_actions.append(&archive_button);
+    editor_actions.append(&delete_button);
 
     let editor_body = gtk::TextView::new();
     editor_body.add_css_class("editor-body");
@@ -464,6 +618,7 @@ fn build_edge_surface(application: &gtk::Application) {
 
     editor.append(&editor_header);
     editor.append(&editor_scroll);
+    editor.append(&editor_actions);
 
     stack.add_named(&tabs, Some("tabs"));
     stack.add_named(&editor, Some("editor"));
@@ -481,7 +636,8 @@ fn build_edge_surface(application: &gtk::Application) {
     let ui = PrototypeUi {
         window: window.clone(),
         stack,
-        tab_revealers,
+        tabs,
+        tab_revealers: Rc::new(RefCell::new(Vec::new())),
         editor_title,
         editor_body,
         keep_open_button: keep_open_button.clone(),
@@ -494,6 +650,8 @@ fn build_edge_surface(application: &gtk::Application) {
         autosave_pending: Rc::new(Cell::new(false)),
     };
 
+    ui.refresh_tabs();
+
     {
         let ui = ui.clone();
         ui.editor_body.buffer().connect_changed(move |buffer| {
@@ -503,14 +661,26 @@ fn build_edge_surface(application: &gtk::Application) {
         });
     }
 
-    for (button, note_id) in tab_buttons {
+    {
         let ui = ui.clone();
-        button.connect_clicked(move |_| ui.open_editor(note_id));
+        let editor_title = ui.editor_title.clone();
+        editor_title
+            .connect_changed(move |entry| ui.update_open_note_title(entry.text().to_string()));
     }
 
     {
         let ui = ui.clone();
         keep_open_button.connect_toggled(move |button| ui.set_keep_open(button.is_active()));
+    }
+
+    {
+        let ui = ui.clone();
+        archive_button.connect_clicked(move |_| ui.archive_open_note());
+    }
+
+    {
+        let ui = ui.clone();
+        delete_button.connect_clicked(move |_| ui.confirm_delete_open_note());
     }
 
     let editor_click = gtk::GestureClick::new();
@@ -589,7 +759,7 @@ fn build_edge_surface(application: &gtk::Application) {
 fn load_notes() -> (Vec<Note>, Option<Rc<Storage>>) {
     let initial_notes = initial_notes();
     let result = Storage::open(&storage::database_path()).and_then(|mut storage| {
-        let notes = storage.load_or_seed(&initial_notes)?;
+        let notes = storage.load_or_seed(&initial_notes, MAX_VISIBLE_NOTES)?;
         Ok((notes, storage))
     });
 

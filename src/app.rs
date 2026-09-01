@@ -48,8 +48,12 @@ pub enum DeckState {
 #[derive(Debug, Eq, PartialEq)]
 pub enum Action {
     ShowTabs,
+    AddNote(Note),
     OpenNote(NoteId),
+    UpdateOpenNoteTitle(String),
     UpdateOpenNoteBody(String),
+    ArchiveOpenNote,
+    DeleteOpenNote,
     SetKeepOpen(bool),
     CollapseDeck,
 }
@@ -57,7 +61,10 @@ pub enum Action {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Event {
     Deck(DeckState),
+    NoteAdded(NoteId),
     NoteEdited(NoteId),
+    NoteArchived(NoteId),
+    NoteDeleted(NoteId),
     KeepOpen(bool),
 }
 
@@ -84,6 +91,23 @@ impl AppState {
         self.notes.iter().find(|note| note.id == id)
     }
 
+    pub fn next_note_id(&self) -> NoteId {
+        let next = self
+            .notes
+            .iter()
+            .map(|note| note.id.value())
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        NoteId::new(next)
+    }
+
+    pub fn replace_notes(&mut self, notes: Vec<Note>) {
+        self.notes = notes;
+        self.deck = DeckState::Dormant;
+        self.keep_open = false;
+    }
+
     pub const fn deck(&self) -> DeckState {
         self.deck
     }
@@ -102,25 +126,53 @@ impl AppState {
                 self.deck = DeckState::Tabs;
                 Some(Event::Deck(self.deck))
             }
+            Action::AddNote(note) => {
+                if self.note(note.id).is_some() {
+                    return None;
+                }
+
+                let id = note.id;
+                self.notes.insert(0, note);
+                Some(Event::NoteAdded(id))
+            }
             Action::OpenNote(id) => {
                 self.note(id)?;
                 self.deck = DeckState::Open(id);
                 self.keep_open = false;
                 Some(Event::Deck(self.deck))
             }
+            Action::UpdateOpenNoteTitle(title) => {
+                let DeckState::Open(id) = self.deck else {
+                    return None;
+                };
+                let index = self.notes.iter().position(|note| note.id == id)?;
+
+                if self.notes[index].title == title {
+                    return None;
+                }
+
+                self.notes[index].title = title;
+                let note = self.notes.remove(index);
+                self.notes.insert(0, note);
+                Some(Event::NoteEdited(id))
+            }
             Action::UpdateOpenNoteBody(body) => {
                 let DeckState::Open(id) = self.deck else {
                     return None;
                 };
-                let note = self.notes.iter_mut().find(|note| note.id == id)?;
+                let index = self.notes.iter().position(|note| note.id == id)?;
 
-                if note.body == body {
+                if self.notes[index].body == body {
                     return None;
                 }
 
-                note.body = body;
+                self.notes[index].body = body;
+                let note = self.notes.remove(index);
+                self.notes.insert(0, note);
                 Some(Event::NoteEdited(id))
             }
+            Action::ArchiveOpenNote => self.remove_open_note(false),
+            Action::DeleteOpenNote => self.remove_open_note(true),
             Action::SetKeepOpen(keep_open) => {
                 if !matches!(self.deck, DeckState::Open(_)) || self.keep_open == keep_open {
                     return None;
@@ -134,6 +186,22 @@ impl AppState {
                 self.keep_open = false;
                 Some(Event::Deck(self.deck))
             }
+        }
+    }
+
+    fn remove_open_note(&mut self, delete: bool) -> Option<Event> {
+        let DeckState::Open(id) = self.deck else {
+            return None;
+        };
+        let index = self.notes.iter().position(|note| note.id == id)?;
+        self.notes.remove(index);
+        self.deck = DeckState::Dormant;
+        self.keep_open = false;
+
+        if delete {
+            Some(Event::NoteDeleted(id))
+        } else {
+            Some(Event::NoteArchived(id))
         }
     }
 }
@@ -175,6 +243,12 @@ mod tests {
     fn editing_an_open_note_updates_its_body() {
         let mut state = state();
         let note_id = NoteId::new(1);
+        state.dispatch(Action::AddNote(Note::new(
+            NoteId::new(2),
+            "Later note",
+            "",
+            NoteColor::Blue,
+        )));
         state.dispatch(Action::OpenNote(note_id));
 
         assert_eq!(
@@ -185,6 +259,7 @@ mod tests {
             state.note(note_id).map(|note| note.body.as_str()),
             Some("Changed body")
         );
+        assert_eq!(state.notes()[0].id, note_id);
     }
 
     #[test]
@@ -209,5 +284,45 @@ mod tests {
 
         state.dispatch(Action::CollapseDeck);
         assert!(!state.keep_open());
+    }
+
+    #[test]
+    fn a_note_can_be_added_and_its_title_edited() {
+        let mut state = state();
+        let note = Note::new(NoteId::new(2), "Untitled note", "", NoteColor::Yellow);
+
+        assert_eq!(
+            state.dispatch(Action::AddNote(note)),
+            Some(Event::NoteAdded(NoteId::new(2)))
+        );
+        state.dispatch(Action::OpenNote(NoteId::new(2)));
+        assert_eq!(
+            state.dispatch(Action::UpdateOpenNoteTitle("Ideas".to_owned())),
+            Some(Event::NoteEdited(NoteId::new(2)))
+        );
+        assert_eq!(
+            state.note(NoteId::new(2)).map(|note| note.title.as_str()),
+            Some("Ideas")
+        );
+    }
+
+    #[test]
+    fn archiving_or_deleting_removes_the_open_note() {
+        let mut archived = state();
+        archived.dispatch(Action::OpenNote(NoteId::new(1)));
+        assert_eq!(
+            archived.dispatch(Action::ArchiveOpenNote),
+            Some(Event::NoteArchived(NoteId::new(1)))
+        );
+        assert!(archived.notes().is_empty());
+        assert_eq!(archived.deck(), DeckState::Dormant);
+
+        let mut deleted = state();
+        deleted.dispatch(Action::OpenNote(NoteId::new(1)));
+        assert_eq!(
+            deleted.dispatch(Action::DeleteOpenNote),
+            Some(Event::NoteDeleted(NoteId::new(1)))
+        );
+        assert!(deleted.notes().is_empty());
     }
 }

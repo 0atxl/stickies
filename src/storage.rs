@@ -75,7 +75,11 @@ impl Storage {
         Ok(storage)
     }
 
-    pub fn load_or_seed(&mut self, initial_notes: &[Note]) -> Result<Vec<Note>, StorageError> {
+    pub fn load_or_seed(
+        &mut self,
+        initial_notes: &[Note],
+        limit: usize,
+    ) -> Result<Vec<Note>, StorageError> {
         let note_count = self
             .connection
             .query_row("SELECT COUNT(*) FROM notes", [], |row| row.get::<_, i64>(0))?;
@@ -84,7 +88,30 @@ impl Storage {
             self.insert_notes(initial_notes)?;
         }
 
-        self.load_active_notes()
+        self.load_deck_notes(limit)
+    }
+
+    pub fn create_note(
+        &self,
+        title: &str,
+        body: &str,
+        color: NoteColor,
+    ) -> Result<Note, StorageError> {
+        let timestamp = unix_timestamp_millis();
+        self.connection.execute(
+            "INSERT INTO notes (
+                title, body, color, pinned, sort_order,
+                created_at, updated_at, archived_at, deleted_at
+             ) VALUES (
+                ?1, ?2, ?3, 0,
+                (SELECT COALESCE(MIN(sort_order), 1) - 1 FROM notes),
+                ?4, ?4, NULL, NULL
+             )",
+            params![title, body, color_name(color), timestamp],
+        )?;
+        let id = self.connection.last_insert_rowid();
+        let id = u64::try_from(id).map_err(|_| StorageError::InvalidNoteId(id))?;
+        Ok(Note::new(NoteId::new(id), title, body, color))
     }
 
     pub fn update_note(&self, note: &Note) -> Result<(), StorageError> {
@@ -96,7 +123,7 @@ impl Storage {
                 note.title,
                 note.body,
                 color_name(note.color),
-                unix_timestamp(),
+                unix_timestamp_millis(),
                 note_id_to_i64(note.id)?,
             ],
         )?;
@@ -105,6 +132,45 @@ impl Storage {
         } else {
             Ok(())
         }
+    }
+
+    pub fn archive_note(&self, id: NoteId) -> Result<(), StorageError> {
+        self.mark_note_removed(id, false)
+    }
+
+    pub fn delete_note(&self, id: NoteId) -> Result<(), StorageError> {
+        self.mark_note_removed(id, true)
+    }
+
+    pub fn load_deck_notes(&self, limit: usize) -> Result<Vec<Note>, StorageError> {
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let mut statement = self.connection.prepare(
+            "SELECT id, title, body, color
+             FROM notes
+             WHERE archived_at IS NULL AND deleted_at IS NULL
+             ORDER BY pinned DESC, updated_at DESC, sort_order ASC, id DESC
+             LIMIT ?1",
+        )?;
+        let rows = statement.query_map([limit], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+
+        rows.map(|row| {
+            let (id, title, body, color) = row?;
+            let id = u64::try_from(id).map_err(|_| StorageError::InvalidNoteId(id))?;
+            Ok(Note {
+                id: NoteId::new(id),
+                title,
+                body,
+                color: parse_color(&color)?,
+            })
+        })
+        .collect()
     }
 
     fn migrate(&mut self) -> Result<(), StorageError> {
@@ -127,7 +193,7 @@ impl Storage {
     }
 
     fn insert_notes(&mut self, notes: &[Note]) -> Result<(), StorageError> {
-        let timestamp = unix_timestamp();
+        let timestamp = unix_timestamp_millis();
         let transaction = self.connection.transaction()?;
 
         for (sort_order, note) in notes.iter().enumerate() {
@@ -151,34 +217,23 @@ impl Storage {
         Ok(())
     }
 
-    fn load_active_notes(&self) -> Result<Vec<Note>, StorageError> {
-        let mut statement = self.connection.prepare(
-            "SELECT id, title, body, color
-             FROM notes
-             WHERE archived_at IS NULL AND deleted_at IS NULL
-             ORDER BY pinned DESC, sort_order ASC, id ASC",
+    fn mark_note_removed(&self, id: NoteId, delete: bool) -> Result<(), StorageError> {
+        let statement = if delete {
+            "UPDATE notes SET deleted_at = ?1, updated_at = ?1
+             WHERE id = ?2 AND archived_at IS NULL AND deleted_at IS NULL"
+        } else {
+            "UPDATE notes SET archived_at = ?1, updated_at = ?1
+             WHERE id = ?2 AND archived_at IS NULL AND deleted_at IS NULL"
+        };
+        let updated = self.connection.execute(
+            statement,
+            params![unix_timestamp_millis(), note_id_to_i64(id)?],
         )?;
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })?;
-
-        let mut notes = Vec::new();
-        for row in rows {
-            let (id, title, body, color) = row?;
-            let id = u64::try_from(id).map_err(|_| StorageError::InvalidNoteId(id))?;
-            notes.push(Note {
-                id: NoteId::new(id),
-                title,
-                body,
-                color: parse_color(&color)?,
-            });
+        if updated == 0 {
+            Err(StorageError::MissingNote(id))
+        } else {
+            Ok(())
         }
-        Ok(notes)
     }
 }
 
@@ -209,10 +264,10 @@ fn parse_color(color: &str) -> Result<NoteColor, StorageError> {
     }
 }
 
-fn unix_timestamp() -> i64 {
+fn unix_timestamp_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs() as i64)
+        .map_or(0, |duration| duration.as_millis() as i64)
 }
 
 #[cfg(test)]
@@ -239,7 +294,7 @@ mod tests {
         {
             let mut storage = Storage::open(&path).expect("database should open");
             let mut notes = storage
-                .load_or_seed(&initial)
+                .load_or_seed(&initial, 5)
                 .expect("initial notes should be stored");
             notes[0].body = "Changed body".to_owned();
             storage
@@ -250,7 +305,7 @@ mod tests {
         {
             let mut storage = Storage::open(&path).expect("database should reopen");
             let notes = storage
-                .load_or_seed(&initial)
+                .load_or_seed(&initial, 5)
                 .expect("stored notes should load");
             assert_eq!(notes[0].body, "Changed body");
         }
@@ -275,5 +330,56 @@ mod tests {
                 .expect("schema version should remain readable"),
             2
         );
+    }
+
+    #[test]
+    fn create_archive_delete_and_deck_limit_are_persisted() {
+        let connection = Connection::open_in_memory().expect("database should open");
+        let mut storage = Storage { connection };
+        storage.migrate().expect("migration should run");
+        storage
+            .load_or_seed(
+                &[Note::new(NoteId::new(1), "Existing", "", NoteColor::Blue)],
+                5,
+            )
+            .expect("initial note should be stored");
+
+        let first = storage
+            .create_note("First", "Body", NoteColor::Yellow)
+            .expect("note should be created");
+        let second = storage
+            .create_note("Second", "", NoteColor::Green)
+            .expect("note should be created");
+        assert_eq!(
+            storage
+                .load_deck_notes(1)
+                .expect("limited deck should load")[0]
+                .id,
+            second.id
+        );
+
+        storage
+            .archive_note(second.id)
+            .expect("note should be archived");
+        assert!(
+            storage
+                .load_deck_notes(5)
+                .expect("deck should load")
+                .iter()
+                .all(|note| note.id != second.id)
+        );
+
+        storage
+            .delete_note(first.id)
+            .expect("note should be soft deleted");
+        let deleted_at = storage
+            .connection
+            .query_row(
+                "SELECT deleted_at FROM notes WHERE id = ?1",
+                [note_id_to_i64(first.id).expect("note id should fit")],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("deleted note should remain stored");
+        assert!(deleted_at.is_some());
     }
 }
