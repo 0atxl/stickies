@@ -63,6 +63,18 @@ pub struct Storage {
     connection: Connection,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NoteCollection {
+    Active,
+    Archived,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NoteSort {
+    Recent,
+    Title,
+}
+
 impl Storage {
     pub fn open(path: &Path) -> Result<Self, StorageError> {
         if let Some(parent) = path.parent() {
@@ -145,32 +157,91 @@ impl Storage {
     pub fn load_deck_notes(&self, limit: usize) -> Result<Vec<Note>, StorageError> {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let mut statement = self.connection.prepare(
-            "SELECT id, title, body, color
+            "SELECT id, title, body, color, pinned
              FROM notes
              WHERE archived_at IS NULL AND deleted_at IS NULL
              ORDER BY pinned DESC, updated_at DESC, sort_order ASC, id DESC
              LIMIT ?1",
         )?;
-        let rows = statement.query_map([limit], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })?;
+        let rows = statement.query_map([limit], note_from_row)?;
 
         rows.map(|row| {
-            let (id, title, body, color) = row?;
-            let id = u64::try_from(id).map_err(|_| StorageError::InvalidNoteId(id))?;
-            Ok(Note {
-                id: NoteId::new(id),
-                title,
-                body,
-                color: parse_color(&color)?,
-            })
+            let row = row?;
+            stored_note_from_row(row)
         })
         .collect()
+    }
+
+    pub fn search_notes(
+        &self,
+        collection: NoteCollection,
+        query: &str,
+        sort: NoteSort,
+    ) -> Result<Vec<Note>, StorageError> {
+        let collection_clause = match collection {
+            NoteCollection::Active => "archived_at IS NULL",
+            NoteCollection::Archived => "archived_at IS NOT NULL",
+        };
+        let order_clause = match (collection, sort) {
+            (NoteCollection::Active, NoteSort::Recent) => {
+                "pinned DESC, updated_at DESC, sort_order ASC, id DESC"
+            }
+            (NoteCollection::Active, NoteSort::Title) => {
+                "pinned DESC, title COLLATE NOCASE ASC, updated_at DESC, id DESC"
+            }
+            (NoteCollection::Archived, NoteSort::Recent) => {
+                "updated_at DESC, sort_order ASC, id DESC"
+            }
+            (NoteCollection::Archived, NoteSort::Title) => {
+                "title COLLATE NOCASE ASC, updated_at DESC, id DESC"
+            }
+        };
+        let sql = format!(
+            "SELECT id, title, body, color, pinned
+             FROM notes
+             WHERE {collection_clause}
+               AND deleted_at IS NULL
+               AND (instr(lower(title), lower(?1)) > 0
+                    OR instr(lower(body), lower(?1)) > 0)
+             ORDER BY {order_clause}"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map([query], note_from_row)?;
+
+        rows.map(|row| {
+            let row = row?;
+            stored_note_from_row(row)
+        })
+        .collect()
+    }
+
+    pub fn restore_note(&self, id: NoteId) -> Result<(), StorageError> {
+        let timestamp = unix_timestamp_millis();
+        let updated = self.connection.execute(
+            "UPDATE notes
+             SET archived_at = NULL, updated_at = ?1
+             WHERE id = ?2 AND archived_at IS NOT NULL AND deleted_at IS NULL",
+            params![timestamp, note_id_to_i64(id)?],
+        )?;
+        if updated == 0 {
+            Err(StorageError::MissingNote(id))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn set_note_pinned(&self, id: NoteId, pinned: bool) -> Result<(), StorageError> {
+        let updated = self.connection.execute(
+            "UPDATE notes
+             SET pinned = ?1
+             WHERE id = ?2 AND archived_at IS NULL AND deleted_at IS NULL",
+            params![pinned, note_id_to_i64(id)?],
+        )?;
+        if updated == 0 {
+            Err(StorageError::MissingNote(id))
+        } else {
+            Ok(())
+        }
     }
 
     fn migrate(&mut self) -> Result<(), StorageError> {
@@ -201,14 +272,15 @@ impl Storage {
                 "INSERT INTO notes (
                     id, title, body, color, pinned, sort_order,
                     created_at, updated_at, archived_at, deleted_at
-                 ) VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?6, NULL, NULL)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, NULL, NULL)",
                 params![
                     note_id_to_i64(note.id)?,
                     note.title,
                     note.body,
                     color_name(note.color),
+                    note.pinned,
                     i64::try_from(sort_order).unwrap_or(i64::MAX),
-                    timestamp,
+                    timestamp
                 ],
             )?;
         }
@@ -220,7 +292,7 @@ impl Storage {
     fn mark_note_removed(&self, id: NoteId, delete: bool) -> Result<(), StorageError> {
         let statement = if delete {
             "UPDATE notes SET deleted_at = ?1, updated_at = ?1
-             WHERE id = ?2 AND archived_at IS NULL AND deleted_at IS NULL"
+             WHERE id = ?2 AND deleted_at IS NULL"
         } else {
             "UPDATE notes SET archived_at = ?1, updated_at = ?1
              WHERE id = ?2 AND archived_at IS NULL AND deleted_at IS NULL"
@@ -243,6 +315,31 @@ pub fn database_path() -> PathBuf {
 
 fn note_id_to_i64(id: NoteId) -> Result<i64, StorageError> {
     i64::try_from(id.value()).map_err(|_| StorageError::NoteIdOutOfRange(id.value()))
+}
+
+fn note_from_row(
+    row: &rusqlite::Row<'_>,
+) -> Result<(i64, String, String, String, bool), rusqlite::Error> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+    ))
+}
+
+fn stored_note_from_row(
+    (id, title, body, color, pinned): (i64, String, String, String, bool),
+) -> Result<Note, StorageError> {
+    let id = u64::try_from(id).map_err(|_| StorageError::InvalidNoteId(id))?;
+    Ok(Note {
+        id: NoteId::new(id),
+        title,
+        body,
+        color: parse_color(&color)?,
+        pinned,
+    })
 }
 
 const fn color_name(color: NoteColor) -> &'static str {
@@ -381,5 +478,120 @@ mod tests {
             )
             .expect("deleted note should remain stored");
         assert!(deleted_at.is_some());
+    }
+
+    #[test]
+    fn search_separates_active_archived_and_deleted_notes_and_restore_moves_one_back() {
+        let connection = Connection::open_in_memory().expect("database should open");
+        let mut storage = Storage { connection };
+        storage.migrate().expect("migration should run");
+
+        let active = storage
+            .create_note("Groceries", "Buy ginger", NoteColor::Green)
+            .expect("active note should be created");
+        let archived = storage
+            .create_note("Work", "Review Ginger API", NoteColor::Blue)
+            .expect("archived note should be created");
+        let deleted = storage
+            .create_note("Old ginger", "Remove", NoteColor::Yellow)
+            .expect("deleted note should be created");
+        storage
+            .archive_note(archived.id)
+            .expect("note should be archived");
+        storage
+            .archive_note(deleted.id)
+            .expect("deleted note should first be archived");
+        storage
+            .delete_note(deleted.id)
+            .expect("note should be deleted");
+
+        assert_eq!(
+            storage
+                .search_notes(NoteCollection::Active, "GINGER", NoteSort::Recent)
+                .expect("active search should run"),
+            vec![active.clone()]
+        );
+        assert_eq!(
+            storage
+                .search_notes(NoteCollection::Archived, "ginger", NoteSort::Recent)
+                .expect("archive search should run"),
+            vec![archived.clone()]
+        );
+
+        storage
+            .restore_note(archived.id)
+            .expect("archived note should restore");
+        let active_results = storage
+            .search_notes(NoteCollection::Active, "ginger", NoteSort::Recent)
+            .expect("active search should run after restore");
+        assert_eq!(active_results.len(), 2);
+        assert!(active_results.contains(&archived));
+        assert!(
+            storage
+                .search_notes(NoteCollection::Archived, "", NoteSort::Recent)
+                .expect("archive should be empty")
+                .is_empty()
+        );
+
+        let title_sorted = storage
+            .search_notes(NoteCollection::Active, "", NoteSort::Title)
+            .expect("title sort should run");
+        assert_eq!(title_sorted[0].id, active.id);
+        assert_eq!(title_sorted[1].id, archived.id);
+
+        storage
+            .connection
+            .execute(
+                "UPDATE notes SET updated_at = ?1 WHERE id = ?2",
+                params![100, note_id_to_i64(active.id).expect("note ID should fit")],
+            )
+            .expect("active timestamp should be set");
+        storage
+            .connection
+            .execute(
+                "UPDATE notes SET updated_at = ?1 WHERE id = ?2",
+                params![
+                    200,
+                    note_id_to_i64(archived.id).expect("note ID should fit")
+                ],
+            )
+            .expect("restored timestamp should be set");
+        storage
+            .set_note_pinned(active.id, true)
+            .expect("older note should pin");
+        assert_eq!(
+            storage
+                .search_notes(NoteCollection::Active, "", NoteSort::Recent)
+                .expect("recent sort should put pinned note first")[0]
+                .id,
+            active.id
+        );
+        storage
+            .set_note_pinned(active.id, false)
+            .expect("older note should unpin");
+        assert_eq!(
+            storage
+                .search_notes(NoteCollection::Active, "", NoteSort::Recent)
+                .expect("recent sort should restore edit order")[0]
+                .id,
+            archived.id
+        );
+
+        storage
+            .set_note_pinned(archived.id, true)
+            .expect("active note should pin");
+        assert_eq!(
+            storage
+                .search_notes(NoteCollection::Active, "", NoteSort::Title)
+                .expect("title sort should run")[0]
+                .id,
+            archived.id
+        );
+        assert!(
+            storage
+                .load_deck_notes(5)
+                .expect("deck should load pinned note")[0]
+                .pinned
+        );
     }
 }

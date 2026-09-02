@@ -1,4 +1,5 @@
 mod app;
+mod manager;
 mod storage;
 
 use std::{cell::Cell, cell::RefCell, rc::Rc, time::Duration};
@@ -39,6 +40,8 @@ struct PrototypeUi {
     keep_open_button: gtk::ToggleButton,
     state: Rc<RefCell<AppState>>,
     storage: Option<Rc<Storage>>,
+    manager_window: Rc<RefCell<Option<manager::ManagerWindow>>>,
+    deck_refresh_needed: Rc<Cell<bool>>,
     animation_generation: Rc<Cell<u64>>,
     focus_loss_generation: Rc<Cell<u64>>,
     inactivity_source: Rc<RefCell<Option<glib::SourceId>>>,
@@ -54,6 +57,10 @@ impl PrototypeUi {
     }
 
     fn show_tabs(&self) {
+        if self.deck_refresh_needed.replace(false) {
+            self.reload_deck_notes();
+            self.refresh_tabs();
+        }
         let event = self.state.borrow_mut().dispatch(Action::ShowTabs);
         if event != Some(Event::Deck(DeckState::Tabs)) {
             return;
@@ -223,6 +230,7 @@ impl PrototypeUi {
         {
             return;
         }
+        self.refresh_manager();
         self.open_editor(note_id, true);
     }
 
@@ -287,8 +295,15 @@ impl PrototypeUi {
             Action::ArchiveOpenNote
         };
         self.state.borrow_mut().dispatch(action);
+        self.refresh_manager();
         self.reload_deck_notes();
         self.collapse_now();
+    }
+
+    fn refresh_manager(&self) {
+        if let Some(manager) = self.manager_window.borrow().as_ref() {
+            manager.refresh();
+        }
     }
 
     fn reload_deck_notes(&self) {
@@ -299,6 +314,32 @@ impl PrototypeUi {
             Ok(notes) => self.state.borrow_mut().replace_notes(notes),
             Err(error) => eprintln!("Stickies could not refresh the edge notes: {error}"),
         }
+    }
+
+    fn show_all_notes(&self) {
+        let Some(storage) = self.storage.as_ref().cloned() else {
+            eprintln!("Stickies cannot open All Notes without local storage");
+            return;
+        };
+        if let Some(window) = self.manager_window.borrow().as_ref() {
+            window.present();
+            return;
+        }
+        let Some(application) = self.window.application() else {
+            return;
+        };
+
+        let deck_refresh_needed = self.deck_refresh_needed.clone();
+        let manager = manager::build_window(&application, storage, move || {
+            deck_refresh_needed.set(true);
+        });
+        let manager_window = self.manager_window.clone();
+        manager.window().connect_close_request(move |_| {
+            manager_window.borrow_mut().take();
+            glib::Propagation::Proceed
+        });
+        self.manager_window.replace(Some(manager.clone()));
+        manager.present();
     }
 
     fn refresh_tabs(&self) {
@@ -337,12 +378,21 @@ impl PrototypeUi {
             self.append_tab_widget(&tab);
         }
 
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         let create_button = gtk::Button::with_label("+");
         create_button.add_css_class("create-note");
         create_button.set_tooltip_text(Some("Create note"));
         let ui = self.clone();
         create_button.connect_clicked(move |_| ui.create_note());
-        self.append_tab_widget(&create_button);
+
+        let all_notes_button = gtk::Button::with_label("All Notes");
+        all_notes_button.set_hexpand(true);
+        all_notes_button.set_sensitive(self.storage.is_some());
+        let ui = self.clone();
+        all_notes_button.connect_clicked(move |_| ui.show_all_notes());
+        actions.append(&create_button);
+        actions.append(&all_notes_button);
+        self.append_tab_widget(&actions);
     }
 
     fn append_tab_widget(&self, widget: &impl IsA<gtk::Widget>) {
@@ -397,7 +447,10 @@ impl PrototypeUi {
         };
 
         match storage.update_note(&note) {
-            Ok(()) => self.autosave_pending.set(false),
+            Ok(()) => {
+                self.autosave_pending.set(false);
+                self.refresh_manager();
+            }
             Err(error) => eprintln!("Stickies could not save the open note: {error}"),
         }
     }
@@ -643,6 +696,8 @@ fn build_edge_surface(application: &gtk::Application) {
         keep_open_button: keep_open_button.clone(),
         state,
         storage,
+        manager_window: Rc::new(RefCell::new(None)),
+        deck_refresh_needed: Rc::new(Cell::new(false)),
         animation_generation: Rc::new(Cell::new(0)),
         focus_loss_generation: Rc::new(Cell::new(0)),
         inactivity_source: Rc::new(RefCell::new(None)),

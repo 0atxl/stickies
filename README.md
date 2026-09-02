@@ -10,19 +10,19 @@ The planned interaction is simple. Recent or pinned notes sit at the screen edge
 - Local SQLite storage with no account, backend, or telemetry.
 - Fast mouse and keyboard access without a normal tiled application window.
 - Markdown and plain-text export so notes remain portable.
-- Hyprland support first, followed by other Wayland compositors that support Layer Shell.
+- Hyprland is the reference environment. KDE Plasma Wayland, Sway, and other Wayland compositors that support Layer Shell are planned Linux targets.
 
-GNOME and X11 support are outside the initial release plan.
+GNOME and X11 are outside the Linux release scope. Windows and macOS may receive separate ports later.
 
 ## Status
 
-Stickies is in early development. The current prototype has a right-edge Layer Shell marker, a five-note edge deck, editable notes, session-only Keep open behavior, and local SQLite persistence. Users can create notes, edit titles and bodies, archive notes, and soft delete them with confirmation. Edits save after 750 ms of quiet time and load again when the app restarts.
+Stickies is in early development. The current prototype has a right-edge Layer Shell marker, a five-note edge deck, editable notes, session-only Keep open behavior, and local SQLite persistence. Users can create notes, edit titles and bodies, archive notes, and soft delete them with confirmation. A plain All Notes window searches active and archived notes, sorts them by recent edit or title, and provides pin, archive, restore, and delete controls. Edits save after 750 ms of quiet time and load again when the app restarts.
 
-Planned work includes the all-notes window, search, archived-note restore, desktop integration, multi-monitor behavior, Markdown export, and packaging.
+Planned work includes desktop integration, multi-monitor behavior, Markdown export, and packaging.
 
 ## Requirements
 
-- A Wayland compositor with Layer Shell support. Hyprland is the current target.
+- A Wayland compositor with Layer Shell support. Hyprland is the reference environment.
 - Rust and Cargo.
 - GTK4 and gtk4-layer-shell development libraries.
 - SQLite development library.

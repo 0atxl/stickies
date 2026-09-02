@@ -25,6 +25,7 @@ pub struct Note {
     pub title: String,
     pub body: String,
     pub color: NoteColor,
+    pub pinned: bool,
 }
 
 impl Note {
@@ -34,6 +35,7 @@ impl Note {
             title: title.to_owned(),
             body: body.to_owned(),
             color,
+            pinned: false,
         }
     }
 }
