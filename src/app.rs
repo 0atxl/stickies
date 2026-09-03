@@ -93,17 +93,6 @@ impl AppState {
         self.notes.iter().find(|note| note.id == id)
     }
 
-    pub fn next_note_id(&self) -> NoteId {
-        let next = self
-            .notes
-            .iter()
-            .map(|note| note.id.value())
-            .max()
-            .unwrap_or(0)
-            .saturating_add(1);
-        NoteId::new(next)
-    }
-
     pub fn replace_notes(&mut self, notes: Vec<Note>) {
         self.notes = notes;
         self.deck = DeckState::Dormant;

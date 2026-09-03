@@ -7,6 +7,14 @@ use crate::{
     storage::{NoteCollection, NoteSort, Storage},
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ManagerChange {
+    Pin,
+    Archive,
+    Restore,
+    Delete,
+}
+
 struct ManagerUi {
     window: gtk::ApplicationWindow,
     storage: Rc<Storage>,
@@ -22,7 +30,8 @@ struct ManagerUi {
     restore: gtk::Button,
     delete: gtk::Button,
     status: gtk::Label,
-    on_notes_changed: Box<dyn Fn()>,
+    on_note_changing: Box<dyn Fn(NoteId) -> bool>,
+    on_note_changed: Box<dyn Fn(NoteId, ManagerChange)>,
 }
 
 #[derive(Clone)]
@@ -138,9 +147,13 @@ impl ManagerUi {
         if self.collection.get() != NoteCollection::Active {
             return;
         }
+        if !(self.on_note_changing)(note.id) {
+            self.status.set_text("Could not save the open note");
+            return;
+        }
 
         match self.storage.set_note_pinned(note.id, !note.pinned) {
-            Ok(()) => self.finish_mutation(),
+            Ok(()) => self.finish_mutation(note.id, ManagerChange::Pin),
             Err(error) => self.show_mutation_error("change the pin", error),
         }
     }
@@ -152,9 +165,13 @@ impl ManagerUi {
         if self.collection.get() != NoteCollection::Active {
             return;
         }
+        if !(self.on_note_changing)(note.id) {
+            self.status.set_text("Could not save the open note");
+            return;
+        }
 
         match self.storage.archive_note(note.id) {
-            Ok(()) => self.finish_mutation(),
+            Ok(()) => self.finish_mutation(note.id, ManagerChange::Archive),
             Err(error) => self.show_mutation_error("archive the note", error),
         }
     }
@@ -166,9 +183,13 @@ impl ManagerUi {
         if self.collection.get() != NoteCollection::Archived {
             return;
         }
+        if !(self.on_note_changing)(note.id) {
+            self.status.set_text("Could not save the open note");
+            return;
+        }
 
         match self.storage.restore_note(note.id) {
-            Ok(()) => self.finish_mutation(),
+            Ok(()) => self.finish_mutation(note.id, ManagerChange::Restore),
             Err(error) => self.show_mutation_error("restore the note", error),
         }
     }
@@ -203,14 +224,18 @@ impl ManagerUi {
     }
 
     fn delete_note(&self, note_id: NoteId) {
+        if !(self.on_note_changing)(note_id) {
+            self.status.set_text("Could not save the open note");
+            return;
+        }
         match self.storage.delete_note(note_id) {
-            Ok(()) => self.finish_mutation(),
+            Ok(()) => self.finish_mutation(note_id, ManagerChange::Delete),
             Err(error) => self.show_mutation_error("delete the note", error),
         }
     }
 
-    fn finish_mutation(&self) {
-        (self.on_notes_changed)();
+    fn finish_mutation(&self, note_id: NoteId, change: ManagerChange) {
+        (self.on_note_changed)(note_id, change);
         self.refresh();
     }
 
@@ -223,7 +248,8 @@ impl ManagerUi {
 pub fn build_window(
     application: &gtk::Application,
     storage: Rc<Storage>,
-    on_notes_changed: impl Fn() + 'static,
+    on_note_changing: impl Fn(NoteId) -> bool + 'static,
+    on_note_changed: impl Fn(NoteId, ManagerChange) + 'static,
 ) -> ManagerWindow {
     let window = gtk::ApplicationWindow::builder()
         .application(application)
@@ -323,7 +349,8 @@ pub fn build_window(
         restore,
         delete,
         status,
-        on_notes_changed: Box::new(on_notes_changed),
+        on_note_changing: Box::new(on_note_changing),
+        on_note_changed: Box::new(on_note_changed),
     });
 
     connect_manager_signals(&ui, active, archived, sort);

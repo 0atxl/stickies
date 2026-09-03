@@ -130,7 +130,7 @@ impl Storage {
         let updated = self.connection.execute(
             "UPDATE notes
              SET title = ?1, body = ?2, color = ?3, updated_at = ?4
-             WHERE id = ?5 AND deleted_at IS NULL",
+             WHERE id = ?5 AND archived_at IS NULL AND deleted_at IS NULL",
             params![
                 note.title,
                 note.body,
@@ -458,6 +458,12 @@ mod tests {
         storage
             .archive_note(second.id)
             .expect("note should be archived");
+        let mut archived_edit = second.clone();
+        archived_edit.body = "This must not be saved".to_owned();
+        assert!(matches!(
+            storage.update_note(&archived_edit),
+            Err(StorageError::MissingNote(id)) if id == second.id
+        ));
         assert!(
             storage
                 .load_deck_notes(5)
