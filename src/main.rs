@@ -603,7 +603,11 @@ fn main() -> glib::ExitCode {
         .application_id(APPLICATION_ID)
         .build();
 
-    application.connect_activate(build_edge_surface);
+    application.connect_activate(|application| {
+        if application.windows().is_empty() {
+            build_edge_surface(application);
+        }
+    });
     application.run()
 }
 
