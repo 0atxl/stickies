@@ -87,22 +87,6 @@ impl Storage {
         Ok(storage)
     }
 
-    pub fn load_or_seed(
-        &mut self,
-        initial_notes: &[Note],
-        limit: usize,
-    ) -> Result<Vec<Note>, StorageError> {
-        let note_count = self
-            .connection
-            .query_row("SELECT COUNT(*) FROM notes", [], |row| row.get::<_, i64>(0))?;
-
-        if note_count == 0 {
-            self.insert_notes(initial_notes)?;
-        }
-
-        self.load_deck_notes(limit)
-    }
-
     pub fn create_note(
         &self,
         title: &str,
@@ -263,32 +247,6 @@ impl Storage {
         Ok(())
     }
 
-    fn insert_notes(&mut self, notes: &[Note]) -> Result<(), StorageError> {
-        let timestamp = unix_timestamp_millis();
-        let transaction = self.connection.transaction()?;
-
-        for (sort_order, note) in notes.iter().enumerate() {
-            transaction.execute(
-                "INSERT INTO notes (
-                    id, title, body, color, pinned, sort_order,
-                    created_at, updated_at, archived_at, deleted_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, NULL, NULL)",
-                params![
-                    note_id_to_i64(note.id)?,
-                    note.title,
-                    note.body,
-                    color_name(note.color),
-                    note.pinned,
-                    i64::try_from(sort_order).unwrap_or(i64::MAX),
-                    timestamp
-                ],
-            )?;
-        }
-
-        transaction.commit()?;
-        Ok(())
-    }
-
     fn mark_note_removed(&self, id: NoteId, delete: bool) -> Result<(), StorageError> {
         let statement = if delete {
             "UPDATE notes SET deleted_at = ?1, updated_at = ?1
@@ -369,10 +327,48 @@ fn unix_timestamp_millis() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use crate::app::{Action, AppState, DeckState, Event};
+
     use super::*;
 
     #[test]
-    fn notes_survive_reopening_the_database() {
+    fn a_failed_write_keeps_edits_open_until_a_successful_retry() {
+        let connection = Connection::open_in_memory().expect("database should open");
+        let mut storage = Storage { connection };
+        storage.migrate().expect("migration should run");
+        let note = storage
+            .create_note("Work", "Saved", NoteColor::Yellow)
+            .unwrap();
+        let id = note.id;
+        let mut state = AppState::new(vec![note]);
+        state.dispatch(Action::OpenNote(id));
+        state.dispatch(Action::UpdateOpenNoteBody("Unsaved".to_owned()));
+
+        storage
+            .connection
+            .pragma_update(None, "query_only", true)
+            .unwrap();
+        assert!(storage.update_note(state.pending_note().unwrap()).is_err());
+        assert_eq!(state.dispatch(Action::CollapseDeck), None);
+        assert_eq!(state.deck(), DeckState::Open(id));
+        assert_eq!(state.pending_note().unwrap().body, "Unsaved");
+        assert_eq!(storage.load_deck_notes(5).unwrap()[0].body, "Saved");
+
+        storage
+            .connection
+            .pragma_update(None, "query_only", false)
+            .unwrap();
+        storage.update_note(state.pending_note().unwrap()).unwrap();
+        state.note_saved(id);
+        assert_eq!(
+            state.dispatch(Action::CollapseDeck),
+            Some(Event::Deck(DeckState::Dormant))
+        );
+        assert_eq!(storage.load_deck_notes(5).unwrap()[0].body, "Unsaved");
+    }
+
+    #[test]
+    fn empty_databases_stay_empty_and_user_notes_survive_reopening() {
         let path = std::env::temp_dir().join(format!(
             "stickies-storage-{}-{}.db",
             std::process::id(),
@@ -381,30 +377,37 @@ mod tests {
                 .expect("system time must follow the Unix epoch")
                 .as_nanos()
         ));
-        let initial = vec![Note::new(
-            NoteId::new(1),
-            "Work",
-            "Initial body",
-            NoteColor::Yellow,
-        )];
+        {
+            let storage = Storage::open(&path).expect("database should open");
+            assert!(storage.load_deck_notes(5).unwrap().is_empty());
+        }
 
         {
-            let mut storage = Storage::open(&path).expect("database should open");
-            let mut notes = storage
-                .load_or_seed(&initial, 5)
-                .expect("initial notes should be stored");
-            notes[0].body = "Changed body".to_owned();
+            let storage = Storage::open(&path).expect("empty database should reopen");
+            assert!(storage.load_deck_notes(5).unwrap().is_empty());
+            let mut note = storage
+                .create_note("Work", "Initial body", NoteColor::Yellow)
+                .expect("user note should be created");
+            note.body = "Changed body".to_owned();
             storage
-                .update_note(&notes[0])
+                .update_note(&note)
                 .expect("edited note should be stored");
         }
 
         {
-            let mut storage = Storage::open(&path).expect("database should reopen");
+            let storage = Storage::open(&path).expect("database should reopen");
             let notes = storage
-                .load_or_seed(&initial, 5)
+                .load_deck_notes(5)
                 .expect("stored notes should load");
+            assert_eq!(notes.len(), 1);
+            assert_eq!(notes[0].title, "Work");
             assert_eq!(notes[0].body, "Changed body");
+            storage.delete_note(notes[0].id).unwrap();
+        }
+
+        {
+            let storage = Storage::open(&path).expect("database should reopen after deletion");
+            assert!(storage.load_deck_notes(5).unwrap().is_empty());
         }
 
         fs::remove_file(path).expect("test database should be removable");
@@ -435,11 +438,8 @@ mod tests {
         let mut storage = Storage { connection };
         storage.migrate().expect("migration should run");
         storage
-            .load_or_seed(
-                &[Note::new(NoteId::new(1), "Existing", "", NoteColor::Blue)],
-                5,
-            )
-            .expect("initial note should be stored");
+            .create_note("Existing", "", NoteColor::Blue)
+            .expect("existing note should be created");
 
         let first = storage
             .create_note("First", "Body", NoteColor::Yellow)

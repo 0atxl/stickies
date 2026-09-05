@@ -16,9 +16,11 @@ GNOME and X11 are outside the Linux release scope. Windows and macOS may receive
 
 ## Status
 
-Stickies is in early development. The current prototype has a right-edge Layer Shell marker, a five-note edge deck, editable notes, session-only Keep open behavior, and local SQLite persistence. Users can create notes, edit titles and bodies, archive notes, and soft delete them with confirmation. A plain All Notes window searches active and archived notes, sorts them by recent edit or title, and provides pin, archive, restore, and delete controls. Edits save after 750 ms of quiet time and load again when the app restarts.
+Stickies is in early development. The current prototype has a right-edge Layer Shell marker, a five-note edge deck, editable notes, session-only Keep open behavior, and local SQLite persistence. Users can create notes, edit titles and bodies, archive notes, and soft delete them with confirmation. A plain All Notes window searches active and archived notes, sorts them by recent edit or title, and provides pin, archive, restore, and delete controls. Edits save after 750 ms of quiet time and load again when the app restarts. The application is single-instance and has an initial XDG configuration, desktop entry, opt-in launch-at-login backend, and Linux CI.
 
-Planned work includes desktop integration, multi-monitor behavior, Markdown export, and packaging.
+New databases start empty. Use `+` at the edge to create your first note. Existing databases retain their notes, including any examples created by earlier prototypes.
+
+Planned work includes the final UI, the remaining desktop behavior, multi-monitor support, Markdown export, and packaging.
 
 ## Requirements
 

@@ -56,6 +56,7 @@ impl ManagerWindow {
 
 impl ManagerUi {
     fn refresh(&self) {
+        let selected_id = self.selected_note().map(|note| note.id);
         while let Some(child) = self.list.first_child() {
             self.list.remove(&child);
         }
@@ -86,12 +87,16 @@ impl ManagerUi {
             1 => "1 note".to_owned(),
             _ => format!("{count} notes"),
         });
+        let selected_index = selected_id
+            .and_then(|id| notes.iter().position(|note| note.id == id))
+            .and_then(|index| i32::try_from(index).ok())
+            .unwrap_or(0);
         self.notes.replace(notes);
 
         if count == 0 {
             self.clear_preview();
-        } else if let Some(first) = self.list.row_at_index(0) {
-            self.list.select_row(Some(&first));
+        } else if let Some(row) = self.list.row_at_index(selected_index) {
+            self.list.select_row(Some(&row));
         }
     }
 

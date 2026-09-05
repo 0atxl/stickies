@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Stickies
+Comment=Keep local notes at the edge of your desktop
+TryExec=stickies
+Exec=stickies
+Icon=dev.stickies.Stickies
+Terminal=false
+Categories=Utility;
+StartupNotify=false

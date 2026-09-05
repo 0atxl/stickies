@@ -1,4 +1,6 @@
 mod app;
+mod autostart;
+mod config;
 mod manager;
 mod storage;
 
@@ -46,7 +48,6 @@ struct PrototypeUi {
     focus_loss_source: Rc<RefCell<Option<glib::SourceId>>>,
     inactivity_source: Rc<RefCell<Option<glib::SourceId>>>,
     autosave_source: Rc<RefCell<Option<glib::SourceId>>>,
-    autosave_pending: Rc<Cell<bool>>,
     loading_editor: Rc<Cell<bool>>,
 }
 
@@ -58,7 +59,10 @@ impl PrototypeUi {
     }
 
     fn show_tabs(&self) {
-        if self.deck_refresh_needed.replace(false) {
+        if matches!(self.state.borrow().deck(), DeckState::Open(_)) {
+            return;
+        }
+        if self.deck_refresh_needed.get() {
             self.reload_deck_notes();
             self.refresh_tabs();
         }
@@ -103,9 +107,13 @@ impl PrototypeUi {
 
     fn start_collapse(&self, generation: u64) {
         self.flush_autosave();
+        if self.state.borrow_mut().dispatch(Action::CollapseDeck)
+            != Some(Event::Deck(DeckState::Dormant))
+        {
+            return;
+        }
         self.cancel_inactivity_timeout();
         self.cancel_focus_loss_collapse();
-        self.state.borrow_mut().dispatch(Action::CollapseDeck);
         self.keep_open_button.set_active(false);
         self.window.set_keyboard_mode(KeyboardMode::None);
         gtk::prelude::RootExt::set_focus(&self.window, None::<&gtk::Widget>);
@@ -131,6 +139,7 @@ impl PrototypeUi {
     }
 
     fn open_editor(&self, note_id: NoteId, focus_title: bool) {
+        self.flush_autosave();
         let note = {
             let mut state = self.state.borrow_mut();
             let event = state.dispatch(Action::OpenNote(note_id));
@@ -218,6 +227,10 @@ impl PrototypeUi {
     }
 
     fn create_note(&self) {
+        self.flush_autosave();
+        if self.state.borrow().pending_note().is_some() {
+            return;
+        }
         let note = match self
             .storage
             .create_note("Untitled note", "", NoteColor::Yellow)
@@ -274,7 +287,7 @@ impl PrototypeUi {
 
     fn remove_open_note(&self, delete: bool) {
         self.flush_autosave();
-        if self.autosave_pending.get() {
+        if self.state.borrow().pending_note().is_some() {
             return;
         }
 
@@ -315,7 +328,7 @@ impl PrototypeUi {
         }
 
         self.flush_autosave();
-        !self.autosave_pending.get()
+        self.state.borrow().pending_note().is_none()
     }
 
     fn finish_manager_change(&self, note_id: NoteId, change: manager::ManagerChange) {
@@ -331,15 +344,20 @@ impl PrototypeUi {
             manager::ManagerChange::Pin | manager::ManagerChange::Restore => return,
         };
         self.state.borrow_mut().dispatch(action);
-        self.deck_refresh_needed.set(false);
         self.reload_deck_notes();
         self.collapse_now();
     }
 
     fn reload_deck_notes(&self) {
         match self.storage.load_deck_notes(MAX_VISIBLE_NOTES) {
-            Ok(notes) => self.state.borrow_mut().replace_notes(notes),
-            Err(error) => eprintln!("Stickies could not refresh the edge notes: {error}"),
+            Ok(notes) => {
+                let replaced = self.state.borrow_mut().replace_notes(notes);
+                self.deck_refresh_needed.set(!replaced);
+            }
+            Err(error) => {
+                self.deck_refresh_needed.set(true);
+                eprintln!("Stickies could not refresh the edge notes: {error}");
+            }
         }
     }
 
@@ -434,7 +452,6 @@ impl PrototypeUi {
         if let Some(source) = self.autosave_source.borrow_mut().take() {
             source.remove();
         }
-        self.autosave_pending.set(true);
 
         let ui = self.clone();
         let source =
@@ -453,24 +470,14 @@ impl PrototypeUi {
     }
 
     fn save_pending_note(&self) {
-        if !self.autosave_pending.get() {
-            return;
-        }
-
-        let note = {
-            let state = self.state.borrow();
-            let DeckState::Open(note_id) = state.deck() else {
-                return;
-            };
-            state.note(note_id).cloned()
-        };
+        let note = self.state.borrow().pending_note().cloned();
         let Some(note) = note else {
             return;
         };
 
         match self.storage.update_note(&note) {
             Ok(()) => {
-                self.autosave_pending.set(false);
+                self.state.borrow_mut().note_saved(note.id);
                 self.refresh_manager();
             }
             Err(error) => eprintln!("Stickies could not save the open note: {error}"),
@@ -569,36 +576,9 @@ impl PrototypeUi {
     }
 }
 
-fn initial_notes() -> Vec<Note> {
-    vec![
-        Note::new(
-            NoteId::new(1),
-            "Work",
-            "Review the release checklist.\n\n- Confirm the package build\n- Write the release notes\n- Test the upgrade path",
-            NoteColor::Yellow,
-        ),
-        Note::new(
-            NoteId::new(2),
-            "Homelab",
-            "Move the weekly backups to the new drive, then run a restore test before removing the old copy.",
-            NoteColor::Blue,
-        ),
-        Note::new(
-            NoteId::new(3),
-            "Projects",
-            "The edge stack should open on hover, keep pointer transitions calm, and get out of the way as soon as Escape is pressed.",
-            NoteColor::Purple,
-        ),
-        Note::new(
-            NoteId::new(4),
-            "Shopping",
-            "- Coffee beans\n- AA batteries\n- Two-metre USB-C cable",
-            NoteColor::Green,
-        ),
-    ]
-}
-
 fn main() -> glib::ExitCode {
+    reconcile_startup_preference();
+
     let application = gtk::Application::builder()
         .application_id(APPLICATION_ID)
         .build();
@@ -609,6 +589,19 @@ fn main() -> glib::ExitCode {
         }
     });
     application.run()
+}
+
+fn reconcile_startup_preference() {
+    match config::Config::load(&config::config_path()) {
+        Ok(config) => {
+            if let Err(error) =
+                autostart::reconcile(&autostart::autostart_path(), config.launch_at_login)
+            {
+                eprintln!("Stickies could not update autostart: {error}");
+            }
+        }
+        Err(error) => eprintln!("Stickies ignored its configuration: {error}"),
+    }
 }
 
 fn build_edge_surface(application: &gtk::Application) {
@@ -735,7 +728,6 @@ fn build_edge_surface(application: &gtk::Application) {
         focus_loss_source: Rc::new(RefCell::new(None)),
         inactivity_source: Rc::new(RefCell::new(None)),
         autosave_source: Rc::new(RefCell::new(None)),
-        autosave_pending: Rc::new(Cell::new(false)),
         loading_editor: Rc::new(Cell::new(false)),
     };
 
@@ -846,9 +838,8 @@ fn build_edge_surface(application: &gtk::Application) {
 }
 
 fn load_notes() -> Result<(Vec<Note>, Rc<Storage>), StorageError> {
-    let initial_notes = initial_notes();
-    let mut storage = Storage::open(&storage::database_path())?;
-    let notes = storage.load_or_seed(&initial_notes, MAX_VISIBLE_NOTES)?;
+    let storage = Storage::open(&storage::database_path())?;
+    let notes = storage.load_deck_notes(MAX_VISIBLE_NOTES)?;
     Ok((notes, Rc::new(storage)))
 }
 
