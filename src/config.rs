@@ -17,6 +17,85 @@ pub enum ScreenEdge {
     Bottom,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    Glass,
+    Paper,
+    Playful,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Appearance {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Paper {
+    #[default]
+    Plain,
+    Dots,
+    Grid,
+    Ruled,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Shape {
+    #[default]
+    Square,
+    Ticket,
+    Torn,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TabLayout {
+    #[default]
+    Adjacent,
+    Overlapping,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Font {
+    #[default]
+    Theme,
+    Grotesk,
+    Mono,
+    Handwritten,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NoteStyle {
+    pub font: Option<Font>,
+    pub paper: Option<Paper>,
+    pub shape: Option<Shape>,
+}
+
+impl NoteStyle {
+    pub fn resolve(&self, defaults: &Config) -> Config {
+        let mut config = defaults.clone();
+        if let Some(font) = self.font {
+            config.font = font;
+        }
+        if let Some(paper) = self.paper {
+            config.paper = paper;
+        }
+        if let Some(shape) = self.shape {
+            config.shape = shape;
+        }
+        config
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -24,6 +103,19 @@ pub struct Config {
     pub marker_offset: f64,
     pub edge_hover_enabled: bool,
     pub launch_at_login: bool,
+    pub theme: Theme,
+    pub appearance: Appearance,
+    pub font: Font,
+    pub font_size: u32,
+    pub paper: Paper,
+    pub shape: Shape,
+    pub white_paper: bool,
+    pub tab_layout: TabLayout,
+    pub visible_notes: usize,
+    pub inactivity_seconds: u64,
+    pub reduced_motion: bool,
+    pub hide_in_fullscreen: bool,
+    pub hide_in_dnd: bool,
 }
 
 impl Default for Config {
@@ -33,6 +125,19 @@ impl Default for Config {
             marker_offset: 0.5,
             edge_hover_enabled: true,
             launch_at_login: false,
+            theme: Theme::Paper,
+            appearance: Appearance::System,
+            font: Font::Theme,
+            font_size: 16,
+            paper: Paper::Plain,
+            shape: Shape::Ticket,
+            white_paper: false,
+            tab_layout: TabLayout::Adjacent,
+            visible_notes: 5,
+            inactivity_seconds: 120,
+            reduced_motion: false,
+            hide_in_fullscreen: true,
+            hide_in_dnd: true,
         }
     }
 }
@@ -71,6 +176,19 @@ impl Config {
         if !self.marker_offset.is_finite() || !(0.0..=1.0).contains(&self.marker_offset) {
             return Err(ConfigError::InvalidMarkerOffset(self.marker_offset));
         }
+        if !matches!(self.visible_notes, 4 | 5) {
+            return Err(ConfigError::InvalidValue("visible_notes must be 4 or 5"));
+        }
+        if !(12..=24).contains(&self.font_size) {
+            return Err(ConfigError::InvalidValue(
+                "font_size must be between 12 and 24",
+            ));
+        }
+        if !(30..=1800).contains(&self.inactivity_seconds) {
+            return Err(ConfigError::InvalidValue(
+                "inactivity_seconds must be between 30 and 1800",
+            ));
+        }
         Ok(())
     }
 }
@@ -82,6 +200,7 @@ pub enum ConfigError {
     Serialize(toml::ser::Error),
     InvalidMarkerOffset(f64),
     MissingParent,
+    InvalidValue(&'static str),
 }
 
 impl fmt::Display for ConfigError {
@@ -98,6 +217,7 @@ impl fmt::Display for ConfigError {
                     "marker_offset must be between 0 and 1, got {offset}"
                 )
             }
+            Self::InvalidValue(message) => formatter.write_str(message),
             Self::MissingParent => write!(formatter, "configuration path has no parent directory"),
         }
     }
@@ -147,6 +267,46 @@ mod tests {
     }
 
     #[test]
+    fn ui_settings_validate_limits_and_round_trip() {
+        let config = Config {
+            theme: Theme::Paper,
+            appearance: Appearance::Dark,
+            font: Font::Handwritten,
+            font_size: 18,
+            paper: Paper::Grid,
+            shape: Shape::Ticket,
+            visible_notes: 4,
+            tab_layout: TabLayout::Overlapping,
+            inactivity_seconds: 90,
+            ..Config::default()
+        };
+        let text = toml::to_string(&config).unwrap();
+        assert_eq!(toml::from_str::<Config>(&text).unwrap(), config);
+        for invalid in [
+            Config {
+                visible_notes: 6,
+                ..config.clone()
+            },
+            Config {
+                font_size: 0,
+                ..config.clone()
+            },
+            Config {
+                inactivity_seconds: 0,
+                ..config.clone()
+            },
+        ] {
+            assert!(invalid.validate().is_err());
+        }
+        let style = NoteStyle {
+            font: Some(Font::Mono),
+            ..NoteStyle::default()
+        };
+        assert_eq!(style.resolve(&config).font, Font::Mono);
+        assert_eq!(style.resolve(&config).paper, Paper::Grid);
+    }
+
+    #[test]
     fn a_missing_file_is_created_with_defaults() {
         let directory = test_directory("missing");
         let path = directory.join("config.toml");
@@ -168,6 +328,7 @@ mod tests {
             marker_offset: 0.25,
             edge_hover_enabled: false,
             launch_at_login: true,
+            ..Config::default()
         };
 
         config.save(&path).expect("configuration should save");

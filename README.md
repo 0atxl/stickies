@@ -16,17 +16,21 @@ GNOME and X11 are outside the Linux release scope. Windows and macOS may receive
 
 ## Status
 
-Stickies is in early development. The current prototype has a right-edge Layer Shell marker, a five-note edge deck, editable notes, session-only Keep open behavior, and local SQLite persistence. Users can create notes, edit titles and bodies, archive notes, and soft delete them with confirmation. A plain All Notes window searches active and archived notes, sorts them by recent edit or title, and provides pin, archive, restore, and delete controls. Edits save after 750 ms of quiet time and load again when the app restarts. The application is single-instance and has an initial XDG configuration, desktop entry, opt-in launch-at-login backend, and Linux CI.
+Stickies is in early development. All Notes now has a compact list, an editable note, and an embedded Appearance drawer with immediate changes. Main and floating editors share the same live note. Search, pinning, archive, restore, deletion with Undo, and Copy text are available. The Paper layout is awaiting visual approval before completing the other main-window themes. Floating-note and edge-strip visual redesigns follow later.
 
+Notes save locally after 750 ms of quiet time. Failed saves block closing or replacing an editor. Always open disables the default two-minute inactivity timeout; pinning controls note order. Checklist markers, bullets, numbered lists, and completed-line strike-through work in the plain-text editor.
+
+The UI is awaiting manual design review and compositor checks. Glass currently provides translucency without verified background blur. DND integration currently watches Omarchy shell state. Other desktop compatibility is unverified.
 New databases start empty. Use `+` at the edge to create your first note. Existing databases retain their notes, including any examples created by earlier prototypes.
 
-Planned work includes the final UI, the remaining desktop behavior, multi-monitor support, Markdown export, and packaging.
+Remaining work includes UI refinement, desktop verification, multi-monitor support, Markdown export, and packaging.
 
 ## Requirements
 
 - A Wayland compositor with Layer Shell support. Hyprland is the reference environment.
 - Rust and Cargo.
-- GTK4 and gtk4-layer-shell development libraries.
+- GTK4, libadwaita 1.7 or newer, and gtk4-layer-shell development libraries.
+- Fontconfig and `glib-compile-resources`. Bundled fonts and their licenses are in `assets/fonts`.
 - SQLite development library.
 - `pkg-config`.
 
@@ -34,6 +38,7 @@ Confirm the native libraries are available:
 
 ```bash
 pkg-config --modversion gtk4
+pkg-config --modversion libadwaita-1
 pkg-config --modversion gtk4-layer-shell-0
 pkg-config --modversion sqlite3
 ```

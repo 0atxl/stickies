@@ -5,11 +5,11 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::app::{Note, NoteColor, NoteId};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -20,6 +20,7 @@ pub enum StorageError {
     NoteIdOutOfRange(u64),
     MissingNote(NoteId),
     UnsupportedSchema(i64),
+    InvalidStyle(String),
 }
 
 impl fmt::Display for StorageError {
@@ -35,6 +36,7 @@ impl fmt::Display for StorageError {
             Self::MissingNote(id) => {
                 write!(formatter, "database does not contain note {}", id.value())
             }
+            Self::InvalidStyle(message) => write!(formatter, "invalid note appearance: {message}"),
             Self::UnsupportedSchema(version) => {
                 write!(
                     formatter,
@@ -65,6 +67,7 @@ pub struct Storage {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NoteCollection {
+    All,
     Active,
     Archived,
 }
@@ -138,6 +141,18 @@ impl Storage {
         self.mark_note_removed(id, true)
     }
 
+    pub fn undo_delete(&self, id: NoteId) -> Result<(), StorageError> {
+        let updated = self.connection.execute(
+            "UPDATE notes SET deleted_at = NULL WHERE id = ?1 AND deleted_at IS NOT NULL",
+            params![note_id_to_i64(id)?],
+        )?;
+        if updated == 0 {
+            Err(StorageError::MissingNote(id))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn load_deck_notes(&self, limit: usize) -> Result<Vec<Note>, StorageError> {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let mut statement = self.connection.prepare(
@@ -156,6 +171,57 @@ impl Storage {
         .collect()
     }
 
+    pub fn load_note(&self, id: NoteId) -> Result<Note, StorageError> {
+        let row = self.connection.query_row(
+            "SELECT id, title, body, color, pinned FROM notes WHERE id = ?1 AND archived_at IS NULL AND deleted_at IS NULL",
+            [note_id_to_i64(id)?], note_from_row,
+        )?;
+        stored_note_from_row(row)
+    }
+
+    pub fn load_note_style(&self, id: NoteId) -> Result<crate::config::NoteStyle, StorageError> {
+        let text: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT settings FROM note_styles WHERE note_id = ?1",
+                [note_id_to_i64(id)?],
+                |row| row.get(0),
+            )
+            .optional()?;
+        text.map(|text| {
+            toml::from_str(&text)
+                .map_err(|error: toml::de::Error| StorageError::InvalidStyle(error.to_string()))
+        })
+        .unwrap_or_else(|| Ok(crate::config::NoteStyle::default()))
+    }
+
+    pub fn save_note_style(
+        &self,
+        id: NoteId,
+        style: &crate::config::NoteStyle,
+    ) -> Result<(), StorageError> {
+        let text = toml::to_string(style)
+            .map_err(|error| StorageError::InvalidStyle(error.to_string()))?;
+        self.connection.execute("INSERT INTO note_styles (note_id, settings) VALUES (?1, ?2) ON CONFLICT(note_id) DO UPDATE SET settings = excluded.settings",params![note_id_to_i64(id)?,text])?;
+        Ok(())
+    }
+
+    pub fn note_dates(&self, id: NoteId) -> Result<(i64, i64), StorageError> {
+        Ok(self.connection.query_row(
+            "SELECT created_at, updated_at FROM notes WHERE id = ?1",
+            [note_id_to_i64(id)?],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?)
+    }
+
+    pub fn is_archived(&self, id: NoteId) -> Result<bool, StorageError> {
+        Ok(self.connection.query_row(
+            "SELECT archived_at IS NOT NULL FROM notes WHERE id = ?1 AND deleted_at IS NULL",
+            [note_id_to_i64(id)?],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn search_notes(
         &self,
         collection: NoteCollection,
@@ -163,14 +229,15 @@ impl Storage {
         sort: NoteSort,
     ) -> Result<Vec<Note>, StorageError> {
         let collection_clause = match collection {
+            NoteCollection::All => "1 = 1",
             NoteCollection::Active => "archived_at IS NULL",
             NoteCollection::Archived => "archived_at IS NOT NULL",
         };
         let order_clause = match (collection, sort) {
-            (NoteCollection::Active, NoteSort::Recent) => {
+            (NoteCollection::Active | NoteCollection::All, NoteSort::Recent) => {
                 "pinned DESC, updated_at DESC, sort_order ASC, id DESC"
             }
-            (NoteCollection::Active, NoteSort::Title) => {
+            (NoteCollection::Active | NoteCollection::All, NoteSort::Title) => {
                 "pinned DESC, title COLLATE NOCASE ASC, updated_at DESC, id DESC"
             }
             (NoteCollection::Archived, NoteSort::Recent) => {
@@ -240,10 +307,16 @@ impl Storage {
         if version == 0 {
             let transaction = self.connection.transaction()?;
             transaction.execute_batch(include_str!("../migrations/001_initial.sql"))?;
-            transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            transaction.pragma_update(None, "user_version", 1)?;
             transaction.commit()?;
         }
 
+        if version < 2 {
+            let transaction = self.connection.transaction()?;
+            transaction.execute_batch(include_str!("../migrations/002_note_style.sql"))?;
+            transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            transaction.commit()?;
+        }
         Ok(())
     }
 
@@ -327,43 +400,94 @@ fn unix_timestamp_millis() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::{Action, AppState, DeckState, Event};
 
     use super::*;
 
     #[test]
-    fn a_failed_write_keeps_edits_open_until_a_successful_retry() {
+    fn undo_delete_restores_the_previous_collection_and_pin() {
+        let mut storage = Storage {
+            connection: Connection::open_in_memory().unwrap(),
+        };
+        storage.migrate().unwrap();
+        for archived in [false, true] {
+            let note = storage
+                .create_note("Keep", "Content", NoteColor::Green)
+                .unwrap();
+            storage.set_note_pinned(note.id, true).unwrap();
+            if archived {
+                storage.archive_note(note.id).unwrap();
+            }
+            storage.delete_note(note.id).unwrap();
+            storage.undo_delete(note.id).unwrap();
+            let collection = if archived {
+                NoteCollection::Archived
+            } else {
+                NoteCollection::Active
+            };
+            let notes = storage
+                .search_notes(collection, "", NoteSort::Recent)
+                .unwrap();
+            let restored = notes.iter().find(|n| n.id == note.id).unwrap();
+            assert_eq!(restored.body, "Content");
+            assert!(restored.pinned);
+            assert!(storage.undo_delete(note.id).is_err());
+        }
+    }
+
+    #[test]
+    fn existing_notes_survive_style_migration_and_overrides_round_trip() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/001_initial.sql"))
+            .unwrap();
+        connection.pragma_update(None, "user_version", 1).unwrap();
+        let mut storage = Storage { connection };
+        let note = storage
+            .create_note("Existing note", "Keep this content", NoteColor::Blue)
+            .unwrap();
+        storage.migrate().unwrap();
+        assert_eq!(
+            storage.load_note(note.id).unwrap().body,
+            "Keep this content"
+        );
+        assert_eq!(
+            storage.load_note_style(note.id).unwrap(),
+            crate::config::NoteStyle::default()
+        );
+        let style = crate::config::NoteStyle {
+            font: Some(crate::config::Font::Mono),
+            paper: Some(crate::config::Paper::Dots),
+            shape: Some(crate::config::Shape::Torn),
+        };
+        storage.save_note_style(note.id, &style).unwrap();
+        assert_eq!(storage.load_note_style(note.id).unwrap(), style);
+        storage.archive_note(note.id).unwrap();
+        storage.restore_note(note.id).unwrap();
+        assert_eq!(storage.load_note_style(note.id).unwrap(), style);
+    }
+
+    #[test]
+    fn a_failed_write_preserves_saved_content_until_retry() {
         let connection = Connection::open_in_memory().expect("database should open");
         let mut storage = Storage { connection };
         storage.migrate().expect("migration should run");
-        let note = storage
+        let mut note = storage
             .create_note("Work", "Saved", NoteColor::Yellow)
             .unwrap();
-        let id = note.id;
-        let mut state = AppState::new(vec![note]);
-        state.dispatch(Action::OpenNote(id));
-        state.dispatch(Action::UpdateOpenNoteBody("Unsaved".to_owned()));
+        note.body = "Unsaved".into();
 
         storage
             .connection
             .pragma_update(None, "query_only", true)
             .unwrap();
-        assert!(storage.update_note(state.pending_note().unwrap()).is_err());
-        assert_eq!(state.dispatch(Action::CollapseDeck), None);
-        assert_eq!(state.deck(), DeckState::Open(id));
-        assert_eq!(state.pending_note().unwrap().body, "Unsaved");
+        assert!(storage.update_note(&note).is_err());
         assert_eq!(storage.load_deck_notes(5).unwrap()[0].body, "Saved");
 
         storage
             .connection
             .pragma_update(None, "query_only", false)
             .unwrap();
-        storage.update_note(state.pending_note().unwrap()).unwrap();
-        state.note_saved(id);
-        assert_eq!(
-            state.dispatch(Action::CollapseDeck),
-            Some(Event::Deck(DeckState::Dormant))
-        );
+        storage.update_note(&note).unwrap();
         assert_eq!(storage.load_deck_notes(5).unwrap()[0].body, "Unsaved");
     }
 
@@ -422,13 +546,15 @@ mod tests {
         let mut storage = Storage { connection };
 
         let error = storage.migrate().expect_err("future schema should fail");
-        assert!(matches!(error, StorageError::UnsupportedSchema(2)));
+        assert!(
+            matches!(error, StorageError::UnsupportedSchema(version) if version == SCHEMA_VERSION + 1)
+        );
         assert_eq!(
             storage
                 .connection
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .expect("schema version should remain readable"),
-            2
+            SCHEMA_VERSION + 1
         );
     }
 
@@ -510,6 +636,14 @@ mod tests {
         storage
             .delete_note(deleted.id)
             .expect("note should be deleted");
+
+        let all = storage
+            .search_notes(NoteCollection::All, "ginger", NoteSort::Recent)
+            .unwrap();
+        assert_eq!(all.len(), 2);
+        assert!(all.contains(&active) && all.contains(&archived));
+        assert!(!storage.is_archived(active.id).unwrap());
+        assert!(storage.is_archived(archived.id).unwrap());
 
         assert_eq!(
             storage

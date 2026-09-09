@@ -1,945 +1,936 @@
 mod app;
+mod appearance;
 mod autostart;
 mod config;
+mod editor;
 mod manager;
+mod note_session;
+mod platform;
+mod settings;
 mod storage;
+mod ui_assets;
 
-use std::{cell::Cell, cell::RefCell, rc::Rc, time::Duration};
-
-use app::{Action, AppState, DeckState, Event, Note, NoteColor, NoteId};
-use gtk::gdk::Display;
-use gtk::glib;
-use gtk::prelude::*;
+use app::{Action, AppState, NoteColor, NoteId};
+use config::{Config, ScreenEdge, TabLayout};
+use gtk::{glib, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
-use storage::{Storage, StorageError};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::{Rc, Weak},
+    time::Duration,
+};
+use storage::Storage;
 
 const APPLICATION_ID: &str = "dev.stickies.Stickies";
-const LAYER_NAMESPACE: &str = "stickies";
-const DORMANT_WIDTH: i32 = 20;
-const DORMANT_HEIGHT: i32 = 180;
-const EXPANDED_WIDTH: i32 = 360;
-const EDITOR_HEIGHT: i32 = 420;
-const TAB_WIDTH: i32 = 160;
-const TAB_HEIGHT: i32 = 42;
-const TAB_INPUT_WIDTH: i32 = 180;
-const TAB_INPUT_HEIGHT: i32 = 310;
-const MAX_VISIBLE_NOTES: usize = 5;
-const COLLAPSE_DELAY_MS: u64 = 500;
-const OPEN_FOCUS_LOSS_DELAY_SECONDS: u64 = 2 * 60;
-const INACTIVITY_TIMEOUT_SECONDS: u64 = 5 * 60;
-const AUTOSAVE_DELAY_MS: u64 = 750;
-const REVEAL_DURATION_MS: u64 = 180;
-const TAB_STAGGER_MS: u64 = 35;
+const WIDTH: i32 = 420;
+const HEIGHT: i32 = 500;
 
-#[derive(Clone)]
-struct PrototypeUi {
+struct SeparateNote {
     window: gtk::ApplicationWindow,
-    stack: gtk::Stack,
-    tabs: gtk::Box,
-    tab_revealers: Rc<RefCell<Vec<gtk::Revealer>>>,
-    editor_title: gtk::Entry,
-    editor_body: gtk::TextView,
-    keep_open_button: gtk::ToggleButton,
-    state: Rc<RefCell<AppState>>,
-    storage: Rc<Storage>,
-    manager_window: Rc<RefCell<Option<manager::ManagerWindow>>>,
-    deck_refresh_needed: Rc<Cell<bool>>,
-    animation_generation: Rc<Cell<u64>>,
-    focus_loss_source: Rc<RefCell<Option<glib::SourceId>>>,
-    inactivity_source: Rc<RefCell<Option<glib::SourceId>>>,
-    autosave_source: Rc<RefCell<Option<glib::SourceId>>>,
-    loading_editor: Rc<Cell<bool>>,
+    editor: Rc<editor::Editor>,
 }
 
-impl PrototypeUi {
-    fn bump_generation(&self) -> u64 {
-        let generation = self.animation_generation.get().wrapping_add(1);
-        self.animation_generation.set(generation);
-        generation
-    }
+struct Ui {
+    application: gtk::Application,
+    window: gtk::ApplicationWindow,
+    root: gtk::Overlay,
+    stack: gtk::Stack,
+    marker: gtk::Box,
+    tabs: gtk::Box,
+    config: Rc<RefCell<Config>>,
+    config_valid: bool,
+    system_animations: bool,
+    dnd: Cell<bool>,
+    dnd_monitor: RefCell<Option<gtk::gio::FileMonitor>>,
+    provider: gtk::CssProvider,
+    storage: Rc<Storage>,
+    sessions: RefCell<HashMap<NoteId, Weak<note_session::NoteSession>>>,
+    docked: RefCell<Option<Rc<editor::Editor>>>,
+    deck: RefCell<AppState>,
+    separate: RefCell<HashMap<NoteId, SeparateNote>>,
+    reusable: Cell<Option<NoteId>>,
+    manager: RefCell<Option<manager::ManagerWindow>>,
+    revealed: Cell<bool>,
+    generation: Cell<u64>,
+}
 
-    fn show_tabs(&self) {
-        if matches!(self.state.borrow().deck(), DeckState::Open(_)) {
-            return;
+impl Ui {
+    fn refresh(self: &Rc<Self>) {
+        if let Some(editor) = self.docked.borrow().as_ref() {
+            editor.sync_pin();
         }
-        if self.deck_refresh_needed.get() {
-            self.reload_deck_notes();
-            self.refresh_tabs();
+        for note in self.separate.borrow().values() {
+            note.editor.sync_pin();
         }
-        let event = self.state.borrow_mut().dispatch(Action::ShowTabs);
-        if event != Some(Event::Deck(DeckState::Tabs)) {
-            return;
-        }
-
-        let generation = self.bump_generation();
-        self.set_edge_input_region(TAB_INPUT_WIDTH, TAB_INPUT_HEIGHT);
-        self.stack.set_visible_child_name("tabs");
-        self.stack.set_visible(true);
-
-        for (index, revealer) in self.tab_revealers.borrow().iter().cloned().enumerate() {
-            let animation_generation = self.animation_generation.clone();
-            glib::timeout_add_local_once(
-                Duration::from_millis(index as u64 * TAB_STAGGER_MS),
-                move || {
-                    if animation_generation.get() == generation {
-                        revealer.set_reveal_child(true);
-                    }
-                },
-            );
-        }
-    }
-
-    fn schedule_collapse(&self) {
-        if matches!(self.state.borrow().deck(), DeckState::Open(_)) {
-            return;
-        }
-
-        let generation = self.bump_generation();
-        let ui = self.clone();
-        glib::timeout_add_local_once(Duration::from_millis(COLLAPSE_DELAY_MS), move || {
-            if ui.animation_generation.get() == generation
-                && !matches!(ui.state.borrow().deck(), DeckState::Open(_))
-            {
-                ui.start_collapse(generation);
-            }
-        });
-    }
-
-    fn start_collapse(&self, generation: u64) {
-        self.flush_autosave();
-        if self.state.borrow_mut().dispatch(Action::CollapseDeck)
-            != Some(Event::Deck(DeckState::Dormant))
-        {
-            return;
-        }
-        self.cancel_inactivity_timeout();
-        self.cancel_focus_loss_collapse();
-        self.keep_open_button.set_active(false);
-        self.window.set_keyboard_mode(KeyboardMode::None);
-        gtk::prelude::RootExt::set_focus(&self.window, None::<&gtk::Widget>);
-
-        for revealer in self.tab_revealers.borrow().iter() {
-            revealer.set_reveal_child(false);
-        }
-        self.stack.set_visible_child_name("tabs");
-
-        let ui = self.clone();
-        glib::timeout_add_local_once(Duration::from_millis(REVEAL_DURATION_MS), move || {
-            if ui.animation_generation.get() == generation {
-                ui.refresh_tabs();
-                ui.stack.set_visible(false);
-                ui.set_edge_input_region(DORMANT_WIDTH, DORMANT_HEIGHT);
-            }
-        });
-    }
-
-    fn collapse_now(&self) {
-        let generation = self.bump_generation();
-        self.start_collapse(generation);
-    }
-
-    fn open_editor(&self, note_id: NoteId, focus_title: bool) {
-        self.flush_autosave();
-        let note = {
-            let mut state = self.state.borrow_mut();
-            let event = state.dispatch(Action::OpenNote(note_id));
-            if event != Some(Event::Deck(DeckState::Open(note_id))) {
-                return;
-            }
-            state.note(note_id).cloned()
-        };
-        let Some(note) = note else {
-            return;
-        };
-
-        self.bump_generation();
-        self.set_full_input_region();
-        self.keep_open_button.set_active(false);
-        self.loading_editor.set(true);
-        self.editor_title.set_text(&note.title);
-        self.editor_body.buffer().set_text(&note.body);
-        self.loading_editor.set(false);
-        self.stack.set_visible_child_name("editor");
-        self.stack.set_visible(true);
-        self.window.set_keyboard_mode(KeyboardMode::OnDemand);
-        self.reset_inactivity_timeout();
-
-        if focus_title {
-            let editor_title = self.editor_title.clone();
-            glib::idle_add_local_once(move || {
-                let _ = editor_title.grab_focus();
-                editor_title.select_region(0, -1);
-            });
-        } else {
-            let editor_body = self.editor_body.clone();
-            glib::idle_add_local_once(move || {
-                let _ = editor_body.grab_focus();
-            });
-        }
-    }
-
-    fn set_keep_open(&self, keep_open: bool) {
-        let event = self
-            .state
-            .borrow_mut()
-            .dispatch(Action::SetKeepOpen(keep_open));
-        if event != Some(Event::KeepOpen(keep_open)) {
-            return;
-        }
-
-        if keep_open {
-            self.cancel_inactivity_timeout();
-            self.cancel_focus_loss_collapse();
-        } else {
-            self.reset_inactivity_timeout();
-            if !self.window.is_active() {
-                self.schedule_focus_loss_collapse();
-            }
-        }
-    }
-
-    fn update_open_note_body(&self, body: String) {
-        if self.loading_editor.get() {
-            return;
-        }
-
-        let event = self
-            .state
-            .borrow_mut()
-            .dispatch(Action::UpdateOpenNoteBody(body));
-        if matches!(event, Some(Event::NoteEdited(_))) {
-            self.schedule_autosave();
-        }
-    }
-
-    fn update_open_note_title(&self, title: String) {
-        if self.loading_editor.get() {
-            return;
-        }
-
-        let event = self
-            .state
-            .borrow_mut()
-            .dispatch(Action::UpdateOpenNoteTitle(title));
-        if matches!(event, Some(Event::NoteEdited(_))) {
-            self.schedule_autosave();
-        }
-    }
-
-    fn create_note(&self) {
-        self.flush_autosave();
-        if self.state.borrow().pending_note().is_some() {
-            return;
-        }
-        let note = match self
-            .storage
-            .create_note("Untitled note", "", NoteColor::Yellow)
-        {
-            Ok(note) => note,
-            Err(error) => {
-                eprintln!("Stickies could not create a note: {error}");
-                return;
-            }
-        };
-
-        let note_id = note.id;
-        if self.state.borrow_mut().dispatch(Action::AddNote(note))
-            != Some(Event::NoteAdded(note_id))
-        {
-            return;
-        }
-        self.refresh_manager();
-        self.open_editor(note_id, true);
-    }
-
-    fn archive_open_note(&self) {
-        self.remove_open_note(false);
-    }
-
-    fn confirm_delete_open_note(&self) {
-        let title = {
-            let state = self.state.borrow();
-            let DeckState::Open(note_id) = state.deck() else {
-                return;
-            };
-            state
-                .note(note_id)
-                .map_or_else(|| "this note".to_owned(), |note| note.title.clone())
-        };
-        let dialog = gtk::MessageDialog::builder()
-            .transient_for(&self.window)
-            .modal(true)
-            .message_type(gtk::MessageType::Question)
-            .buttons(gtk::ButtonsType::Cancel)
-            .text("Delete note?")
-            .secondary_text(format!("Delete \"{title}\"? This cannot be undone yet."))
-            .build();
-        dialog.add_button("Delete", gtk::ResponseType::Accept);
-
-        let ui = self.clone();
-        dialog.run_async(move |dialog, response| {
-            if response == gtk::ResponseType::Accept {
-                ui.remove_open_note(true);
-            }
-            dialog.close();
-        });
-    }
-
-    fn remove_open_note(&self, delete: bool) {
-        self.flush_autosave();
-        if self.state.borrow().pending_note().is_some() {
-            return;
-        }
-
-        let note_id = match self.state.borrow().deck() {
-            DeckState::Open(note_id) => note_id,
-            _ => return,
-        };
-        let result = if delete {
-            self.storage.delete_note(note_id)
-        } else {
-            self.storage.archive_note(note_id)
-        };
-        if let Err(error) = result {
-            eprintln!("Stickies could not remove the note: {error}");
-            return;
-        }
-
-        let action = if delete {
-            Action::DeleteOpenNote
-        } else {
-            Action::ArchiveOpenNote
-        };
-        self.state.borrow_mut().dispatch(action);
-        self.refresh_manager();
-        self.reload_deck_notes();
-        self.collapse_now();
-    }
-
-    fn refresh_manager(&self) {
-        if let Some(manager) = self.manager_window.borrow().as_ref() {
+        if let Some(manager) = self.manager.borrow().as_ref() {
             manager.refresh();
         }
+        self.refresh_tabs();
     }
-
-    fn prepare_manager_change(&self, note_id: NoteId) -> bool {
-        if self.state.borrow().deck() != DeckState::Open(note_id) {
-            return true;
-        }
-
-        self.flush_autosave();
-        self.state.borrow().pending_note().is_none()
-    }
-
-    fn finish_manager_change(&self, note_id: NoteId, change: manager::ManagerChange) {
-        self.deck_refresh_needed.set(true);
-
-        if self.state.borrow().deck() != DeckState::Open(note_id) {
-            return;
-        }
-
-        let action = match change {
-            manager::ManagerChange::Archive => Action::ArchiveOpenNote,
-            manager::ManagerChange::Delete => Action::DeleteOpenNote,
-            manager::ManagerChange::Pin | manager::ManagerChange::Restore => return,
-        };
-        self.state.borrow_mut().dispatch(action);
-        self.reload_deck_notes();
-        self.collapse_now();
-    }
-
-    fn reload_deck_notes(&self) {
-        match self.storage.load_deck_notes(MAX_VISIBLE_NOTES) {
-            Ok(notes) => {
-                let replaced = self.state.borrow_mut().replace_notes(notes);
-                self.deck_refresh_needed.set(!replaced);
-            }
-            Err(error) => {
-                self.deck_refresh_needed.set(true);
-                eprintln!("Stickies could not refresh the edge notes: {error}");
-            }
-        }
-    }
-
-    fn show_all_notes(&self) {
-        if let Some(window) = self.manager_window.borrow().as_ref() {
-            window.present();
-            return;
-        }
-        let Some(application) = self.window.application() else {
-            return;
-        };
-
-        let before_change = self.clone();
-        let after_change = self.clone();
-        let manager = manager::build_window(
-            &application,
-            self.storage.clone(),
-            move |note_id| before_change.prepare_manager_change(note_id),
-            move |note_id, change| after_change.finish_manager_change(note_id, change),
-        );
-        let manager_window = self.manager_window.clone();
-        manager.window().connect_close_request(move |_| {
-            manager_window.borrow_mut().take();
-            glib::Propagation::Proceed
-        });
-        self.manager_window.replace(Some(manager.clone()));
-        manager.present();
-    }
-
-    fn refresh_tabs(&self) {
+    fn refresh_tabs(self: &Rc<Self>) {
         while let Some(child) = self.tabs.first_child() {
             self.tabs.remove(&child);
         }
-        self.tab_revealers.borrow_mut().clear();
-
-        let notes = self.state.borrow().notes().to_vec();
-        for note in notes.into_iter().take(MAX_VISIBLE_NOTES) {
+        while let Some(child) = self.marker.first_child() {
+            self.marker.remove(&child);
+        }
+        let config = self.config.borrow().clone();
+        let notes = match self.storage.load_deck_notes(config.visible_notes) {
+            Ok(notes) => notes,
+            Err(error) => {
+                eprintln!("Could not load edge notes: {error}");
+                return;
+            }
+        };
+        self.deck.borrow_mut().replace_notes(notes);
+        let notes = self.deck.borrow().notes().to_vec();
+        let all = appearance::icon("stickies-notes", "All Notes");
+        all.add_css_class("strip-control");
+        all.set_halign(gtk::Align::Center);
+        {
+            let weak = Rc::downgrade(self);
+            all.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.show_manager();
+                }
+            });
+        }
+        self.tabs.append(&all);
+        let horizontal = matches!(config.edge, ScreenEdge::Top | ScreenEdge::Bottom);
+        self.tabs.set_orientation(if horizontal {
+            gtk::Orientation::Horizontal
+        } else {
+            gtk::Orientation::Vertical
+        });
+        self.marker.set_orientation(if horizontal {
+            gtk::Orientation::Horizontal
+        } else {
+            gtk::Orientation::Vertical
+        });
+        let fixed = gtk::Fixed::new();
+        for (index, note) in notes.iter().enumerate() {
+            let pill = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            pill.add_css_class("edge-pill");
+            appearance::set_color(&pill, note.color);
+            self.marker.append(&pill);
             let tab = gtk::Button::new();
             tab.add_css_class("note-tab");
-            tab.add_css_class(match note.color {
-                NoteColor::Yellow => "note-yellow",
-                NoteColor::Blue => "note-blue",
-                NoteColor::Purple => "note-purple",
-                NoteColor::Green => "note-green",
-            });
-            tab.set_size_request(TAB_WIDTH, TAB_HEIGHT);
-            tab.set_focus_on_click(false);
-            tab.set_tooltip_text(Some(&format!("Open {}", note.title)));
-
-            let visible_title = if note.title.trim().is_empty() {
+            appearance::set_color(&tab, note.color);
+            let title = if note.title.trim().is_empty() {
                 "Untitled note"
             } else {
                 &note.title
             };
-            let title_label = gtk::Label::new(Some(visible_title));
-            title_label.add_css_class("tab-title");
-            title_label.set_xalign(0.0);
-            tab.set_child(Some(&title_label));
-
-            let ui = self.clone();
-            let note_id = note.id;
-            tab.connect_clicked(move |_| ui.open_editor(note_id, false));
-            self.append_tab_widget(&tab);
-        }
-
-        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let create_button = gtk::Button::with_label("+");
-        create_button.add_css_class("create-note");
-        create_button.set_tooltip_text(Some("Create note"));
-        let ui = self.clone();
-        create_button.connect_clicked(move |_| ui.create_note());
-
-        let all_notes_button = gtk::Button::with_label("All Notes");
-        all_notes_button.set_hexpand(true);
-        let ui = self.clone();
-        all_notes_button.connect_clicked(move |_| ui.show_all_notes());
-        actions.append(&create_button);
-        actions.append(&all_notes_button);
-        self.append_tab_widget(&actions);
-    }
-
-    fn append_tab_widget(&self, widget: &impl IsA<gtk::Widget>) {
-        let revealer = gtk::Revealer::new();
-        revealer.set_transition_type(gtk::RevealerTransitionType::SlideLeft);
-        revealer.set_transition_duration(REVEAL_DURATION_MS as u32);
-        revealer.set_child(Some(widget));
-        self.tabs.append(&revealer);
-        self.tab_revealers.borrow_mut().push(revealer);
-    }
-
-    fn schedule_autosave(&self) {
-        if let Some(source) = self.autosave_source.borrow_mut().take() {
-            source.remove();
-        }
-
-        let ui = self.clone();
-        let source =
-            glib::timeout_add_local_once(Duration::from_millis(AUTOSAVE_DELAY_MS), move || {
-                ui.autosave_source.borrow_mut().take();
-                ui.save_pending_note();
+            tab.set_tooltip_text(Some(title));
+            let label = gtk::Label::new(Some(title));
+            label.add_css_class("tab-title");
+            label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            label.set_max_width_chars(18);
+            label.set_xalign(0.);
+            let (x, y, w, h) = if config.tab_layout == TabLayout::Overlapping {
+                let text = gtk::Fixed::new();
+                text.set_size_request(24, 126);
+                label.set_size_request(124, 22);
+                text.put(&label, 0., 0.);
+                text.set_child_transform(
+                    &label,
+                    Some(
+                        &gtk::gsk::Transform::new()
+                            .translate(&gtk::graphene::Point::new(0., 126.))
+                            .rotate(-90.),
+                    ),
+                );
+                tab.set_child(Some(&text));
+                if horizontal {
+                    (index as f64 * 36., 0., 48, 148)
+                } else {
+                    (index as f64 * 36., index as f64 * 24., 48, 148)
+                }
+            } else {
+                tab.set_child(Some(&label));
+                if horizontal {
+                    (index as f64 * 116., 0., 110, 44)
+                } else {
+                    (0., index as f64 * 50., 174, 44)
+                }
+            };
+            tab.set_size_request(w, h);
+            fixed.put(&tab, x, y);
+            if !config.reduced_motion {
+                appearance::animate_tab_on_hover(
+                    &fixed,
+                    &tab,
+                    x,
+                    y,
+                    config.edge,
+                    config.tab_layout == TabLayout::Overlapping,
+                );
+            }
+            let id = note.id;
+            let weak = Rc::downgrade(self);
+            tab.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.open_docked(id);
+                }
             });
-        self.autosave_source.replace(Some(source));
-    }
-
-    fn flush_autosave(&self) {
-        if let Some(source) = self.autosave_source.borrow_mut().take() {
-            source.remove();
         }
-        self.save_pending_note();
+        if notes.is_empty() {
+            let pill = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            pill.add_css_class("edge-pill");
+            pill.add_css_class("note-yellow");
+            self.marker.append(&pill);
+        }
+        self.tabs.append(&fixed);
+        let create = appearance::icon("list-add-symbolic", "New note");
+        create.add_css_class("strip-control");
+        create.set_halign(gtk::Align::Center);
+        {
+            let weak = Rc::downgrade(self);
+            create.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.create_note();
+                }
+            });
+        }
+        self.tabs.append(&create);
     }
-
-    fn save_pending_note(&self) {
-        let note = self.state.borrow().pending_note().cloned();
-        let Some(note) = note else {
+    fn reveal(&self) {
+        if self.docked.borrow().is_some() {
+            return;
+        }
+        self.generation.set(self.generation.get().wrapping_add(1));
+        self.deck.borrow_mut().dispatch(Action::ShowTabs);
+        self.revealed.set(true);
+        self.marker.set_visible(false);
+        self.stack.set_visible_child_name("tabs");
+        self.stack.set_visible(true);
+        self.set_input(false);
+        self.window.set_keyboard_mode(KeyboardMode::OnDemand);
+    }
+    fn dormant(&self) {
+        if self.docked.borrow().is_some() {
+            return;
+        }
+        self.deck.borrow_mut().dispatch(Action::CollapseDeck);
+        self.revealed.set(false);
+        self.marker.set_visible(true);
+        self.stack.set_visible(false);
+        self.window.set_keyboard_mode(KeyboardMode::None);
+        self.set_input(true);
+    }
+    fn schedule_hide(self: &Rc<Self>) {
+        let generation = self.generation.get().wrapping_add(1);
+        self.generation.set(generation);
+        let weak = Rc::downgrade(self);
+        glib::timeout_add_local_once(Duration::from_millis(500), move || {
+            if let Some(ui) = weak.upgrade()
+                && ui.generation.get() == generation
+            {
+                ui.dormant();
+            }
+        });
+    }
+    fn create_note(self: &Rc<Self>) {
+        if !self.close_docked() {
+            return;
+        }
+        match self.storage.create_note("", "", NoteColor::Yellow) {
+            Ok(note) => {
+                self.deck
+                    .borrow_mut()
+                    .dispatch(Action::AddNote(note.clone()));
+                self.refresh();
+                self.open_docked(note.id);
+                if let Some(editor) = self.docked.borrow().as_ref() {
+                    editor.title.grab_focus();
+                }
+            }
+            Err(error) => self.error(&format!("Could not create a note: {error}")),
+        }
+    }
+    fn note_session(self: &Rc<Self>, id: NoteId) -> Option<Rc<note_session::NoteSession>> {
+        if let Some(session) = self.sessions.borrow().get(&id).and_then(Weak::upgrade) {
+            return Some(session);
+        }
+        let note = match self.storage.load_note(id) {
+            Ok(note) => note,
+            Err(error) => {
+                self.error(&format!("Could not open note: {error}"));
+                return None;
+            }
+        };
+        let saved = Rc::downgrade(self);
+        let session = note_session::NoteSession::new(note, self.storage.clone(), move || {
+            if let Some(ui) = saved.upgrade() {
+                ui.refresh();
+            }
+        });
+        let mut sessions = self.sessions.borrow_mut();
+        sessions.retain(|_, session| session.strong_count() > 0);
+        sessions.insert(id, Rc::downgrade(&session));
+        Some(session)
+    }
+    fn new_editor(self: &Rc<Self>, id: NoteId, detached: bool) -> Option<Rc<editor::Editor>> {
+        let session = self.note_session(id)?;
+        let timeout = Rc::downgrade(self);
+        let editor = editor::Editor::new(session, self.config.clone(), move || {
+            if let Some(ui) = timeout.upgrade() {
+                if detached {
+                    ui.close_separate(id);
+                } else {
+                    ui.close_docked();
+                }
+            }
+        });
+        let weak = Rc::downgrade(self);
+        editor.close.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                if detached {
+                    ui.close_separate(id);
+                } else {
+                    ui.close_docked();
+                }
+            }
+        });
+        editor.separate.set_visible(!detached);
+        let weak = Rc::downgrade(self);
+        editor.separate.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_separate(id, true);
+            }
+        });
+        Some(editor)
+    }
+    fn open_docked(self: &Rc<Self>, id: NoteId) {
+        if let Some(note) = self.separate.borrow().get(&id) {
+            note.window.present();
+            return;
+        }
+        if !self.close_docked() {
+            return;
+        }
+        let Some(editor) = self.new_editor(id, false) else {
             return;
         };
-
-        match self.storage.update_note(&note) {
-            Ok(()) => {
-                self.state.borrow_mut().note_saved(note.id);
-                self.refresh_manager();
+        self.deck.borrow_mut().dispatch(Action::OpenNote(id));
+        self.stack.add_named(&editor.root, Some("editor"));
+        self.stack.set_visible_child_name("editor");
+        self.stack.set_visible(true);
+        self.marker.set_visible(false);
+        self.window.set_keyboard_mode(KeyboardMode::OnDemand);
+        self.docked.replace(Some(editor.clone()));
+        self.window.set_layer(Layer::Overlay);
+        self.update_visibility();
+        self.set_input(false);
+        editor.body.grab_focus();
+    }
+    fn close_docked(self: &Rc<Self>) -> bool {
+        let editor = self.docked.borrow().clone();
+        if let Some(editor) = editor {
+            if !editor.flush() {
+                return false;
             }
-            Err(error) => eprintln!("Stickies could not save the open note: {error}"),
+            editor.stop();
+            self.docked.borrow_mut().take();
+            self.deck.borrow_mut().dispatch(Action::CollapseDeck);
+            self.stack.remove(&editor.root);
+            self.marker.set_visible(true);
+            self.refresh_tabs();
+            self.reveal();
+            self.place_edge();
+            self.update_visibility();
+        }
+        true
+    }
+    fn open_separate(self: &Rc<Self>, id: NoteId, another: bool) {
+        if let Some(note) = self.separate.borrow().get(&id) {
+            note.window.present();
+            return;
+        }
+        let is_docked = self.docked.borrow().as_ref().is_some_and(|e| e.id() == id);
+        if is_docked && !self.close_docked() {
+            return;
+        }
+        if !another && let Some(previous) = self.reusable.get() {
+            let window = self
+                .separate
+                .borrow()
+                .get(&previous)
+                .map(|n| n.window.clone());
+            let old_editor = self
+                .separate
+                .borrow()
+                .get(&previous)
+                .map(|n| n.editor.clone());
+            if let (Some(window), Some(old_editor)) = (window, old_editor) {
+                if !old_editor.flush() {
+                    return;
+                }
+                let Some(editor) = self.new_editor(id, true) else {
+                    return;
+                };
+                old_editor.stop();
+                self.separate.borrow_mut().remove(&previous);
+                window.set_child(Some(&editor.root));
+                window.set_title(Some("Stickies · Note"));
+                self.separate.borrow_mut().insert(
+                    id,
+                    SeparateNote {
+                        window: window.clone(),
+                        editor: editor.clone(),
+                    },
+                );
+                self.reusable.set(Some(id));
+                window.present();
+                editor.body.grab_focus();
+                return;
+            }
+        }
+        let Some(editor) = self.new_editor(id, true) else {
+            return;
+        };
+        let window = gtk::ApplicationWindow::builder()
+            .application(&self.application)
+            .title("Stickies · Note")
+            .default_width(400)
+            .default_height(420)
+            .decorated(false)
+            .resizable(false)
+            .build();
+        window.add_css_class("note-window");
+        window.set_child(Some(&editor.root));
+        let weak = Rc::downgrade(self);
+        window.connect_close_request(move |window| {
+            if let Some(ui) = weak.upgrade() {
+                let id = ui
+                    .separate
+                    .borrow()
+                    .iter()
+                    .find(|(_, note)| note.window == *window)
+                    .map(|(id, _)| *id);
+                if let Some(id) = id {
+                    let editor = ui.separate.borrow().get(&id).map(|n| n.editor.clone());
+                    if let Some(editor) = editor {
+                        if !editor.flush() {
+                            return glib::Propagation::Stop;
+                        }
+                        editor.stop();
+                    }
+                    ui.separate.borrow_mut().remove(&id);
+                    if ui.reusable.get() == Some(id) {
+                        ui.reusable.set(None);
+                    }
+                }
+            }
+            glib::Propagation::Proceed
+        });
+        let keys = gtk::EventControllerKey::new();
+        let weak = window.downgrade();
+        keys.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                if let Some(window) = weak.upgrade() {
+                    window.close();
+                }
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        window.add_controller(keys);
+        self.separate.borrow_mut().insert(
+            id,
+            SeparateNote {
+                window: window.clone(),
+                editor: editor.clone(),
+            },
+        );
+        if !another {
+            self.reusable.set(Some(id));
+        }
+        window.present();
+        editor.body.grab_focus();
+    }
+    fn close_separate(&self, id: NoteId) {
+        let window = self
+            .separate
+            .borrow()
+            .get(&id)
+            .map(|note| note.window.clone());
+        if let Some(window) = window {
+            window.close();
         }
     }
+    fn finish_change(self: &Rc<Self>, id: NoteId, change: manager::ManagerChange) {
+        if change == manager::ManagerChange::Pin {
+            let session = self.sessions.borrow().get(&id).and_then(Weak::upgrade);
+            if let Some(session) = session {
+                session.sync_pin();
+            }
+        }
+        if matches!(
+            change,
+            manager::ManagerChange::Archive | manager::ManagerChange::Delete
+        ) {
+            if self.docked.borrow().as_ref().is_some_and(|e| e.id() == id) {
+                self.deck
+                    .borrow_mut()
+                    .dispatch(if change == manager::ManagerChange::Archive {
+                        Action::ArchiveOpenNote
+                    } else {
+                        Action::DeleteOpenNote
+                    });
+                self.close_docked();
+            }
+            self.close_separate(id);
+        }
+        self.refresh();
+    }
+    fn show_manager(self: &Rc<Self>) {
+        if let Some(manager) = self.manager.borrow().as_ref() {
+            manager.present();
+            return;
+        }
+        let sessions = Rc::downgrade(self);
+        let after = Rc::downgrade(self);
+        let edit = Rc::downgrade(self);
+        let settings = Rc::downgrade(self);
+        let manager = manager::build_window(
+            &self.application,
+            self.storage.clone(),
+            self.config.clone(),
+            manager::Callbacks {
+                session: Box::new(move |id| sessions.upgrade().and_then(|ui| ui.note_session(id))),
+                changed: Box::new(move |id, change| {
+                    if let Some(ui) = after.upgrade() {
+                        ui.finish_change(id, change);
+                    }
+                }),
+                popout: Box::new(move |id| {
+                    if let Some(ui) = edit.upgrade() {
+                        ui.open_separate(id, true);
+                    }
+                }),
+                settings: Rc::new(move |config| {
+                    settings
+                        .upgrade()
+                        .ok_or_else(|| "Stickies is closing".to_owned())?
+                        .change_settings(config)
+                }),
+            },
+        );
+        let weak = Rc::downgrade(self);
+        manager.window().connect_close_request(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                let manager = ui.manager.borrow().clone();
+                if manager.is_some_and(|m| !m.flush()) {
+                    return glib::Propagation::Stop;
+                }
+                ui.manager.borrow_mut().take();
+            }
+            glib::Propagation::Proceed
+        });
+        self.manager.replace(Some(manager.clone()));
+        manager.present();
+    }
+    fn change_settings(self: &Rc<Self>, config: Config) -> Result<(), String> {
+        if !self.config_valid {
+            return Err("The existing configuration is invalid. Correct it before saving settings; it has not been overwritten.".into());
+        }
+        config
+            .save(&config::config_path())
+            .map_err(|e| e.to_string())?;
+        let login_changed = self.config.borrow().launch_at_login != config.launch_at_login;
+        self.config.replace(config.clone());
+        if let Some(settings) = gtk::Settings::default() {
+            settings.set_gtk_enable_animations(self.system_animations && !config.reduced_motion);
+        }
+        appearance::apply(&self.provider, &config);
+        self.place_edge();
+        self.update_visibility();
+        self.refresh_tabs();
+        if let Some(editor) = self.docked.borrow().as_ref() {
+            editor.refresh_appearance();
+        }
+        for note in self.separate.borrow().values() {
+            note.editor.refresh_appearance();
+        }
+        if let Some(manager) = self.manager.borrow().as_ref() {
+            manager.refresh_appearance();
+        }
+        if login_changed {
+            autostart::reconcile(&autostart::autostart_path(), config.launch_at_login).map_err(
+                |e| format!("Settings saved, but launch at login could not be updated: {e}"),
+            )?;
+        }
+        Ok(())
+    }
+    fn update_visibility(&self) {
+        self.window.set_visible(
+            self.docked.borrow().is_some() || !(self.config.borrow().hide_in_dnd && self.dnd.get()),
+        );
+    }
 
-    fn reset_inactivity_timeout(&self) {
-        self.cancel_inactivity_timeout();
-
-        let state = self.state.borrow();
-        if !matches!(state.deck(), DeckState::Open(_))
-            || state.keep_open()
-            || !self.window.is_active()
+    fn place_edge(&self) {
+        let config = self.config.borrow();
+        for edge in [Edge::Left, Edge::Right, Edge::Top, Edge::Bottom] {
+            self.window.set_anchor(edge, false);
+            self.window.set_margin(edge, 0);
+        }
+        let (edge, halign, valign) = match config.edge {
+            ScreenEdge::Left => (Edge::Left, gtk::Align::Start, gtk::Align::Center),
+            ScreenEdge::Right => (Edge::Right, gtk::Align::End, gtk::Align::Center),
+            ScreenEdge::Top => (Edge::Top, gtk::Align::Center, gtk::Align::Start),
+            ScreenEdge::Bottom => (Edge::Bottom, gtk::Align::Center, gtk::Align::End),
+        };
+        self.window.set_anchor(edge, true);
+        self.marker.set_halign(halign);
+        self.marker.set_valign(valign);
+        self.stack.set_halign(halign);
+        self.stack.set_valign(valign);
+        let horizontal = matches!(config.edge, ScreenEdge::Top | ScreenEdge::Bottom);
+        let width = if horizontal { 720 } else { WIDTH };
+        self.root.set_size_request(width, HEIGHT);
+        self.window.set_default_size(width, HEIGHT);
+        if let Some(display) = gtk::gdk::Display::default()
+            && let Some(monitor) = display
+                .monitors()
+                .item(0)
+                .and_downcast::<gtk::gdk::Monitor>()
         {
-            return;
+            let geometry = monitor.geometry();
+            let available = if horizontal {
+                geometry.width() - width
+            } else {
+                geometry.height() - HEIGHT
+            };
+            let perpendicular = if horizontal { Edge::Left } else { Edge::Top };
+            self.window.set_anchor(perpendicular, true);
+            self.window.set_margin(
+                perpendicular,
+                (available.max(0) as f64 * config.marker_offset) as i32,
+            );
         }
-        drop(state);
-
-        let ui = self.clone();
-        let source = glib::timeout_add_local_once(
-            Duration::from_secs(INACTIVITY_TIMEOUT_SECONDS),
-            move || {
-                ui.inactivity_source.borrow_mut().take();
-                let state = ui.state.borrow();
-                let should_collapse =
-                    matches!(state.deck(), DeckState::Open(_)) && !state.keep_open();
-                drop(state);
-
-                if should_collapse {
-                    ui.collapse_now();
-                }
+        self.window.set_layer(
+            if config.hide_in_fullscreen && self.docked.borrow().is_none() {
+                Layer::Top
+            } else {
+                Layer::Overlay
             },
         );
-        self.inactivity_source.replace(Some(source));
+        self.stack
+            .set_transition_duration(if config.reduced_motion { 0 } else { 140 });
+        drop(config);
+        self.set_input(!self.revealed.get() && self.docked.borrow().is_none());
     }
-
-    fn cancel_inactivity_timeout(&self) {
-        if let Some(source) = self.inactivity_source.borrow_mut().take() {
-            source.remove();
-        }
-    }
-
-    fn schedule_focus_loss_collapse(&self) {
-        self.cancel_focus_loss_collapse();
-        self.cancel_inactivity_timeout();
-
-        let state = self.state.borrow();
-        if !matches!(state.deck(), DeckState::Open(_)) || state.keep_open() {
-            return;
-        }
-        drop(state);
-
-        let ui = self.clone();
-        let source = glib::timeout_add_local_once(
-            Duration::from_secs(OPEN_FOCUS_LOSS_DELAY_SECONDS),
-            move || {
-                ui.focus_loss_source.borrow_mut().take();
-                let state = ui.state.borrow();
-                let should_collapse =
-                    matches!(state.deck(), DeckState::Open(_)) && !state.keep_open();
-                drop(state);
-
-                if should_collapse {
-                    ui.collapse_now();
-                }
-            },
-        );
-        self.focus_loss_source.replace(Some(source));
-    }
-
-    fn cancel_focus_loss_collapse(&self) {
-        if let Some(source) = self.focus_loss_source.borrow_mut().take() {
-            source.remove();
-        }
-    }
-
-    fn set_edge_input_region(&self, width: i32, height: i32) {
+    fn set_input(&self, dormant: bool) {
         let Some(surface) = self.window.surface() else {
             return;
         };
-
-        let rectangle = gtk::cairo::RectangleInt::new(
-            EXPANDED_WIDTH - width,
-            (EDITOR_HEIGHT - height) / 2,
-            width,
-            height,
-        );
-        let region = gtk::cairo::Region::create_rectangle(&rectangle);
-        surface.set_input_region(Some(&region));
+        let width = surface.width();
+        let height = surface.height();
+        let edge = self.config.borrow().edge;
+        let (w, h) = if dormant {
+            if matches!(edge, ScreenEdge::Top | ScreenEdge::Bottom) {
+                (150, 20)
+            } else {
+                (20, 180)
+            }
+        } else if self.docked.borrow().is_some() {
+            (400, 420)
+        } else if matches!(edge, ScreenEdge::Top | ScreenEdge::Bottom) {
+            (700, 190)
+        } else {
+            (230, 390)
+        };
+        let x = match edge {
+            ScreenEdge::Left => 0,
+            ScreenEdge::Right => width - w,
+            _ => (width - w) / 2,
+        };
+        let y = match edge {
+            ScreenEdge::Top => 0,
+            ScreenEdge::Bottom => height - h,
+            _ => (height - h) / 2,
+        };
+        surface.set_input_region(Some(&gtk::cairo::Region::create_rectangle(
+            &gtk::cairo::RectangleInt::new(x, y, w, h),
+        )));
     }
-
-    fn set_full_input_region(&self) {
-        if let Some(surface) = self.window.surface() {
-            surface.set_input_region(None);
-        }
+    fn error(&self, message: &str) {
+        let dialog = gtk::MessageDialog::builder()
+            .application(&self.application)
+            .message_type(gtk::MessageType::Error)
+            .buttons(gtk::ButtonsType::Close)
+            .text(message)
+            .build();
+        dialog.connect_response(|dialog, _| dialog.close());
+        dialog.present();
     }
 }
 
 fn main() -> glib::ExitCode {
-    reconcile_startup_preference();
-
+    if let Err(error) = ui_assets::register() {
+        eprintln!("Could not load UI assets: {error}");
+        return glib::ExitCode::FAILURE;
+    }
+    if let Err(error) = adw::init() {
+        eprintln!("Could not initialize the desktop UI: {error}");
+        return glib::ExitCode::FAILURE;
+    }
     let application = gtk::Application::builder()
         .application_id(APPLICATION_ID)
         .build();
-
     application.connect_activate(|application| {
         if application.windows().is_empty() {
-            build_edge_surface(application);
+            build(application);
         }
     });
     application.run()
 }
-
-fn reconcile_startup_preference() {
-    match config::Config::load(&config::config_path()) {
-        Ok(config) => {
-            if let Err(error) =
-                autostart::reconcile(&autostart::autostart_path(), config.launch_at_login)
-            {
-                eprintln!("Stickies could not update autostart: {error}");
-            }
-        }
-        Err(error) => eprintln!("Stickies ignored its configuration: {error}"),
-    }
-}
-
-fn build_edge_surface(application: &gtk::Application) {
-    let (notes, storage) = match load_notes() {
-        Ok(loaded) => loaded,
+fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
+    let storage = match Storage::open(&storage::database_path()) {
+        Ok(storage) => Rc::new(storage),
         Err(error) => {
-            show_storage_error(application, &error);
-            return;
+            let dialog = gtk::MessageDialog::builder()
+                .application(application)
+                .text("Stickies could not open your notes")
+                .secondary_text(error.to_string())
+                .buttons(gtk::ButtonsType::Close)
+                .build();
+            dialog.connect_response(|d, _| d.close());
+            dialog.present();
+            return None;
         }
     };
-    let state = Rc::new(RefCell::new(AppState::new(notes)));
-
+    let (config, valid) = match Config::load(&config::config_path()) {
+        Ok(config) => (config, true),
+        Err(error) => {
+            eprintln!("Stickies ignored invalid configuration: {error}");
+            (Config::default(), false)
+        }
+    };
+    if valid
+        && let Err(error) =
+            autostart::reconcile(&autostart::autostart_path(), config.launch_at_login)
+    {
+        eprintln!("Stickies could not update launch at login: {error}");
+    }
+    let provider = gtk::CssProvider::new();
+    appearance::apply(&provider, &config);
+    gtk::style_context_add_provider_for_display(
+        &gtk::gdk::Display::default().expect("GTK display"),
+        &provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
     let window = gtk::ApplicationWindow::builder()
         .application(application)
-        .default_width(EXPANDED_WIDTH)
-        .default_height(EDITOR_HEIGHT)
         .decorated(false)
         .resizable(false)
+        .default_width(WIDTH)
+        .default_height(HEIGHT)
         .build();
-
+    window.add_css_class("edge-window");
     window.init_layer_shell();
-    window.set_namespace(Some(LAYER_NAMESPACE));
-    window.set_layer(Layer::Overlay);
-    window.set_anchor(Edge::Right, true);
+    window.set_namespace(Some("stickies"));
     window.set_exclusive_zone(0);
     window.set_keyboard_mode(KeyboardMode::None);
-
     let root = gtk::Overlay::new();
-    root.set_size_request(EXPANDED_WIDTH, EDITOR_HEIGHT);
-
     let hit_area = gtk::Box::new(gtk::Orientation::Vertical, 0);
     hit_area.add_css_class("hit-area");
     root.set_child(Some(&hit_area));
-
     let stack = gtk::Stack::new();
-    stack.set_transition_type(gtk::StackTransitionType::Crossfade);
-    stack.set_transition_duration(140);
     stack.set_hhomogeneous(false);
     stack.set_vhomogeneous(false);
-    stack.set_size_request(320, 350);
-    stack.set_halign(gtk::Align::End);
-    stack.set_valign(gtk::Align::Center);
-    stack.set_margin_end(16);
+    stack.set_transition_type(gtk::StackTransitionType::Crossfade);
     stack.set_visible(false);
-
     let tabs = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    tabs.set_width_request(TAB_WIDTH);
-    tabs.set_halign(gtk::Align::End);
-    tabs.set_valign(gtk::Align::Center);
-
-    let editor = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    editor.add_css_class("editor-card");
-
-    let editor_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let editor_title = gtk::Entry::new();
-    editor_title.add_css_class("editor-title");
-    editor_title.set_hexpand(true);
-    editor_title.set_placeholder_text(Some("Note title"));
-
-    let close_hint = gtk::Label::new(Some("Esc to close"));
-    close_hint.add_css_class("close-hint");
-    editor_header.append(&editor_title);
-    editor_header.append(&close_hint);
-
-    let editor_actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-
-    let keep_open_button = gtk::ToggleButton::with_label("Keep open");
-    keep_open_button.add_css_class("keep-open");
-    keep_open_button.set_tooltip_text(Some("Keep this note open while using other windows"));
-
-    let archive_button = gtk::Button::with_label("Archive");
-    archive_button.add_css_class("archive-note");
-    let delete_button = gtk::Button::with_label("Delete");
-    delete_button.add_css_class("delete-note");
-    editor_actions.append(&keep_open_button);
-    editor_actions.append(&archive_button);
-    editor_actions.append(&delete_button);
-
-    let editor_body = gtk::TextView::new();
-    editor_body.add_css_class("editor-body");
-    editor_body.set_wrap_mode(gtk::WrapMode::WordChar);
-    editor_body.set_left_margin(12);
-    editor_body.set_right_margin(12);
-    editor_body.set_top_margin(12);
-    editor_body.set_bottom_margin(12);
-
-    let editor_scroll = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vexpand(true)
-        .child(&editor_body)
-        .build();
-    editor_scroll.add_css_class("editor-scroll");
-
-    editor.append(&editor_header);
-    editor.append(&editor_scroll);
-    editor.append(&editor_actions);
-
+    tabs.set_margin_start(12);
+    tabs.set_margin_end(12);
+    tabs.set_margin_top(12);
+    tabs.set_margin_bottom(12);
     stack.add_named(&tabs, Some("tabs"));
-    stack.add_named(&editor, Some("editor"));
-    stack.set_visible_child_name("tabs");
     root.add_overlay(&stack);
-
     let marker = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    marker.add_css_class("edge-marker");
-    marker.set_size_request(8, DORMANT_HEIGHT);
-    marker.set_halign(gtk::Align::End);
-    marker.set_valign(gtk::Align::Center);
     marker.set_can_target(false);
     root.add_overlay(&marker);
-
-    let ui = PrototypeUi {
+    let ui = Rc::new(Ui {
+        system_animations: gtk::Settings::default().is_some_and(|s| s.is_gtk_enable_animations()),
+        sessions: RefCell::new(HashMap::new()),
+        application: application.clone(),
         window: window.clone(),
+        root: root.clone(),
         stack,
+        marker,
         tabs,
-        tab_revealers: Rc::new(RefCell::new(Vec::new())),
-        editor_title,
-        editor_body,
-        keep_open_button: keep_open_button.clone(),
-        state,
+        config: Rc::new(RefCell::new(config)),
+        config_valid: valid,
+        dnd: Cell::new(false),
+        dnd_monitor: RefCell::new(None),
+        provider,
         storage,
-        manager_window: Rc::new(RefCell::new(None)),
-        deck_refresh_needed: Rc::new(Cell::new(false)),
-        animation_generation: Rc::new(Cell::new(0)),
-        focus_loss_source: Rc::new(RefCell::new(None)),
-        inactivity_source: Rc::new(RefCell::new(None)),
-        autosave_source: Rc::new(RefCell::new(None)),
-        loading_editor: Rc::new(Cell::new(false)),
-    };
-
+        docked: RefCell::new(None),
+        deck: RefCell::new(AppState::new(Vec::new())),
+        separate: RefCell::new(HashMap::new()),
+        reusable: Cell::new(None),
+        manager: RefCell::new(None),
+        revealed: Cell::new(false),
+        generation: Cell::new(0),
+    });
+    if let Some(settings) = gtk::Settings::default() {
+        settings
+            .set_gtk_enable_animations(ui.system_animations && !ui.config.borrow().reduced_motion);
+    }
+    ui.place_edge();
     ui.refresh_tabs();
-
-    {
-        let ui = ui.clone();
-        ui.editor_body.buffer().connect_changed(move |buffer| {
-            let (start, end) = buffer.bounds();
-            let body = buffer.text(&start, &end, true).to_string();
-            ui.update_open_note_body(body);
-        });
-    }
-
-    {
-        let ui = ui.clone();
-        let editor_title = ui.editor_title.clone();
-        editor_title
-            .connect_changed(move |entry| ui.update_open_note_title(entry.text().to_string()));
-    }
-
-    {
-        let ui = ui.clone();
-        keep_open_button.connect_toggled(move |button| ui.set_keep_open(button.is_active()));
-    }
-
-    {
-        let ui = ui.clone();
-        archive_button.connect_clicked(move |_| ui.archive_open_note());
-    }
-
-    {
-        let ui = ui.clone();
-        delete_button.connect_clicked(move |_| ui.confirm_delete_open_note());
-    }
-
-    let editor_click = gtk::GestureClick::new();
-    {
-        let ui = ui.clone();
-        editor_click.connect_pressed(move |_, _, _, _| ui.reset_inactivity_timeout());
-    }
-    editor.add_controller(editor_click);
-
-    let editor_scroll_activity =
-        gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
-    {
-        let ui = ui.clone();
-        editor_scroll_activity.connect_scroll(move |_, _, _| {
-            ui.reset_inactivity_timeout();
-            glib::Propagation::Proceed
-        });
-    }
-    editor.add_controller(editor_scroll_activity);
-
     let motion = gtk::EventControllerMotion::new();
     {
-        let ui = ui.clone();
-        motion.connect_enter(move |_, _, _| ui.show_tabs());
-    }
-    {
-        let ui = ui.clone();
-        motion.connect_leave(move |_| ui.schedule_collapse());
-    }
-    root.add_controller(motion);
-
-    let keys = gtk::EventControllerKey::new();
-    let key_ui = ui.clone();
-    keys.connect_key_pressed(move |_, key, _, _| {
-        let note_is_open = matches!(key_ui.state.borrow().deck(), DeckState::Open(_));
-        if note_is_open {
-            key_ui.reset_inactivity_timeout();
-        }
-
-        if key == gtk::gdk::Key::Escape && note_is_open {
-            key_ui.collapse_now();
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
-    });
-    window.add_controller(keys);
-
-    {
-        let ui = ui.clone();
-        window.connect_is_active_notify(move |window| {
-            if window.is_active() {
-                ui.cancel_focus_loss_collapse();
-                ui.reset_inactivity_timeout();
-            } else {
-                ui.schedule_focus_loss_collapse();
+        let weak = Rc::downgrade(&ui);
+        motion.connect_enter(move |_, _, _| {
+            if let Some(ui) = weak.upgrade()
+                && ui.config.borrow().edge_hover_enabled
+            {
+                ui.reveal();
             }
         });
     }
-
     {
-        let ui = ui.clone();
-        window.connect_map(move |_| ui.set_edge_input_region(DORMANT_WIDTH, DORMANT_HEIGHT));
+        let weak = Rc::downgrade(&ui);
+        motion.connect_leave(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.schedule_hide();
+            }
+        });
     }
-
+    root.add_controller(motion);
+    let click = gtk::GestureClick::new();
     {
-        let ui = ui.clone();
-        application.connect_shutdown(move |_| ui.flush_autosave());
+        let weak = Rc::downgrade(&ui);
+        click.connect_released(move |_, _, _, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.reveal();
+            }
+        });
     }
-
-    install_styles();
+    root.add_controller(click);
+    let drag = gtk::GestureDrag::new();
+    let initial = Rc::new(Cell::new(0.));
+    {
+        let weak = Rc::downgrade(&ui);
+        let initial = initial.clone();
+        drag.connect_drag_begin(move |gesture, _, _| {
+            if let Some(ui) = weak.upgrade() {
+                if ui.docked.borrow().is_some() || ui.revealed.get() {
+                    gesture.set_state(gtk::EventSequenceState::Denied);
+                    return;
+                }
+                initial.set(ui.config.borrow().marker_offset);
+            }
+        });
+    }
+    {
+        let weak = Rc::downgrade(&ui);
+        drag.connect_drag_end(move |_, x, y| {
+            if let Some(ui) = weak.upgrade()
+                && ui.docked.borrow().is_none()
+                && ui.config_valid
+            {
+                let mut config = ui.config.borrow().clone();
+                let horizontal = matches!(config.edge, ScreenEdge::Top | ScreenEdge::Bottom);
+                let distance = if horizontal { x } else { y };
+                let Some(display) = gtk::gdk::Display::default() else {
+                    return;
+                };
+                let Some(monitor) = display
+                    .monitors()
+                    .item(0)
+                    .and_downcast::<gtk::gdk::Monitor>()
+                else {
+                    return;
+                };
+                let geometry = monitor.geometry();
+                let available = if horizontal {
+                    geometry.width() - 720
+                } else {
+                    geometry.height() - HEIGHT
+                };
+                if available <= 0 {
+                    return;
+                }
+                config.marker_offset =
+                    (initial.get() + distance / f64::from(available)).clamp(0., 1.);
+                if config.save(&config::config_path()).is_ok() {
+                    ui.config.replace(config);
+                    ui.place_edge();
+                }
+            }
+        });
+    }
+    root.add_controller(drag);
+    let keys = gtk::EventControllerKey::new();
+    {
+        let weak = Rc::downgrade(&ui);
+        keys.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk::gdk::Key::Escape {
+                if let Some(ui) = weak.upgrade() {
+                    if ui.docked.borrow().is_some() {
+                        ui.close_docked();
+                    } else {
+                        ui.dormant();
+                    }
+                }
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+    }
+    window.add_controller(keys);
+    {
+        let weak = Rc::downgrade(&ui);
+        window.connect_map(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_input(!ui.revealed.get() && ui.docked.borrow().is_none());
+            }
+        });
+    }
+    {
+        let weak = Rc::downgrade(&ui);
+        window.connect_realize(move |window| {
+            if let Some(surface) = window.surface() {
+                let weak = weak.clone();
+                surface.connect_layout(move |_, _, _| {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_input(!ui.revealed.get() && ui.docked.borrow().is_none());
+                    }
+                });
+            }
+        });
+    }
+    // Keep the coordinator alive for the application lifetime, without widget cycles.
+    let shutdown_ui = ui.clone();
+    application.connect_shutdown(move |_| {
+        let ui = &shutdown_ui;
+        let manager = ui.manager.borrow().clone();
+        if let Some(manager) = manager {
+            manager.flush();
+        }
+        if let Some(editor) = ui.docked.borrow().as_ref() {
+            editor.flush();
+        }
+        for note in ui.separate.borrow().values() {
+            note.editor.flush();
+        }
+    });
     window.set_child(Some(&root));
     window.present();
-}
-
-fn load_notes() -> Result<(Vec<Note>, Rc<Storage>), StorageError> {
-    let storage = Storage::open(&storage::database_path())?;
-    let notes = storage.load_deck_notes(MAX_VISIBLE_NOTES)?;
-    Ok((notes, Rc::new(storage)))
-}
-
-fn show_storage_error(application: &gtk::Application, error: &StorageError) {
-    eprintln!("Stickies could not open local storage: {error}");
-    let dialog = gtk::MessageDialog::builder()
-        .application(application)
-        .modal(true)
-        .message_type(gtk::MessageType::Error)
-        .buttons(gtk::ButtonsType::Close)
-        .text("Stickies could not open your notes")
-        .secondary_text(format!("{error}. No notes were changed."))
-        .build();
-    dialog.connect_response(|dialog, _| dialog.close());
-    dialog.present();
-}
-
-fn install_styles() {
-    let styles = gtk::CssProvider::new();
-    styles.load_from_data(
-        r#"
-        window,
-        .hit-area {
-            background: transparent;
+    let weak = Rc::downgrade(&ui);
+    let monitor = platform::watch_do_not_disturb(move |dnd| {
+        if let Some(ui) = weak.upgrade() {
+            ui.dnd.set(dnd);
+            ui.update_visibility();
         }
-
-        .edge-marker {
-            background: #f2c14e;
-            border-radius: 4px 0 0 4px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-        }
-
-        .note-tab {
-            background: rgba(30, 32, 38, 0.97);
-            color: #f5f5f5;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 10px 0 0 10px;
-            padding: 10px 14px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
-        }
-
-        .note-tab:hover {
-            background: rgba(43, 46, 54, 0.99);
-            border-color: rgba(255, 255, 255, 0.24);
-        }
-
-        .note-tab.note-yellow { border-left: 4px solid #f2c14e; }
-        .note-tab.note-blue { border-left: 4px solid #69a7ff; }
-        .note-tab.note-purple { border-left: 4px solid #b08cff; }
-        .note-tab.note-green { border-left: 4px solid #70c98b; }
-
-        .tab-title {
-            color: #ffffff;
-            font-size: 14px;
-            font-weight: 700;
-        }
-
-        .close-hint {
-            color: #8f949e;
-            font-size: 10px;
-        }
-
-        .keep-open {
-            font-size: 11px;
-        }
-
-        .editor-card {
-            background: rgba(30, 32, 38, 0.98);
-            color: #f5f5f5;
-            border: 1px solid rgba(255, 255, 255, 0.16);
-            border-left: 4px solid #f2c14e;
-            border-radius: 14px;
-            padding: 16px;
-            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.38);
-        }
-
-        .editor-title {
-            color: #ffffff;
-            font-size: 18px;
-            font-weight: 700;
-        }
-
-        .editor-scroll,
-        .editor-body,
-        .editor-body text {
-            background: rgba(18, 20, 24, 0.82);
-            color: #f2f2f2;
-            border-radius: 9px;
-        }
-
-        .editor-body {
-            font-family: monospace;
-            font-size: 13px;
-        }
-        "#,
-    );
-
-    gtk::style_context_add_provider_for_display(
-        &Display::default().expect("GTK display must be available"),
-        &styles,
-        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
+    });
+    ui.dnd_monitor.replace(monitor);
+    Some(ui)
 }

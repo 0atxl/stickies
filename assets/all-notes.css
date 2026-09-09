@@ -1,0 +1,86 @@
+.management {
+  --app-bg: #fbf8f1; --ink: #2a2723; --muted: #847e73;
+  --hairline: #e5dfd2; --selected: #f0e6d2; --focus: #b77e35;
+  background: var(--app-bg); color: var(--ink); font-family: Inter, sans-serif;
+  font-size: 13px;
+}
+.management.glass-dark {
+  --app-bg: #292b2e; --ink: #f4f2ec; --muted: #b7b5af;
+  --hairline: #45474a; --selected: #3b3d40; --focus: #cab795;
+}
+.management .main-header { min-height: 64px; padding: 0 20px; border-bottom: 1px solid var(--hairline); }
+.management .search-field { min-height: 34px; padding: 0 10px; border: 1px solid var(--hairline); background: transparent; color: var(--ink); box-shadow: none; border-radius: 6px; }
+.management .search-field:focus-within { outline: none; }
+.management .panel-title { font-size: 16px; font-weight: 600; }
+.management searchentry { min-height: 34px; padding: 0 10px; background: transparent; color: var(--ink); border: 1px solid var(--hairline); border-radius: 6px; box-shadow: none; }
+.management searchentry text { background: transparent; color: var(--ink); }
+.management searchentry:focus-within { outline: none; }
+.management .search-field:focus-visible { outline: 1px solid var(--muted); outline-offset: 1px; }
+.management .note-list { background: transparent; padding: 10px 10px; }
+.management .list-column { border-right: 1px solid var(--hairline); }
+.management .note-list row { padding: 0; margin: 0 0 4px; border-radius: 8px; background: transparent; color: var(--ink); }
+.management .note-list row:hover { background: alpha(var(--selected), .55); }
+.management .note-list row:selected { background: var(--selected); }
+.management .row-content { min-height: 52px; padding: 0 14px 0 0; }
+.management .row-title { font-size: 14px; font-weight: 600; }
+.management .row-snippet { font-size: 13px; color: var(--muted); }
+.management .tag-bar { min-width: 4px; border-radius: 2px; margin: 12px 12px 12px 0; }
+.management .note-yellow .tag-bar { background: #d98c2b; }
+.management .note-green .tag-bar { background: #6fae68; }
+.management .note-purple .tag-bar { background: #a98fd1; }
+.management .note-blue .tag-bar { background: #5b8def; }
+.management .editor-region { padding: 18px 28px 12px; }
+.management .inline-content { padding: 24px 30px 32px; }
+.management .inline-title { background: transparent; color: var(--ink); border: none; border-radius: 3px; box-shadow: none; padding: 0; min-height: 32px; font-size: 23px; }
+.management .inline-body, .management .inline-body text { background: transparent; color: var(--ink); font-size: 23px; caret-color: var(--ink); }
+.management .inline-title:focus-within { outline: none; }
+.management .metadata { color: var(--muted); font-size: 11px; }
+.management .save-state { color: var(--muted); font-size: 11px; min-height: 16px; }
+.management .save-state.error { color: #b54343; }
+.management .icon-control, .management .icon-control > button {
+  min-width: 24px; min-height: 24px; padding: 4px; border: none;
+  background: transparent; color: var(--ink); box-shadow: none; border-radius: 6px;
+}
+.management menubutton.icon-control { padding: 0; }
+.management .icon-control:hover, .management .icon-control > button:hover { background: alpha(var(--ink), .06); }
+.management .icon-control:checked { background: var(--selected); color: var(--focus); }
+.management button:focus-visible, .management row:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.management button:disabled { opacity: .4; }
+.management popover > contents { background: var(--app-bg); color: var(--ink); border: 1px solid var(--hairline); }
+.management popover button { box-shadow: none; background: transparent; color: var(--ink); padding: 4px 8px; min-height: 24px; font-size: 12px; border: none; }
+.management popover button:hover { background: var(--selected); }
+.management .appearance-panel { background: var(--app-bg); padding: 16px 14px; border-left: 1px solid var(--hairline); }
+.management button { font-weight: 400; }
+.management .appearance-panel, .management .sidebar-pane { color: var(--ink); }
+.management label { color: inherit; }
+.management .row-snippet, .management .metadata, .management .save-state { color: var(--muted); }
+.management .setting-label { font-size: 13px; font-weight: 500; }
+.management .theme-choice { background: transparent; color: var(--ink); border: none; box-shadow: none; padding: 0; }
+.management .theme-sample { border: 1px solid var(--hairline); border-radius: 8px; padding: 2px; }
+.management .theme-choice:checked .theme-sample { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus); }
+.management .theme-caption { font-size: 12px; margin-top: 6px; }
+.management .selection-badge { background: #302e29; color: white; border-radius: 50%; min-width: 18px; min-height: 18px; margin: 5px; }
+.management .segments { border: 1px solid var(--hairline); border-radius: 6px; }
+.management .segments button { padding: 8px 2px; border: 1px solid transparent; box-shadow: none; background: transparent; color: var(--ink); border-radius: 5px; font-size: 12px; }
+.management .segments button:checked { border-color: var(--ink); }
+.management .pattern-choice { border: 1px solid var(--hairline); background: transparent; color: var(--ink); box-shadow: none; padding: 9px 2px; border-radius: 6px; font-size: 12px; }
+.management .pattern-choice:checked { border-color: var(--ink); }
+.management switch { min-width: 38px; min-height: 20px; background: #cdc7bd; border: none; }
+.management switch:checked { background: var(--focus); }
+.management switch slider { background: #fffdf8; min-width: 18px; min-height: 18px; box-shadow: 0 1px 2px alpha(black,.1); }
+.management .empty-title { font-size: 19px; font-weight: 500; }
+.management .empty-action { padding: 9px 16px; border: 1px solid var(--hairline); background: var(--selected); color: var(--ink); border-radius: 6px; box-shadow: none; }
+
+.management menubutton.icon-control:hover { background: transparent; }
+.management .collection-filters { padding: 10px; border-bottom: 1px solid var(--hairline); }
+.management .collection-filters button { min-height: 26px; padding: 2px 8px; font-size: 12px; border: none; box-shadow: none; background: transparent; color: var(--muted); border-radius: 5px; }
+.management .collection-filters button:hover { background: alpha(var(--selected), .5); }
+.management .collection-filters button.selected { background: var(--selected); color: var(--ink); }
+.management .save-indicator { min-height: 16px; color: var(--muted); font-size: 12px; }
+.management .save-dot { opacity: .35; }
+@keyframes saving-dot { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+.management .saving-motion .save-dot { animation: saving-dot 900ms ease-in-out infinite; }
+.management .saving-motion .dot-1 { animation-delay: 150ms; }
+.management .saving-motion .dot-2 { animation-delay: 300ms; }
+
+.management .archive-badge { opacity: .65; }

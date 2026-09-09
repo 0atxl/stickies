@@ -1,0 +1,17 @@
+<gresources><gresource prefix="/dev/stickies/Stickies">
+  <file>all-notes.css</file>
+  <file>icons/stickies-archive-symbolic.svg</file>
+  <file>fonts/Virgil.woff2</file>
+  <file>fonts/Virgil-LICENSE.txt</file>
+  <file>fonts/Inter.ttf</file>
+  <file>fonts/JetBrainsMono.ttf</file>
+  <file>icons/stickies-plus-symbolic.svg</file>
+  <file>icons/stickies-close-symbolic.svg</file>
+  <file>icons/stickies-chevron-symbolic.svg</file>
+  <file>icons/stickies-sort-symbolic.svg</file>
+  <file>icons/stickies-settings-symbolic.svg</file>
+  <file>icons/stickies-more-symbolic.svg</file>
+  <file>icons/stickies-pin-symbolic.svg</file>
+  <file>icons/stickies-popout-symbolic.svg</file>
+  <file>icons/stickies-stack-symbolic.svg</file>
+</gresource></gresources>
