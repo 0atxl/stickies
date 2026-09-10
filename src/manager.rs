@@ -246,10 +246,20 @@ impl ManagerUi {
     }
     fn sync_editor(&self) {
         let defaults = self.config.borrow().clone();
-        if defaults.theme == Theme::Glass && appearance::dark(&defaults) {
-            self.window.add_css_class("glass-dark");
+        if defaults.theme == Theme::Minimal {
+            self.window.add_css_class("minimal");
         } else {
-            self.window.remove_css_class("glass-dark");
+            self.window.remove_css_class("minimal");
+        }
+        if defaults.theme == Theme::Minimal && appearance::dark(&defaults) {
+            self.window.add_css_class("minimal-dark");
+        } else {
+            self.window.remove_css_class("minimal-dark");
+        }
+        if defaults.theme == Theme::Playful {
+            self.window.add_css_class("playful");
+        } else {
+            self.window.remove_css_class("playful");
         }
         let session = self.session.borrow().clone();
         if let Some(session) = session {
@@ -340,6 +350,11 @@ impl ManagerUi {
         }
         appearance::apply_note_font(&self.font, &self.resolved.borrow());
         self.background.queue_draw();
+        ui_assets::refresh_icons(
+            self.window.upcast_ref(),
+            defaults.theme == Theme::Playful,
+            defaults.theme != Theme::Paper,
+        );
         if let Some(id) = self.selected.get()
             && let Ok((created, updated)) = self.storage.note_dates(id)
         {
@@ -836,6 +851,7 @@ pub fn build_window(
         }
     });
     ui.refresh(None);
+    ui.sync_editor();
     ManagerWindow(ui)
 }
 fn menu_button(icon: &str, label: &str) -> gtk::MenuButton {

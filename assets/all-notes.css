@@ -1,12 +1,8 @@
 .management {
-  --app-bg: #fbf8f1; --ink: #2a2723; --muted: #847e73;
-  --hairline: #e5dfd2; --selected: #f0e6d2; --focus: #b77e35;
+  --app-bg: #f8f7f3; --ink: #2d2c29; --muted: #7d7971;
+  --hairline: #e3e0d8; --selected: #ece8df; --focus: #9a876c;
   background: var(--app-bg); color: var(--ink); font-family: Inter, sans-serif;
   font-size: 13px;
-}
-.management.glass-dark {
-  --app-bg: #292b2e; --ink: #f4f2ec; --muted: #b7b5af;
-  --hairline: #45474a; --selected: #3b3d40; --focus: #cab795;
 }
 .management .main-header { min-height: 64px; padding: 0 20px; border-bottom: 1px solid var(--hairline); }
 .management .search-field { min-height: 34px; padding: 0 10px; border: 1px solid var(--hairline); background: transparent; color: var(--ink); box-shadow: none; border-radius: 6px; }
@@ -32,7 +28,7 @@
 .management .editor-region { padding: 18px 28px 12px; }
 .management .inline-content { padding: 24px 30px 32px; }
 .management .inline-title { background: transparent; color: var(--ink); border: none; border-radius: 3px; box-shadow: none; padding: 0; min-height: 32px; font-size: 23px; }
-.management .inline-body, .management .inline-body text { background: transparent; color: var(--ink); font-size: 23px; caret-color: var(--ink); }
+.management .inline-body, .management .inline-body text { background: transparent; color: var(--ink); font-size: 21px; caret-color: var(--ink); }
 .management .inline-title:focus-within { outline: none; }
 .management .metadata { color: var(--muted); font-size: 11px; }
 .management .save-state { color: var(--muted); font-size: 11px; min-height: 16px; }
@@ -65,9 +61,9 @@
 .management .segments button:checked { border-color: var(--ink); }
 .management .pattern-choice { border: 1px solid var(--hairline); background: transparent; color: var(--ink); box-shadow: none; padding: 9px 2px; border-radius: 6px; font-size: 12px; }
 .management .pattern-choice:checked { border-color: var(--ink); }
-.management switch { min-width: 38px; min-height: 20px; background: #cdc7bd; border: none; }
+.management switch { min-width: 38px; min-height: 20px; background: #d0cdc5; border: none; }
 .management switch:checked { background: var(--focus); }
-.management switch slider { background: #fffdf8; min-width: 18px; min-height: 18px; box-shadow: 0 1px 2px alpha(black,.1); }
+.management switch slider { background: #fffefa; min-width: 18px; min-height: 18px; box-shadow: 0 1px 2px alpha(black,.1); }
 .management .empty-title { font-size: 19px; font-weight: 500; }
 .management .empty-action { padding: 9px 16px; border: 1px solid var(--hairline); background: var(--selected); color: var(--ink); border-radius: 6px; box-shadow: none; }
 
@@ -84,3 +80,53 @@
 .management .saving-motion .dot-2 { animation-delay: 300ms; }
 
 .management .archive-badge { opacity: .65; }
+
+/* Playful: neutral chrome, one pink selection accent, and colored notes. */
+.management.playful { --app-bg: #faf9fc; --ink: #292a2d; --muted: #77797c; --hairline: #e4e0e7; --selected: #f7e5ed; --focus: #e24c86; }
+.management.playful .panel-title { font-size: 17px; font-weight: 800; }
+.management.playful .search-field { background: white; border: 2px solid #292a2d; border-radius: 12px; }
+.management.playful .icon-control, .management.playful .icon-control > button { border-radius: 9px; }
+.management.playful .collection-filters button { border-radius: 9px; }
+.management.playful .collection-filters button.selected { background: #e24c86; color: white; }
+.management.playful .note-list row { border-left: 2px solid transparent; border-radius: 8px; }
+.management.playful .note-list row:selected { background: var(--selected); border-left-color: #e24c86; }
+.management.playful .inline-title { font-weight: bold; }
+.management.playful .appearance-panel { background: #faf9fc; }
+.management.playful .segments button:checked, .management.playful .pattern-choice:checked { border-color: #e24c86; }
+
+/* Minimal uses opaque light and dark surfaces. */
+.management.minimal {
+  --app-bg: #e9edf0; --ink: #292f36; --muted: #646e79;
+  --hairline: #cdd4db; --selected: #d9e0e6; --focus: #657789;
+  --panel-bg: #edf0f3; border-radius: 0;
+}
+.management.minimal-dark {
+  --app-bg: #20252c; --ink: #edf1f5; --muted: #aab4c0;
+  --hairline: #424a55; --selected: #37414d; --focus: #acbac9;
+  --panel-bg: #282f38;
+}
+.management.minimal .appearance-panel, .management.minimal popover > contents { background: var(--panel-bg); }
+.management.minimal .search-field, .management.minimal .note-list row,
+.management.minimal .icon-control, .management.minimal .icon-control > button,
+.management.minimal .collection-filters button { border-radius: 0; }
+.management.minimal switch { background: var(--selected); }
+.management.minimal switch:checked { background: var(--focus); }
+
+/* Minimal and Playful use dots and separate selection borders. */
+.management.minimal .tag-bar, .management.playful .tag-bar {
+  min-width: 9px; min-height: 9px; border-radius: 50%; margin: 20px 10px;
+}
+.management.minimal .note-list row { border-left: 2px solid transparent; }
+.management.minimal .note-list row:selected { border-left-color: var(--focus); }
+.management.minimal .segments button:checked, .management.minimal .pattern-choice:checked,
+.management.playful .segments button:checked, .management.playful .pattern-choice:checked {
+  background: var(--selected); border-color: var(--focus);
+}
+.management.minimal .theme-choice:checked .theme-sample,
+.management.playful .theme-choice:checked .theme-sample { background: var(--selected); }
+.management.minimal .selection-badge, .management.playful .selection-badge {
+  background: var(--focus); color: var(--app-bg);
+}
+.management.minimal .segments, .management.minimal .segments button,
+.management.minimal .pattern-choice, .management.minimal .theme-sample,
+.management.minimal .empty-action { border-radius: 0; }

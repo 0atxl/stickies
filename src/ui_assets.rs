@@ -38,13 +38,106 @@ pub fn icon(name: &str, label: &str) -> gtk::Button {
     button
 }
 
-pub fn image(name: &str) -> gtk::Image {
-    let pixbuf = gtk::gdk_pixbuf::Pixbuf::from_resource_at_scale(
+pub fn image(name: &str) -> gtk::DrawingArea {
+    let image = gtk::DrawingArea::new();
+    image.set_content_width(18);
+    image.set_content_height(18);
+    image.set_valign(gtk::Align::Center);
+    image.set_halign(gtk::Align::Center);
+    image.set_widget_name(&format!("stickies-icon-{name}"));
+    set_icon(
+        &image,
         &format!("/dev/stickies/Stickies/icons/stickies-{name}-symbolic.svg"),
-        18,
-        18,
-        true,
+    );
+    image
+}
+
+// Preserve the supplied SVG strokes, using their alpha as a mask for the CSS color.
+fn set_icon(image: &gtk::DrawingArea, path: &str) {
+    let pixbuf =
+        gtk::gdk_pixbuf::Pixbuf::from_resource_at_scale(path, 36, 36, true).expect("bundled icon");
+    let bytes = pixbuf.read_pixel_bytes();
+    let stride = gtk::cairo::Format::A8.stride_for_width(36).unwrap() as usize;
+    let mut alpha = vec![0u8; stride * 36];
+    for y in 0..36usize {
+        for x in 0..36usize {
+            alpha[y * stride + x] = bytes[y * pixbuf.rowstride() as usize + x * 4 + 3];
+        }
+    }
+    let mask = gtk::cairo::ImageSurface::create_for_data(
+        alpha,
+        gtk::cairo::Format::A8,
+        36,
+        36,
+        stride as i32,
     )
-    .expect("bundled icon");
-    gtk::Image::from_pixbuf(Some(&pixbuf))
+    .unwrap();
+    image.set_draw_func(move |widget, cr, _, _| {
+        let color = widget.style_context().color();
+        cr.set_source_rgba(
+            color.red().into(),
+            color.green().into(),
+            color.blue().into(),
+            color.alpha().into(),
+        );
+        cr.scale(0.5, 0.5);
+        let _ = cr.mask_surface(&mask, 0., 0.);
+    });
+}
+
+pub fn refresh_icons(widget: &gtk::Widget, playful: bool, filled_pins: bool) {
+    if let Ok(image) = widget.clone().downcast::<gtk::DrawingArea>() {
+        if let Some(name) = image.widget_name().strip_prefix("stickies-icon-") {
+            let filled = filled_pins
+                && name == "pin"
+                && image
+                    .parent()
+                    .and_downcast::<gtk::ToggleButton>()
+                    .is_some_and(|b| b.is_active());
+            let state = if playful {
+                if filled {
+                    "playful-filled"
+                } else {
+                    "playful-outline"
+                }
+            } else if filled {
+                "standard-filled"
+            } else {
+                "standard-icon"
+            };
+            if !image.has_css_class(state) {
+                let asset = match name {
+                    "chevron" => "chevron-left",
+                    "plus" => "plus-new-note",
+                    "settings" => "settings-gear",
+                    "popout" => "pop-out-window",
+                    "more" => "more-dots",
+                    "pin" if filled => "pin-filled",
+                    other => other,
+                };
+                let path = if playful {
+                    format!("/dev/stickies/Stickies/icons/playful/{asset}.svg")
+                } else if filled {
+                    "/dev/stickies/Stickies/icons/stickies-pin-filled-symbolic.svg".to_string()
+                } else {
+                    format!("/dev/stickies/Stickies/icons/stickies-{name}-symbolic.svg")
+                };
+                set_icon(&image, &path);
+                for class in [
+                    "playful-filled",
+                    "playful-outline",
+                    "standard-icon",
+                    "standard-filled",
+                ] {
+                    image.remove_css_class(class);
+                }
+                image.add_css_class(state);
+            }
+        }
+    }
+    let mut child = widget.first_child();
+    while let Some(w) = child {
+        refresh_icons(&w, playful, filled_pins);
+        child = w.next_sibling();
+    }
 }

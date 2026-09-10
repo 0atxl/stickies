@@ -21,7 +21,8 @@ pub enum ScreenEdge {
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
     #[default]
-    Glass,
+    #[serde(alias = "glass")]
+    Minimal,
     Paper,
     Playful,
 }
@@ -251,6 +252,18 @@ pub fn config_path() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn legacy_glass_preserves_preferences_and_saves_as_minimal() {
+        let config: super::Config =
+            toml::from_str("theme = 'glass'\nappearance = 'dark'\nfont = 'handwritten'").unwrap();
+        assert_eq!(config.theme, super::Theme::Minimal);
+        assert_eq!(config.appearance, super::Appearance::Dark);
+        assert_eq!(config.font, super::Font::Handwritten);
+        let saved = toml::to_string(&config).unwrap();
+        assert!(saved.contains("theme = \"minimal\""));
+        assert_eq!(toml::from_str::<super::Config>(&saved).unwrap(), config);
+    }
+
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;

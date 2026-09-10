@@ -32,8 +32,21 @@ pub fn build(
     error.add_css_class("save-error");
     error.set_visible(false);
     root.append(&error);
-    let update: Rc<dyn Fn(Config)> = Rc::new(move |config| match on_change(config) {
-        Ok(()) => error.set_visible(false),
+    let samples = Rc::new(RefCell::new(
+        Vec::<(Rc<RefCell<Config>>, gtk::DrawingArea)>::new(),
+    ));
+    let previews = samples.clone();
+    let update: Rc<dyn Fn(Config)> = Rc::new(move |config| match on_change(config.clone()) {
+        Ok(()) => {
+            error.set_visible(false);
+            for (sample, drawing) in previews.borrow().iter() {
+                let mut sample = sample.borrow_mut();
+                sample.appearance = config.appearance;
+                sample.paper = config.paper;
+                sample.white_paper = config.white_paper;
+                drawing.queue_draw();
+            }
+        }
         Err(message) => {
             error.set_text(&message);
             error.set_visible(true);
@@ -48,7 +61,7 @@ pub fn build(
     let mut theme_buttons = Vec::new();
     let mut group: Option<gtk::ToggleButton> = None;
     for (theme, name) in [
-        (Theme::Glass, "Glass"),
+        (Theme::Minimal, "Minimal"),
         (Theme::Paper, "Paper"),
         (Theme::Playful, "Playful"),
     ] {
@@ -69,10 +82,10 @@ pub fn build(
             },
             ..config.clone()
         };
-        let paper = appearance::paper_background(
-            Rc::new(RefCell::new(sample)),
-            Rc::new(Cell::new(NoteColor::Green)),
-        );
+        let sample = Rc::new(RefCell::new(sample));
+        let paper =
+            appearance::paper_background(sample.clone(), Rc::new(Cell::new(NoteColor::Green)));
+        samples.borrow_mut().push((sample, paper.clone()));
         paper.set_size_request(50, 48);
         overlay.set_child(Some(&paper));
         let badge = gtk::Label::new(Some("✓"));
@@ -97,7 +110,7 @@ pub fn build(
     let mode = gtk::Box::new(gtk::Orientation::Vertical, 8);
     let modes = choices(&["System", "Light", "Dark"], config.appearance as usize);
     section(&mode, "Mode", &modes.0);
-    mode.set_visible(config.theme == Theme::Glass);
+    mode.set_visible(config.theme == Theme::Minimal);
     root.append(&mode);
     for (i, button) in modes.1.into_iter().enumerate() {
         let current = current.clone();
@@ -156,7 +169,7 @@ pub fn build(
     let patterns = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let pattern_section = gtk::Box::new(gtk::Orientation::Vertical, 8);
     section(&pattern_section, "Paper pattern", &patterns);
-    pattern_section.set_visible(config.theme != Theme::Glass);
+    pattern_section.set_visible(config.theme != Theme::Minimal);
     root.append(&pattern_section);
     let mut group: Option<gtk::ToggleButton> = None;
     for (pattern, name) in [
@@ -230,8 +243,8 @@ pub fn build(
             if b.is_active() {
                 let mut c = current.borrow().clone();
                 c.theme = theme;
-                mode.set_visible(theme == Theme::Glass);
-                patterns.set_visible(theme != Theme::Glass);
+                mode.set_visible(theme == Theme::Minimal);
+                patterns.set_visible(theme != Theme::Minimal);
                 let i = font_index(&c);
                 update(c);
                 syncing.set(true);
@@ -267,7 +280,7 @@ fn font_index(c: &Config) -> usize {
         Font::Mono => 2,
         Font::Grotesk => 1,
         Font::Theme => {
-            if c.theme == Theme::Glass {
+            if c.theme == Theme::Minimal {
                 1
             } else {
                 0

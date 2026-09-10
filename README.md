@@ -20,7 +20,7 @@ Stickies is in early development. All Notes now has a compact list, an editable 
 
 Notes save locally after 750 ms of quiet time. Failed saves block closing or replacing an editor. Always open disables the default two-minute inactivity timeout; pinning controls note order. Checklist markers, bullets, numbered lists, and completed-line strike-through work in the plain-text editor.
 
-The UI is awaiting manual design review and compositor checks. Glass currently provides translucency without verified background blur. DND integration currently watches Omarchy shell state. Other desktop compatibility is unverified.
+The UI is awaiting manual design review and compositor checks. Minimal has fully opaque light and dark modes with no compositor blur dependency. Saved Glass preferences remain compatible. DND integration currently watches Omarchy shell state. Other desktop compatibility is unverified.
 New databases start empty. Use `+` at the edge to create your first note. Existing databases retain their notes, including any examples created by earlier prototypes.
 
 Remaining work includes UI refinement, desktop verification, multi-monitor support, Markdown export, and packaging.

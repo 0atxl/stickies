@@ -74,7 +74,7 @@ pub fn dark(config: &Config) -> bool {
 
 pub fn apply_note_font(provider: &gtk::CssProvider, config: &Config) {
     let font = match config.font {
-        Font::Theme if config.theme != Theme::Glass => "'Virgil 3 YOFF', cursive",
+        Font::Theme if config.theme != Theme::Minimal => "'Virgil 3 YOFF', cursive",
         Font::Theme | Font::Grotesk => "Inter, sans-serif",
         Font::Mono => "'JetBrains Mono', monospace",
         Font::Handwritten => "'Virgil 3 YOFF', cursive",
@@ -85,20 +85,20 @@ pub fn apply_note_font(provider: &gtk::CssProvider, config: &Config) {
 }
 
 pub fn apply(provider: &gtk::CssProvider, config: &Config) {
-    let is_dark = config.theme == Theme::Glass && dark(config);
+    let is_dark = config.theme == Theme::Minimal && dark(config);
     let (bg, fg, muted, line) = if is_dark {
         ("#22252c", "#f0f0ee", "#afb3ba", "#454953")
     } else {
-        ("#faf8f2", "#302f2b", "#8a867d", "#e4dfd5")
+        ("#f8f7f3", "#2d2c29", "#7d7971", "#e3e0d8")
     };
     let font = match config.font {
-        Font::Theme if config.theme != Theme::Glass => "'Virgil 3 YOFF', cursive",
+        Font::Theme if config.theme != Theme::Minimal => "'Virgil 3 YOFF', cursive",
         Font::Theme | Font::Grotesk => "Inter, sans-serif",
         Font::Mono => "'JetBrains Mono', monospace",
         Font::Handwritten => "'Virgil 3 YOFF', cursive",
     };
     let tab_colors = if config.theme == Theme::Playful {
-        ".note-tab.note-yellow { background: #ffe691; } .note-tab.note-blue { background: #b8d9f5; } .note-tab.note-purple { background: #e0c7f5; } .note-tab.note-green { background: #c4e6b8; }"
+        ".note-tab.note-yellow { background: #faf0bd; } .note-tab.note-blue { background: #b8d9f5; } .note-tab.note-purple { background: #e0c7f5; } .note-tab.note-green { background: #c5ebdc; }"
     } else {
         ""
     };
@@ -166,44 +166,66 @@ pub fn paper_background(
         let w = f64::from(width - 16).max(1.);
         let h = f64::from(height - 16).max(1.);
         cr.translate(8., 8.);
-        let shape = if config.theme == Theme::Glass {
+        let shape = if config.theme == Theme::Minimal {
             Shape::Square
         } else {
             config.shape
         };
         let radius = match config.theme {
-            Theme::Glass => 0.,
+            Theme::Minimal => 0.,
             Theme::Paper => 10.,
-            Theme::Playful => 9.,
+            Theme::Playful => 16.,
         };
-        for offset in (1..=5).rev() {
+        for offset in (1..=if config.theme == Theme::Playful { 0 } else { 5 }).rev() {
             let _ = cr.save();
             cr.translate(0., f64::from(offset));
-            sheet_path(cr, w, h, shape, radius);
-            cr.set_source_rgba(0.25, 0.22, 0.16, 0.018);
+            sheet_path(cr, w, h, shape, radius, config.theme == Theme::Playful);
+            cr.set_source_rgba(
+                0.16,
+                0.18,
+                0.22,
+                if config.theme == Theme::Paper {
+                    0.032
+                } else {
+                    0.018
+                },
+            );
             let _ = cr.fill();
             let _ = cr.restore();
         }
-        sheet_path(cr, w, h, shape, radius);
+        if config.theme == Theme::Playful {
+            let _ = cr.save();
+            cr.translate(3., 4.);
+            sheet_path(cr, w, h, shape, radius, config.theme == Theme::Playful);
+            cr.set_source_rgba(0.16, 0.15, 0.14, 0.85);
+            let _ = cr.fill();
+            let _ = cr.restore();
+        }
+        sheet_path(cr, w, h, shape, radius, config.theme == Theme::Playful);
         let (r, g, b, a) = match config.theme {
-            Theme::Glass if dark(&config) => (0.12, 0.14, 0.17, 0.94),
-            Theme::Glass => (0.97, 0.98, 0.99, 0.93),
+            Theme::Minimal if dark(&config) => (0.14, 0.16, 0.19, 1.),
+            Theme::Minimal => (0.97, 0.98, 0.99, 1.),
             Theme::Paper if config.white_paper => (1., 1., 1., 1.),
-            Theme::Paper => (0.965, 0.937, 0.859, 1.),
+            Theme::Paper => (0.98, 0.969, 0.93, 1.),
             Theme::Playful => match color.get() {
-                NoteColor::Yellow => (0.99, 0.91, 0.68, 1.),
-                NoteColor::Blue => (0.76, 0.86, 0.97, 1.),
-                NoteColor::Purple => (0.86, 0.78, 0.94, 1.),
-                NoteColor::Green => (0.69, 0.87, 0.77, 1.),
+                NoteColor::Yellow => (0.98, 0.93, 0.74, 1.),
+                NoteColor::Blue => (0.71, 0.85, 1., 1.),
+                NoteColor::Purple => (0.86, 0.80, 0.94, 1.),
+                NoteColor::Green => (0.65, 0.96, 0.86, 1.),
             },
         };
         cr.set_source_rgba(r, g, b, a);
         let _ = cr.fill_preserve();
-        cr.set_source_rgba(0.30, 0.27, 0.20, 0.18);
-        cr.set_line_width(0.7);
+        if config.theme == Theme::Playful {
+            cr.set_source_rgb(0.16, 0.15, 0.14);
+            cr.set_line_width(2.);
+        } else {
+            cr.set_source_rgba(0.22, 0.24, 0.27, 0.16);
+            cr.set_line_width(0.7);
+        }
         let _ = cr.stroke_preserve();
         cr.clip();
-        if config.theme != Theme::Glass {
+        if config.theme != Theme::Minimal {
             cr.set_source_rgba(0.25, 0.27, 0.32, 0.07);
             cr.set_line_width(0.7);
             match config.paper {
@@ -231,7 +253,7 @@ pub fn paper_background(
                 }
             }
         }
-        if config.theme != Theme::Paper {
+        if config.theme == Theme::Minimal {
             let (r, g, b) = match color.get() {
                 NoteColor::Yellow => (0.79, 0.60, 0.20),
                 NoteColor::Blue => (0.39, 0.61, 0.82),
@@ -239,14 +261,14 @@ pub fn paper_background(
                 NoteColor::Green => (0.45, 0.65, 0.51),
             };
             cr.set_source_rgb(r, g, b);
-            cr.rectangle(0., 0., 3., h);
+            cr.rectangle(0., 0., w, 2.);
             let _ = cr.fill();
         }
     });
     area
 }
 
-fn sheet_path(cr: &gtk::cairo::Context, w: f64, h: f64, shape: Shape, radius: f64) {
+fn sheet_path(cr: &gtk::cairo::Context, w: f64, h: f64, shape: Shape, radius: f64, playful: bool) {
     cr.new_path();
     cr.move_to(radius, 0.);
     cr.line_to(w - radius, 0.);
@@ -258,15 +280,25 @@ fn sheet_path(cr: &gtk::cairo::Context, w: f64, h: f64, shape: Shape, radius: f6
         cr.curve_to(0., h, 0., h, 0., h - radius);
     } else {
         cr.line_to(w, h - 4.);
-        let count = (w / 12.).ceil() as usize;
+        let step = if playful { 36. } else { 12. };
+        let count = (w / step).ceil() as usize;
         for i in (0..count).rev() {
-            let x = (i as f64 * 12.).min(w);
-            let depth = if shape == Shape::Ticket {
-                3.
+            let x = (i as f64 * step).min(w);
+            let depth = if playful {
+                5.
+            } else if shape == Shape::Ticket {
+                1. + ((i * 7) % 5) as f64 * 0.35
             } else {
-                2. + ((i * 7) % 5) as f64
+                1.5 + ((i * 7) % 5) as f64 * 0.5
             };
-            cr.curve_to(x + 8., h - 4., x + 6., h - 4. + depth, x, h - 4.);
+            cr.curve_to(
+                x + step * 0.67,
+                h - 4.,
+                x + step * 0.5,
+                h - 4. + depth,
+                x,
+                h - 4.,
+            );
         }
     }
     cr.line_to(0., radius);
