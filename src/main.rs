@@ -49,7 +49,6 @@ struct Ui {
     docked: RefCell<Option<Rc<editor::Editor>>>,
     deck: RefCell<AppState>,
     separate: RefCell<HashMap<NoteId, SeparateNote>>,
-    reusable: Cell<Option<NoteId>>,
     manager: RefCell<Option<manager::ManagerWindow>>,
     revealed: Cell<bool>,
     generation: Cell<u64>,
@@ -297,7 +296,7 @@ impl Ui {
         let weak = Rc::downgrade(self);
         editor.separate.connect_clicked(move |_| {
             if let Some(ui) = weak.upgrade() {
-                ui.open_separate(id, true);
+                ui.open_separate(id);
             }
         });
         Some(editor)
@@ -343,7 +342,7 @@ impl Ui {
         }
         true
     }
-    fn open_separate(self: &Rc<Self>, id: NoteId, another: bool) {
+    fn open_separate(self: &Rc<Self>, id: NoteId) {
         if let Some(note) = self.separate.borrow().get(&id) {
             note.window.present();
             return;
@@ -352,49 +351,14 @@ impl Ui {
         if is_docked && !self.close_docked() {
             return;
         }
-        if !another && let Some(previous) = self.reusable.get() {
-            let window = self
-                .separate
-                .borrow()
-                .get(&previous)
-                .map(|n| n.window.clone());
-            let old_editor = self
-                .separate
-                .borrow()
-                .get(&previous)
-                .map(|n| n.editor.clone());
-            if let (Some(window), Some(old_editor)) = (window, old_editor) {
-                if !old_editor.flush() {
-                    return;
-                }
-                let Some(editor) = self.new_editor(id, true) else {
-                    return;
-                };
-                old_editor.stop();
-                self.separate.borrow_mut().remove(&previous);
-                window.set_child(Some(&editor.root));
-                window.set_title(Some("Stickies · Note"));
-                self.separate.borrow_mut().insert(
-                    id,
-                    SeparateNote {
-                        window: window.clone(),
-                        editor: editor.clone(),
-                    },
-                );
-                self.reusable.set(Some(id));
-                window.present();
-                editor.body.grab_focus();
-                return;
-            }
-        }
         let Some(editor) = self.new_editor(id, true) else {
             return;
         };
         let window = gtk::ApplicationWindow::builder()
             .application(&self.application)
             .title("Stickies · Note")
-            .default_width(400)
-            .default_height(420)
+            .default_width(editor::WIDTH)
+            .default_height(editor::HEIGHT)
             .decorated(false)
             .resizable(false)
             .build();
@@ -418,9 +382,6 @@ impl Ui {
                         editor.stop();
                     }
                     ui.separate.borrow_mut().remove(&id);
-                    if ui.reusable.get() == Some(id) {
-                        ui.reusable.set(None);
-                    }
                 }
             }
             glib::Propagation::Proceed
@@ -445,9 +406,6 @@ impl Ui {
                 editor: editor.clone(),
             },
         );
-        if !another {
-            self.reusable.set(Some(id));
-        }
         window.present();
         editor.body.grab_focus();
     }
@@ -508,7 +466,7 @@ impl Ui {
                 }),
                 popout: Box::new(move |id| {
                     if let Some(ui) = edit.upgrade() {
-                        ui.open_separate(id, true);
+                        ui.open_separate(id);
                     }
                 }),
                 settings: Rc::new(move |config| {
@@ -637,7 +595,7 @@ impl Ui {
                 (20, 180)
             }
         } else if self.docked.borrow().is_some() {
-            (400, 420)
+            (editor::WIDTH, editor::HEIGHT)
         } else if matches!(edge, ScreenEdge::Top | ScreenEdge::Bottom) {
             (700, 190)
         } else {
@@ -772,7 +730,6 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
         docked: RefCell::new(None),
         deck: RefCell::new(AppState::new(Vec::new())),
         separate: RefCell::new(HashMap::new()),
-        reusable: Cell::new(None),
         manager: RefCell::new(None),
         revealed: Cell::new(false),
         generation: Cell::new(0),

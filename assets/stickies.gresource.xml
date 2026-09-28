@@ -13,16 +13,10 @@
   <file>icons/stickies-more-symbolic.svg</file>
   <file>icons/stickies-pin-symbolic.svg</file>
   <file>icons/stickies-popout-symbolic.svg</file>
-  <file>icons/stickies-stack-symbolic.svg</file>
   <file>icons/playful/archive.svg</file>
   <file>icons/playful/checklist.svg</file>
-  <file>icons/playful/checkmark.svg</file>
   <file>icons/playful/chevron-left.svg</file>
-  <file>icons/playful/chevron-right.svg</file>
   <file>icons/playful/close.svg</file>
-  <file>icons/playful/copy.svg</file>
-  <file>icons/playful/delete-trash.svg</file>
-  <file>icons/playful/handle-grip.svg</file>
   <file>icons/playful/infinity.svg</file>
   <file>icons/playful/more-dots.svg</file>
   <file>icons/playful/palette.svg</file>
@@ -30,9 +24,10 @@
   <file>icons/playful/pin.svg</file>
   <file>icons/playful/plus-new-note.svg</file>
   <file>icons/playful/pop-out-window.svg</file>
-  <file>icons/playful/search.svg</file>
   <file>icons/playful/settings-gear.svg</file>
   <file>icons/playful/sort.svg</file>
-  <file>icons/playful/tag-dot.svg</file>
 <file>icons/stickies-pin-filled-symbolic.svg</file>
+<file>icons/stickies-infinity-symbolic.svg</file>
+<file>icons/stickies-checklist-symbolic.svg</file>
+<file>icons/stickies-palette-symbolic.svg</file>
 </gresource></gresources>

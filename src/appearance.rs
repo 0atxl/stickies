@@ -114,23 +114,17 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .icon-control.note-purple {{ color: #ac83bf; }}
         .icon-control.note-green {{ color: #73a681; }}
         .metadata, .dim-label {{ color: {muted}; font-size: 11px; }}
-        .editor-card {{ padding: 24px 26px 30px; color: {fg}; }}
-        .editor-title {{ background: transparent; color: inherit; border: none; outline: none; box-shadow: none; font-family: {font}; font-size: {}px; font-weight: 400; padding: 0; min-width: 0; }}
-        .editor-body, .editor-body text {{ background: transparent; color: inherit; font-family: {font}; font-size: {}px; }}
+        .editor-title {{ background: transparent; color: inherit; border: none; outline: none; box-shadow: none; font-family: {font}; font-weight: 400; padding: 0; min-width: 0; }}
+        .editor-body, .editor-body text {{ background: transparent; color: inherit; font-family: {font}; }}
         .editor-body {{ caret-color: currentColor; }}
         .editor-card button {{ color: inherit; }}
-        .note-rail {{ background: {bg}; color: {fg}; border: 1px solid {line}; border-radius: 3px; padding: 4px 2px 8px; }}
-        .note-rail button {{ color: {fg}; }}
         .note-rail .icon-control {{ min-width: 22px; min-height: 22px; padding: 3px; }}
         .note-rail menubutton.icon-control {{ padding: 0; }}
         .note-rail .icon-control > button {{ min-width: 22px; min-height: 22px; padding: 3px; }}
-        .rail-grip {{ min-width: 3px; min-height: 24px; padding: 0; border: 1px solid {line}; border-radius: 3px; background: {bg}; box-shadow: none; }}
-        .rail-grip:hover {{ border-color: {muted}; }}
         .icon-control {{ background: transparent; border: none; box-shadow: none; min-width: 24px; min-height: 24px; padding: 5px; border-radius: 7px; }}
         .icon-control:hover {{ background: alpha(currentColor, 0.09); }}
         .icon-control:checked {{ background: alpha(currentColor, 0.17); }}
         .icon-control > button {{ background: transparent; border: none; box-shadow: none; color: inherit; }}
-        .note-rail popover label, .note-rail popover button {{ color: {fg}; }}
         .strip-control {{ background: {bg}; color: {fg}; border: 1px solid {line}; border-radius: 50%; padding: 5px; }}
         .note-tab {{ background: {bg}; color: {fg}; border: 1px solid {line}; border-left-width: 3px; border-radius: {radius}px; padding: 8px 12px; box-shadow: 0 3px 8px alpha(black, 0.12); }}
         .note-tab:hover {{ background: mix({bg}, {fg}, 0.08); }}
@@ -152,17 +146,53 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         scrollbar.horizontal, scrollbar.horizontal:hover {{ min-height: 6px; background: transparent; }}
         scrollbar.horizontal slider, scrollbar.horizontal:hover slider {{ min-height: 3px; min-width: 24px; margin: 1px 0; border: none; border-radius: 3px; }}
         .save-error {{ color: #b54343; font-size: 11px; }}
-    "#, config.font_size + 6, config.font_size + 8));
+        .individual {{ --note-ink: #2d2c29; --rail-bg: #fbf8f0; --rail-line: #e3e0d8; --rail-selected: #ece8df; }}
+        .individual.minimal {{ --note-ink: #292f36; --rail-bg: #f1f2f4; --rail-line: #cdd4db; --rail-selected: #d9e0e6; }}
+        .individual.minimal-dark {{ --note-ink: #edf1f5; --rail-bg: #23262b; --rail-line: #424a55; --rail-selected: #37414d; }}
+        .individual.playful {{ --note-ink: #292a2d; --rail-bg: #faf9fc; --rail-line: #e3e0d8; --rail-selected: #f7e5ed; }}
+        .individual .editor-card {{ color: var(--note-ink); padding: 26px 20px 28px 32px; }}
+        .individual .editor-title {{ font-size: 23px; }}
+        .individual.minimal .editor-title {{ font-size: 20px; font-weight: 600; }}
+        .individual .editor-body, .individual .editor-body text {{ font-size: 21px; }}
+        .individual .note-rail {{ background: var(--rail-bg); color: var(--note-ink); border: 1px solid var(--rail-line); border-radius: 6px; padding: 4px 2px; box-shadow: 0 3px 6px alpha(black, 0.12); }}
+        .individual .note-rail button, .individual .note-rail popover button, .individual .note-rail popover label {{ color: var(--note-ink); }}
+        .individual .note-rail .icon-control:checked {{ background: var(--rail-selected); }}
+        .individual.playful .note-rail .icon-control:checked {{ background: #f5a4c7; color: #292a2d; }}
+        .individual .note-rail popover contents {{ background: var(--rail-bg); color: var(--note-ink); border: 1px solid var(--rail-line); padding: 8px; }}
+        .individual .note-rail .color-swatch {{ min-width: 26px; min-height: 26px; padding: 0; border-radius: 50%; color: #23262b; border: 2px solid transparent; box-shadow: none; }}
+        .individual .note-rail .color-swatch:checked {{ border-color: var(--note-ink); }}
+        .individual .note-rail .color-swatch.note-yellow {{ background: #d98c2b; }}
+        .individual .note-rail .color-swatch.note-blue {{ background: #5b8def; }}
+        .individual .note-rail .color-swatch.note-purple {{ background: #a98fd1; }}
+        .individual .note-rail .color-swatch.note-green {{ background: #6fae68; }}
+        .individual .note-rail dropdown button {{ background: var(--rail-selected); color: var(--note-ink); border: 1px solid var(--rail-line); box-shadow: none; font-size: 12px; min-height: 24px; padding: 4px 8px; }}
+        .individual .rail-grip {{ padding: 0; box-shadow: none; background: transparent; border: none; min-width: 24px; min-height: 32px; }}
+        .individual .rail-grip-mark {{ background: #a5a7a7; min-width: 3px; min-height: 24px; border-radius: 2px; }}
+        .individual .rail-grip:hover .rail-grip-mark {{ background: var(--note-ink); }}
+        .individual.minimal .note-rail, .individual.minimal .icon-control {{ border-radius: 0; }}
+        .inline-check {{ margin-right: 8px; color: inherit; }}
+        .inline-check check {{ color: inherit; min-width: 16px; min-height: 16px; border-radius: 3px; border: 1px solid currentColor; background: transparent; box-shadow: none; }}
+        .inline-check check:checked {{ background: #30353b; border-color: #30353b; color: white; }}
+        .individual.minimal-dark .inline-check check:checked, .management.minimal-dark .inline-check check:checked {{ background: #edf1f5; border-color: #edf1f5; color: #23262b; }}
+        .individual .note-save {{ color: var(--note-ink); font-family: Inter; font-size: 16px; min-width: 18px; }}
+        @keyframes note-saving {{ 0%, 100% {{ opacity: .25; }} 50% {{ opacity: 1; }} }}
+        .individual .saving-motion .note-save-dot {{ animation: note-saving 900ms ease-in-out infinite; }}
+        .individual .saving-motion .dot-1 {{ animation-delay: 150ms; }}
+        .individual .saving-motion .dot-2 {{ animation-delay: 300ms; }}
+
+    "#));
 }
 
 /// Draw only the paper decoration; text and controls remain native GTK widgets.
 pub fn paper_background(
     config: Rc<RefCell<Config>>,
     color: Rc<std::cell::Cell<NoteColor>>,
+    seed: Rc<std::cell::Cell<u64>>,
 ) -> gtk::DrawingArea {
     let area = gtk::DrawingArea::new();
-    area.set_draw_func(move |_, cr, width, height| {
+    area.set_draw_func(move |area, cr, width, height| {
         let config = config.borrow();
+        let individual = area.has_css_class("individual-sheet");
         let w = f64::from(width - 16).max(1.);
         let h = f64::from(height - 16).max(1.);
         cr.translate(8., 8.);
@@ -173,13 +203,37 @@ pub fn paper_background(
         };
         let radius = match config.theme {
             Theme::Minimal => 0.,
+            Theme::Paper if individual => 24.,
             Theme::Paper => 10.,
+            Theme::Playful if individual => 24.,
             Theme::Playful => 16.,
         };
-        for offset in (1..=if config.theme == Theme::Playful { 0 } else { 5 }).rev() {
+        let radius = (
+            radius,
+            if config.theme == Theme::Paper && individual {
+                0.
+            } else {
+                radius
+            },
+        );
+        for offset in (1..=if config.theme == Theme::Playful && !individual {
+            0
+        } else {
+            5
+        })
+            .rev()
+        {
             let _ = cr.save();
             cr.translate(0., f64::from(offset));
-            sheet_path(cr, w, h, shape, radius, config.theme == Theme::Playful);
+            sheet_path(
+                cr,
+                w,
+                h,
+                shape,
+                radius,
+                config.theme == Theme::Playful,
+                seed.get(),
+            );
             cr.set_source_rgba(
                 0.16,
                 0.18,
@@ -193,24 +247,46 @@ pub fn paper_background(
             let _ = cr.fill();
             let _ = cr.restore();
         }
-        if config.theme == Theme::Playful {
+        if config.theme == Theme::Playful && !individual {
             let _ = cr.save();
             cr.translate(3., 4.);
-            sheet_path(cr, w, h, shape, radius, config.theme == Theme::Playful);
+            sheet_path(
+                cr,
+                w,
+                h,
+                shape,
+                radius,
+                config.theme == Theme::Playful,
+                seed.get(),
+            );
             cr.set_source_rgba(0.16, 0.15, 0.14, 0.85);
             let _ = cr.fill();
             let _ = cr.restore();
         }
-        sheet_path(cr, w, h, shape, radius, config.theme == Theme::Playful);
+        sheet_path(
+            cr,
+            w,
+            h,
+            shape,
+            radius,
+            config.theme == Theme::Playful,
+            seed.get(),
+        );
         let (r, g, b, a) = match config.theme {
+            Theme::Minimal if individual && dark(&config) => {
+                (38. / 255., 42. / 255., 45. / 255., 1.)
+            }
+            Theme::Minimal if individual => (238. / 255., 240. / 255., 243. / 255., 1.),
             Theme::Minimal if dark(&config) => (0.14, 0.16, 0.19, 1.),
             Theme::Minimal => (0.97, 0.98, 0.99, 1.),
             Theme::Paper if config.white_paper => (1., 1., 1., 1.),
-            Theme::Paper => (0.98, 0.969, 0.93, 1.),
+            Theme::Paper if individual => (248. / 255., 241. / 255., 222. / 255., 1.),
+            Theme::Paper => (246. / 255., 239. / 255., 219. / 255., 1.),
             Theme::Playful => match color.get() {
                 NoteColor::Yellow => (0.98, 0.93, 0.74, 1.),
                 NoteColor::Blue => (0.71, 0.85, 1., 1.),
                 NoteColor::Purple => (0.86, 0.80, 0.94, 1.),
+                NoteColor::Green if individual => (0.81, 0.97, 0.85, 1.),
                 NoteColor::Green => (0.65, 0.96, 0.86, 1.),
             },
         };
@@ -218,7 +294,7 @@ pub fn paper_background(
         let _ = cr.fill_preserve();
         if config.theme == Theme::Playful {
             cr.set_source_rgb(0.16, 0.15, 0.14);
-            cr.set_line_width(2.);
+            cr.set_line_width(if individual { 2.5 } else { 2. });
         } else {
             cr.set_source_rgba(0.22, 0.24, 0.27, 0.16);
             cr.set_line_width(0.7);
@@ -256,54 +332,112 @@ pub fn paper_background(
         if config.theme == Theme::Minimal {
             let (r, g, b) = match color.get() {
                 NoteColor::Yellow => (0.79, 0.60, 0.20),
+                NoteColor::Blue if individual => (0.24, 0.62, 0.91),
                 NoteColor::Blue => (0.39, 0.61, 0.82),
                 NoteColor::Purple => (0.67, 0.51, 0.75),
                 NoteColor::Green => (0.45, 0.65, 0.51),
             };
             cr.set_source_rgb(r, g, b);
-            cr.rectangle(0., 0., w, 2.);
+            cr.rectangle(0., 0., w, if individual { 3. } else { 2. });
             let _ = cr.fill();
         }
     });
     area
 }
 
-fn sheet_path(cr: &gtk::cairo::Context, w: f64, h: f64, shape: Shape, radius: f64, playful: bool) {
+fn sheet_path(
+    cr: &gtk::cairo::Context,
+    w: f64,
+    h: f64,
+    shape: Shape,
+    radius: (f64, f64),
+    playful: bool,
+    seed: u64,
+) {
+    let r = radius.0.min(w / 4.).min(h / 4.);
+    let bottom = radius.1.min(w / 4.).min(h / 4.);
     cr.new_path();
-    cr.move_to(radius, 0.);
-    cr.line_to(w - radius, 0.);
-    cr.curve_to(w, 0., w, 0., w, radius);
-    if shape == Shape::Square {
-        cr.line_to(w, h - radius);
-        cr.curve_to(w, h, w, h, w - radius, h);
-        cr.line_to(radius, h);
-        cr.curve_to(0., h, 0., h, 0., h - radius);
+    cr.move_to(r, 0.);
+    edge_path(cr, (r, 0.), (w - r, 0.), playful, false, seed ^ 11);
+    cr.curve_to(w, 0., w, 0., w, r);
+    edge_path(cr, (w, r), (w, h - bottom), playful, false, seed ^ 23);
+    cr.curve_to(w, h, w, h, w - bottom, h);
+    edge_path(
+        cr,
+        (w - bottom, h),
+        (bottom, h),
+        playful || shape != Shape::Square,
+        !playful,
+        seed ^ 37,
+    );
+    cr.curve_to(0., h, 0., h, 0., h - bottom);
+    edge_path(cr, (0., h - bottom), (0., r), playful, false, seed ^ 53);
+    cr.curve_to(0., 0., 0., 0., r, 0.);
+    cr.close_path();
+}
+
+fn edge_path(
+    cr: &gtk::cairo::Context,
+    from: (f64, f64),
+    to: (f64, f64),
+    wobble: bool,
+    torn: bool,
+    seed: u64,
+) {
+    if !wobble {
+        cr.line_to(to.0, to.1);
+        return;
+    }
+    let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+    let len = dx.hypot(dy);
+    if len < 1. {
+        cr.line_to(to.0, to.1);
+        return;
+    }
+    let step = if torn { 6. } else { 30. };
+    let amplitude = if torn { 2.6 } else { 2.3 };
+    let noise = |i: usize| {
+        let mut n = seed.wrapping_add((i as u64).wrapping_mul(0x9e3779b97f4a7c15));
+        n = (n ^ (n >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        n = (n ^ (n >> 27)).wrapping_mul(0x94d049bb133111eb);
+        ((n ^ (n >> 31)) as f64 / u64::MAX as f64 * 2. - 1.) * amplitude
+    };
+    let point = |t: f64, offset: f64| {
+        (
+            from.0 + dx / len * t - dy / len * offset,
+            from.1 + dy / len * t + dx / len * offset,
+        )
+    };
+    let mut points = vec![from];
+    for i in 1..=(len / step) as usize {
+        let t = i as f64 * step;
+        if t >= len {
+            break;
+        }
+        points.push(point(t, noise(i) * ((len - t) / step).min(1.)));
+    }
+    points.push(to);
+    if torn {
+        for &(x, y) in &points[1..] {
+            cr.line_to(x, y);
+        }
     } else {
-        cr.line_to(w, h - 4.);
-        let step = if playful { 36. } else { 12. };
-        let count = (w / step).ceil() as usize;
-        for i in (0..count).rev() {
-            let x = (i as f64 * step).min(w);
-            let depth = if playful {
-                5.
-            } else if shape == Shape::Ticket {
-                1. + ((i * 7) % 5) as f64 * 0.35
-            } else {
-                1.5 + ((i * 7) % 5) as f64 * 0.5
-            };
+        // Shared tangents at segment joins keep all four edges smooth.
+        for i in 0..points.len() - 1 {
+            let p0 = points[i.saturating_sub(1)];
+            let p1 = points[i];
+            let p2 = points[i + 1];
+            let p3 = points[(i + 2).min(points.len() - 1)];
             cr.curve_to(
-                x + step * 0.67,
-                h - 4.,
-                x + step * 0.5,
-                h - 4. + depth,
-                x,
-                h - 4.,
+                p1.0 + (p2.0 - p0.0) / 6.,
+                p1.1 + (p2.1 - p0.1) / 6.,
+                p2.0 - (p3.0 - p1.0) / 6.,
+                p2.1 - (p3.1 - p1.1) / 6.,
+                p2.0,
+                p2.1,
             );
         }
     }
-    cr.line_to(0., radius);
-    cr.curve_to(0., 0., 0., 0., radius, 0.);
-    cr.close_path();
 }
 
 pub fn animate_tab_on_hover(

@@ -107,7 +107,9 @@ pub struct Config {
     pub theme: Theme,
     pub appearance: Appearance,
     pub font: Font,
-    pub font_size: u32,
+    // Accept obsolete saved values, but no longer write this setting.
+    #[serde(rename = "font_size", skip_serializing)]
+    pub legacy_font_size: Option<u32>,
     pub paper: Paper,
     pub shape: Shape,
     pub white_paper: bool,
@@ -129,7 +131,7 @@ impl Default for Config {
             theme: Theme::Paper,
             appearance: Appearance::System,
             font: Font::Theme,
-            font_size: 16,
+            legacy_font_size: None,
             paper: Paper::Plain,
             shape: Shape::Ticket,
             white_paper: false,
@@ -179,11 +181,6 @@ impl Config {
         }
         if !matches!(self.visible_notes, 4 | 5) {
             return Err(ConfigError::InvalidValue("visible_notes must be 4 or 5"));
-        }
-        if !(12..=24).contains(&self.font_size) {
-            return Err(ConfigError::InvalidValue(
-                "font_size must be between 12 and 24",
-            ));
         }
         if !(30..=1800).contains(&self.inactivity_seconds) {
             return Err(ConfigError::InvalidValue(
@@ -280,12 +277,25 @@ mod tests {
     }
 
     #[test]
+    fn obsolete_font_size_loads_but_is_not_written_back() {
+        let config: Config =
+            toml::from_str("font_size = 18\nfont = 'mono'\nedge = 'left'").unwrap();
+        config.validate().unwrap();
+        assert_eq!(config.font, Font::Mono);
+        assert_eq!(config.edge, ScreenEdge::Left);
+        let saved = toml::to_string(&config).unwrap();
+        assert!(!saved.contains("font_size"));
+        let loaded: Config = toml::from_str(&saved).unwrap();
+        assert_eq!(loaded.font, Font::Mono);
+        assert_eq!(loaded.edge, ScreenEdge::Left);
+    }
+
+    #[test]
     fn ui_settings_validate_limits_and_round_trip() {
         let config = Config {
             theme: Theme::Paper,
             appearance: Appearance::Dark,
             font: Font::Handwritten,
-            font_size: 18,
             paper: Paper::Grid,
             shape: Shape::Ticket,
             visible_notes: 4,
@@ -298,10 +308,6 @@ mod tests {
         for invalid in [
             Config {
                 visible_notes: 6,
-                ..config.clone()
-            },
-            Config {
-                font_size: 0,
                 ..config.clone()
             },
             Config {

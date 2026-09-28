@@ -86,53 +86,53 @@ fn set_icon(image: &gtk::DrawingArea, path: &str) {
 }
 
 pub fn refresh_icons(widget: &gtk::Widget, playful: bool, filled_pins: bool) {
-    if let Ok(image) = widget.clone().downcast::<gtk::DrawingArea>() {
-        if let Some(name) = image.widget_name().strip_prefix("stickies-icon-") {
-            let filled = filled_pins
-                && name == "pin"
-                && image
-                    .parent()
-                    .and_downcast::<gtk::ToggleButton>()
-                    .is_some_and(|b| b.is_active());
-            let state = if playful {
-                if filled {
-                    "playful-filled"
-                } else {
-                    "playful-outline"
-                }
-            } else if filled {
-                "standard-filled"
+    if let Ok(image) = widget.clone().downcast::<gtk::DrawingArea>()
+        && let Some(name) = image.widget_name().strip_prefix("stickies-icon-")
+    {
+        let filled = filled_pins
+            && name == "pin"
+            && image
+                .parent()
+                .and_downcast::<gtk::ToggleButton>()
+                .is_some_and(|b| b.is_active());
+        let state = if playful {
+            if filled {
+                "playful-filled"
             } else {
-                "standard-icon"
-            };
-            if !image.has_css_class(state) {
-                let asset = match name {
-                    "chevron" => "chevron-left",
-                    "plus" => "plus-new-note",
-                    "settings" => "settings-gear",
-                    "popout" => "pop-out-window",
-                    "more" => "more-dots",
-                    "pin" if filled => "pin-filled",
-                    other => other,
-                };
-                let path = if playful {
-                    format!("/dev/stickies/Stickies/icons/playful/{asset}.svg")
-                } else if filled {
-                    "/dev/stickies/Stickies/icons/stickies-pin-filled-symbolic.svg".to_string()
-                } else {
-                    format!("/dev/stickies/Stickies/icons/stickies-{name}-symbolic.svg")
-                };
-                set_icon(&image, &path);
-                for class in [
-                    "playful-filled",
-                    "playful-outline",
-                    "standard-icon",
-                    "standard-filled",
-                ] {
-                    image.remove_css_class(class);
-                }
-                image.add_css_class(state);
+                "playful-outline"
             }
+        } else if filled {
+            "standard-filled"
+        } else {
+            "standard-icon"
+        };
+        if !image.has_css_class(state) {
+            let asset = match name {
+                "chevron" => "chevron-left",
+                "plus" => "plus-new-note",
+                "settings" => "settings-gear",
+                "popout" => "pop-out-window",
+                "more" => "more-dots",
+                "pin" if filled => "pin-filled",
+                other => other,
+            };
+            let path = if playful {
+                format!("/dev/stickies/Stickies/icons/playful/{asset}.svg")
+            } else if filled {
+                "/dev/stickies/Stickies/icons/stickies-pin-filled-symbolic.svg".to_string()
+            } else {
+                format!("/dev/stickies/Stickies/icons/stickies-{name}-symbolic.svg")
+            };
+            set_icon(&image, &path);
+            for class in [
+                "playful-filled",
+                "playful-outline",
+                "standard-icon",
+                "standard-filled",
+            ] {
+                image.remove_css_class(class);
+            }
+            image.add_css_class(state);
         }
     }
     let mut child = widget.first_child();

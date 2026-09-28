@@ -58,6 +58,7 @@ struct ManagerUi {
     toast: adw::ToastOverlay,
     resolved: Rc<RefCell<Config>>,
     color: Rc<Cell<NoteColor>>,
+    seed: Rc<Cell<u64>>,
     background: gtk::DrawingArea,
     font: gtk::CssProvider,
 }
@@ -184,6 +185,7 @@ impl ManagerUi {
                 };
                 self.title.set_buffer(&session.title);
                 self.body.set_buffer(Some(&session.body));
+                session.attach_view(&self.body);
                 let weak = Rc::downgrade(self);
                 self.subscription.replace(Some(session.subscribe(move || {
                     if let Some(ui) = weak.upgrade() {
@@ -349,6 +351,8 @@ impl ManagerUi {
                 .set_tooltip_text(Some("Restore this note to edit it"));
         }
         appearance::apply_note_font(&self.font, &self.resolved.borrow());
+        self.seed
+            .set(self.selected.get().map_or(0, |id| id.value()));
         self.background.queue_draw();
         ui_assets::refresh_icons(
             self.window.upcast_ref(),
@@ -542,7 +546,8 @@ pub fn build_window(
     editor.add_css_class("editor-region");
     let resolved = Rc::new(RefCell::new(config.borrow().clone()));
     let color = Rc::new(Cell::new(NoteColor::Yellow));
-    let background = appearance::paper_background(resolved.clone(), color.clone());
+    let seed = Rc::new(Cell::new(0));
+    let background = appearance::paper_background(resolved.clone(), color.clone(), seed.clone());
     let sheet = gtk::Overlay::new();
     sheet.set_child(Some(&background));
     sheet.set_vexpand(true);
@@ -554,6 +559,7 @@ pub fn build_window(
     title.set_width_chars(8);
     title.set_hexpand(true);
     let body = gtk::TextView::new();
+    crate::editor::connect_checklist_backspace(&body);
     body.add_css_class("inline-body");
     body.set_wrap_mode(gtk::WrapMode::WordChar);
     body.set_pixels_above_lines(3);
@@ -713,6 +719,7 @@ pub fn build_window(
         toast,
         resolved,
         color,
+        seed,
         background,
         font,
     });

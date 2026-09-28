@@ -1,8 +1,9 @@
 use crate::{
     app::{NoteColor, NoteId},
     appearance,
-    config::{Config, Font, Paper, Shape},
+    config::{Config, Font, Paper, Theme},
     note_session::NoteSession,
+    ui_assets,
 };
 use gtk::{glib, prelude::*};
 use std::{
@@ -10,6 +11,9 @@ use std::{
     rc::Rc,
     time::Duration,
 };
+
+pub const WIDTH: i32 = 352;
+pub const HEIGHT: i32 = 376;
 
 pub struct Editor {
     pub root: gtk::Overlay,
@@ -28,6 +32,11 @@ pub struct Editor {
     background: gtk::DrawingArea,
     color: Rc<Cell<NoteColor>>,
     status: gtk::Label,
+    save_indicator: gtk::Stack,
+    rail_reveal: gtk::Revealer,
+    pattern_choice: gtk::DropDown,
+    color_buttons: Vec<(gtk::ToggleButton, NoteColor)>,
+    color_label: gtk::Label,
     timeout: RefCell<Option<glib::SourceId>>,
     on_timeout: Box<dyn Fn()>,
     stopped: Cell<bool>,
@@ -41,16 +50,24 @@ impl Editor {
     ) -> Rc<Self> {
         let pinned = session.pinned();
         let root = gtk::Overlay::new();
-        root.set_size_request(400, 420);
+        root.set_size_request(WIDTH, HEIGHT);
+        root.set_halign(gtk::Align::Start);
+        root.set_valign(gtk::Align::Start);
+        root.add_css_class("individual");
         let color = Rc::new(Cell::new(session.color()));
         let style = session.style();
         let resolved = Rc::new(RefCell::new(style.resolve(&config.borrow())));
-        let background = appearance::paper_background(resolved.clone(), color.clone());
-        background.set_margin_start(36);
+        let background = appearance::paper_background(
+            resolved.clone(),
+            color.clone(),
+            Rc::new(Cell::new(session.id().value())),
+        );
+        background.set_margin_start(44);
+        background.add_css_class("individual-sheet");
         root.set_child(Some(&background));
         let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
         content.add_css_class("editor-card");
-        content.set_margin_start(36);
+        content.set_margin_start(44);
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         let title = gtk::Entry::new();
         title.add_css_class("editor-title");
@@ -62,17 +79,36 @@ impl Editor {
             "view-continuous-symbolic",
             "Always open · ignore inactivity timeout",
         );
-        keep.set_label("∞");
-        let close = appearance::icon("window-close-symbolic", "Close note · Escape");
+        keep.set_child(Some(&ui_assets::image("infinity")));
+        let close = ui_assets::icon("close", "Close note · Escape");
         header.append(&title);
+        let save_indicator = gtk::Stack::new();
+        save_indicator.set_transition_type(gtk::StackTransitionType::Crossfade);
+        save_indicator.set_transition_duration(140);
+        save_indicator.add_css_class("note-save");
+        let dots = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        for i in 0..3 {
+            let dot = gtk::Label::new(Some("·"));
+            dot.add_css_class("note-save-dot");
+            dot.add_css_class(&format!("dot-{i}"));
+            dots.append(&dot);
+        }
+        save_indicator.add_named(&dots, Some("saving"));
+        save_indicator.add_named(&gtk::Label::new(Some("✓")), Some("saved"));
+        save_indicator.add_named(&gtk::Label::new(Some("!")), Some("error"));
+        header.append(&save_indicator);
         header.append(&close);
         let body = gtk::TextView::with_buffer(&session.body);
         body.add_css_class("editor-body");
+        connect_checklist_backspace(&body);
         body.set_wrap_mode(gtk::WrapMode::WordChar);
-        body.set_top_margin(34);
+        body.set_top_margin(6);
         body.set_bottom_margin(8);
-        body.set_left_margin(4);
+        body.set_pixels_above_lines(4);
+        body.set_pixels_below_lines(4);
+        body.set_left_margin(0);
         body.set_right_margin(4);
+        session.attach_view(&body);
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::External)
@@ -80,20 +116,25 @@ impl Editor {
             .child(&body)
             .build();
         let pin = appearance::toggle("view-pin-symbolic", "Pin · show before unpinned notes");
+        pin.set_child(Some(&ui_assets::image("pin")));
         pin.set_active(pinned);
         let checklist = appearance::icon(
             "checkbox-checked-symbolic",
             "Checklist · toggle current item",
         );
+        checklist.set_child(Some(&ui_assets::image("checklist")));
         let bullet = appearance::icon("view-list-bullet-symbolic", "Bullet list");
         let numbered = appearance::icon("view-list-ordered-symbolic", "Numbered list");
-        let separate = appearance::icon("window-new-symbolic", "Open away from edge");
+        let separate = ui_assets::icon("popout", "Open away from edge");
         let palette = gtk::MenuButton::builder()
             .icon_name("applications-graphics-symbolic")
-            .tooltip_text("Note color")
+            .tooltip_text("Note appearance")
             .build();
         palette.add_css_class("icon-control");
+        palette.set_direction(gtk::ArrowType::Right);
+        palette.set_child(Some(&ui_assets::image("palette")));
         let popover = gtk::Popover::new();
+        popover.set_position(gtk::PositionType::Right);
         let swatches = gtk::Box::new(gtk::Orientation::Horizontal, 5);
         let mut color_buttons = Vec::new();
         for (color, label) in [
@@ -102,13 +143,19 @@ impl Editor {
             (NoteColor::Purple, "Lilac"),
             (NoteColor::Green, "Sage"),
         ] {
-            let button = appearance::icon("media-record-symbolic", label);
+            let button = gtk::ToggleButton::new();
+            button.add_css_class("color-swatch");
             button.add_css_class(appearance::color_class(color));
+            button.set_tooltip_text(Some(label));
+            button.set_label(if session.color() == color { "✓" } else { "" });
+            button.set_active(session.color() == color);
             swatches.append(&button);
             color_buttons.push((button, color));
         }
         let customization = gtk::Box::new(gtk::Orientation::Vertical, 8);
         customization.append(&gtk::Label::new(Some("This note")));
+        let color_label = gtk::Label::new(None);
+        customization.append(&color_label);
         customization.append(&swatches);
         let font_choice = gtk::DropDown::from_strings(&[
             "Default font",
@@ -130,30 +177,32 @@ impl Editor {
             "Ruled",
         ]);
         paper_choice.set_selected(style.paper.map_or(0, |paper| paper as u32 + 1));
-        let shape_choice = gtk::DropDown::from_strings(&[
-            "Default edge",
-            "Straight",
-            "Torn ticket",
-            "Uneven paper",
-        ]);
-        shape_choice.set_selected(style.shape.map_or(0, |shape| shape as u32 + 1));
         customization.append(&font_choice);
         customization.append(&paper_choice);
-        customization.append(&shape_choice);
         popover.set_child(Some(&customization));
         palette.set_popover(Some(&popover));
-        let rail = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        let rail = gtk::Box::new(gtk::Orientation::Vertical, 24);
         rail.add_css_class("note-rail");
-        let collapse = appearance::icon("pan-start-symbolic", "Collapse note menu");
+        let collapse = ui_assets::icon("chevron", "Collapse note menu");
         let more = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
             .tooltip_text("More note tools")
             .build();
         more.add_css_class("icon-control");
+        more.set_direction(gtk::ArrowType::Right);
+        more.set_child(Some(&ui_assets::image("more")));
         let more_popover = gtk::Popover::new();
+        more_popover.set_position(gtk::PositionType::Right);
         let more_tools = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        for button in [&bullet, &numbered, &separate] {
+        for (button, label) in [
+            (&bullet, "Bullet list"),
+            (&numbered, "Numbered list"),
+            (&separate, "Open away from edge"),
+        ] {
+            button.set_label(label);
             more_tools.append(button);
+            let menu = more_popover.clone();
+            button.connect_clicked(move |_| menu.popdown());
         }
         more_popover.set_child(Some(&more_tools));
         more.set_popover(Some(&more_popover));
@@ -173,14 +222,20 @@ impl Editor {
         rail_reveal.set_child(Some(&rail));
         rail_reveal.set_halign(gtk::Align::Start);
         rail_reveal.set_valign(gtk::Align::Start);
-        rail_reveal.set_margin_top(8);
+        rail_reveal.set_margin_top(12);
+        rail_reveal.set_margin_start(8);
         let grip = gtk::Button::new();
         grip.add_css_class("rail-grip");
         grip.set_tooltip_text(Some("Open note menu"));
         grip.set_halign(gtk::Align::Start);
         grip.set_valign(gtk::Align::Start);
-        grip.set_margin_start(30);
-        grip.set_margin_top(28);
+        let grip_mark = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        grip_mark.add_css_class("rail-grip-mark");
+        grip_mark.set_halign(gtk::Align::Center);
+        grip_mark.set_valign(gtk::Align::Center);
+        grip.set_child(Some(&grip_mark));
+        grip.set_margin_start(24);
+        grip.set_margin_top(18);
         let reveal = rail_reveal.clone();
         grip.connect_clicked(move |button| {
             reveal.set_reveal_child(true);
@@ -229,11 +284,16 @@ impl Editor {
             background,
             color,
             status,
+            save_indicator,
+            rail_reveal,
+            pattern_choice: paper_choice.clone(),
+            color_buttons,
+            color_label,
             timeout: RefCell::new(None),
             on_timeout: Box::new(on_timeout),
             stopped: Cell::new(false),
         });
-        for (choice, field) in [(&font_choice, 0), (&paper_choice, 1), (&shape_choice, 2)] {
+        for (choice, field) in [(&font_choice, 0), (&paper_choice, 1)] {
             let weak = Rc::downgrade(&editor);
             choice.connect_selected_notify(move |choice| {
                 if let Some(editor) = weak.upgrade() {
@@ -251,21 +311,13 @@ impl Editor {
                                 Some(Font::Handwritten),
                             ][selected]
                         }
-                        1 => {
+                        _ => {
                             style.paper = [
                                 None,
                                 Some(Paper::Plain),
                                 Some(Paper::Dots),
                                 Some(Paper::Grid),
                                 Some(Paper::Ruled),
-                            ][selected]
-                        }
-                        _ => {
-                            style.shape = [
-                                None,
-                                Some(Shape::Square),
-                                Some(Shape::Ticket),
-                                Some(Shape::Torn),
                             ][selected]
                         }
                     }
@@ -285,7 +337,6 @@ impl Editor {
                     _ => 0,
                 });
                 paper_choice.set_selected(style.paper.map_or(0, |p| p as u32 + 1));
-                shape_choice.set_selected(style.shape.map_or(0, |s| s as u32 + 1));
                 editor.syncing_pin.set(false);
                 editor.sync_pin();
                 editor.refresh_appearance();
@@ -317,7 +368,8 @@ impl Editor {
                 }
             });
         }
-        for (button, color) in color_buttons {
+        for (button, color) in &editor.color_buttons {
+            let color = *color;
             let weak = Rc::downgrade(&editor);
             let popover = popover.clone();
             button.connect_clicked(move |_| {
@@ -377,6 +429,7 @@ impl Editor {
             });
         }
         editor.root.add_controller(scrolling);
+        editor.refresh_appearance();
         editor.activity();
         editor
     }
@@ -407,7 +460,61 @@ impl Editor {
             .replace(self.session.style().resolve(&self.config.borrow()));
         appearance::apply_note_font(&self.font_provider, &self.resolved.borrow());
         self.color.set(self.session.color());
+        for (button, color) in &self.color_buttons {
+            let selected = *color == self.session.color();
+            button.set_active(selected);
+            button.set_label(if selected { "✓" } else { "" });
+        }
         self.background.queue_draw();
+        let config = self.resolved.borrow();
+        for (class, enabled) in [
+            ("minimal", config.theme == Theme::Minimal),
+            (
+                "minimal-dark",
+                config.theme == Theme::Minimal && appearance::dark(&config),
+            ),
+            ("playful", config.theme == Theme::Playful),
+        ] {
+            if enabled {
+                self.root.add_css_class(class);
+            } else {
+                self.root.remove_css_class(class);
+            }
+        }
+        self.color_label.set_text(match config.theme {
+            Theme::Paper => "Tag color in All Notes",
+            Theme::Minimal => "Top accent color",
+            Theme::Playful => "Note fill color",
+        });
+        self.pattern_choice
+            .set_visible(config.theme != Theme::Minimal);
+        self.rail_reveal
+            .set_transition_duration(if config.reduced_motion { 0 } else { 120 });
+        ui_assets::refresh_icons(self.root.upcast_ref(), config.theme == Theme::Playful, true);
+        let error = self.session.error();
+        self.save_indicator
+            .set_visible_child_name(if error.is_some() {
+                "error"
+            } else if self.session.is_dirty() {
+                "saving"
+            } else {
+                "saved"
+            });
+        self.save_indicator
+            .set_tooltip_text(Some(if error.is_some() {
+                "Could not save note"
+            } else if self.session.is_dirty() {
+                "Saving"
+            } else {
+                "Saved"
+            }));
+        if !config.reduced_motion
+            && gtk::Settings::default().is_some_and(|s| s.is_gtk_enable_animations())
+        {
+            self.save_indicator.add_css_class("saving-motion");
+        } else {
+            self.save_indicator.remove_css_class("saving-motion");
+        }
     }
     pub fn activity(self: &Rc<Self>) {
         if let Some(source) = self.timeout.borrow_mut().take() {
@@ -433,6 +540,31 @@ impl Editor {
     fn continue_list(&self) -> bool {
         continue_list(&self.body)
     }
+}
+
+pub fn connect_checklist_backspace(body: &gtk::TextView) {
+    body.connect_backspace(|body| {
+        let buffer = body.buffer();
+        if !body.is_editable() || buffer.has_selection() {
+            return;
+        }
+        let (mut start, _, text) = current_line(body);
+        let cursor = buffer.cursor_position() - start.offset();
+        let prefix_len = if start.child_anchor().is_some() { 7 } else { 6 };
+        if (text.starts_with("- [ ] ") || text.starts_with("- [x] "))
+            && (1..=prefix_len).contains(&cursor)
+        {
+            let mut end = start;
+            if end.child_anchor().is_some() {
+                end.forward_char();
+            }
+            end.forward_chars(6);
+            buffer.begin_user_action();
+            buffer.delete(&mut start, &mut end);
+            buffer.end_user_action();
+            body.stop_signal_emission_by_name("backspace");
+        }
+    });
 }
 
 fn current_line(body: &gtk::TextView) -> (gtk::TextIter, gtk::TextIter, String) {

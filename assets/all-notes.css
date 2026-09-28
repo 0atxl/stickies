@@ -1,5 +1,5 @@
 .management {
-  --app-bg: #f8f7f3; --ink: #2d2c29; --muted: #7d7971;
+  --app-bg: #fbf8f0; --ink: #2d2c29; --muted: #7d7971;
   --hairline: #e3e0d8; --selected: #ece8df; --focus: #9a876c;
   background: var(--app-bg); color: var(--ink); font-family: Inter, sans-serif;
   font-size: 13px;
@@ -47,7 +47,7 @@
 .management popover button:hover { background: var(--selected); }
 .management .appearance-panel { background: var(--app-bg); padding: 16px 14px; border-left: 1px solid var(--hairline); }
 .management button { font-weight: 400; }
-.management .appearance-panel, .management .sidebar-pane { color: var(--ink); }
+.management .appearance-panel { color: var(--ink); }
 .management label { color: inherit; }
 .management .row-snippet, .management .metadata, .management .save-state { color: var(--muted); }
 .management .setting-label { font-size: 13px; font-weight: 500; }
@@ -96,12 +96,12 @@
 
 /* Minimal uses opaque light and dark surfaces. */
 .management.minimal {
-  --app-bg: #e9edf0; --ink: #292f36; --muted: #646e79;
+  --app-bg: #f1f2f4; --ink: #292f36; --muted: #646e79;
   --hairline: #cdd4db; --selected: #d9e0e6; --focus: #657789;
   --panel-bg: #edf0f3; border-radius: 0;
 }
 .management.minimal-dark {
-  --app-bg: #20252c; --ink: #edf1f5; --muted: #aab4c0;
+  --app-bg: #23262b; --ink: #edf1f5; --muted: #aab4c0;
   --hairline: #424a55; --selected: #37414d; --focus: #acbac9;
   --panel-bg: #282f38;
 }

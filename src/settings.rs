@@ -83,8 +83,11 @@ pub fn build(
             ..config.clone()
         };
         let sample = Rc::new(RefCell::new(sample));
-        let paper =
-            appearance::paper_background(sample.clone(), Rc::new(Cell::new(NoteColor::Green)));
+        let paper = appearance::paper_background(
+            sample.clone(),
+            Rc::new(Cell::new(NoteColor::Green)),
+            Rc::new(Cell::new(1)),
+        );
         samples.borrow_mut().push((sample, paper.clone()));
         paper.set_size_request(50, 48);
         overlay.set_child(Some(&paper));
