@@ -76,7 +76,7 @@ impl Editor {
         let title = gtk::Entry::new();
         title.add_css_class("editor-title");
         title.set_hexpand(true);
-        title.set_width_chars(8);
+        title.set_width_chars(1);
         title.set_placeholder_text(Some("Untitled note"));
         title.set_buffer(&session.title);
         let keep = appearance::toggle(
@@ -137,6 +137,9 @@ impl Editor {
             "Square grid",
             "Ruled",
         ]);
+        paper_choice.set_tooltip_text(Some(
+            "Note canvas pattern; Default pattern follows Appearance",
+        ));
         paper_choice.set_selected(style.paper.map_or(0, |paper| paper as u32 + 1));
         let rail = gtk::Box::new(gtk::Orientation::Vertical, 8);
         rail.add_css_class("note-rail");
@@ -504,6 +507,13 @@ impl Editor {
         self.color.set(self.session.color());
         self.background.queue_draw();
         let config = self.resolved.borrow();
+        let (above, below) = match config.theme {
+            Theme::Paper => (1, 3),
+            Theme::Playful => (1, 3),
+            Theme::Minimal => (1, 3),
+        };
+        self.body.set_pixels_above_lines(above);
+        self.body.set_pixels_below_lines(below);
         for (class, enabled) in [
             ("minimal", config.theme == Theme::Minimal),
             (
@@ -518,8 +528,6 @@ impl Editor {
                 self.root.remove_css_class(class);
             }
         }
-        self.pattern_choice
-            .set_visible(config.theme != Theme::Minimal);
         ui_assets::refresh_icons(self.root.upcast_ref(), config.theme == Theme::Playful, true);
         let error = self.session.error();
         if *self.last_error.borrow() != error {

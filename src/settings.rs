@@ -2,7 +2,6 @@ use crate::{
     app::NoteColor,
     appearance,
     config::{Appearance, Config, Font, Paper, Shape, Theme},
-    ui_assets,
 };
 use gtk::prelude::*;
 use std::{
@@ -13,20 +12,9 @@ use std::{
 pub fn build(
     current: Rc<RefCell<Config>>,
     on_change: impl Fn(Config) -> Result<(), String> + 'static,
-    on_close: impl Fn() + 'static,
 ) -> gtk::ScrolledWindow {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 20);
     root.add_css_class("appearance-panel");
-    let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let title = gtk::Label::new(Some("Appearance"));
-    title.add_css_class("panel-title");
-    title.set_hexpand(true);
-    title.set_xalign(0.);
-    let close = ui_assets::icon("chevron", "Close Appearance");
-    close.connect_clicked(move |_| on_close());
-    header.append(&title);
-    header.append(&close);
-    root.append(&header);
     let error = gtk::Label::new(None);
     error.set_wrap(true);
     error.add_css_class("save-error");
@@ -171,8 +159,7 @@ pub fn build(
     }
     let patterns = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let pattern_section = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    section(&pattern_section, "Paper pattern", &patterns);
-    pattern_section.set_visible(config.theme != Theme::Minimal);
+    section(&pattern_section, "Canvas pattern", &patterns);
     root.append(&pattern_section);
     let mut group: Option<gtk::ToggleButton> = None;
     for (pattern, name) in [
@@ -239,7 +226,6 @@ pub fn build(
         let current = current.clone();
         let update = update.clone();
         let mode = mode.clone();
-        let patterns = pattern_section.clone();
         let syncing = syncing.clone();
         let fonts = font_buttons.clone();
         button.connect_toggled(move |b| {
@@ -247,7 +233,6 @@ pub fn build(
                 let mut c = current.borrow().clone();
                 c.theme = theme;
                 mode.set_visible(theme == Theme::Minimal);
-                patterns.set_visible(theme != Theme::Minimal);
                 let i = font_index(&c);
                 update(c);
                 syncing.set(true);

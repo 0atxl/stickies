@@ -1,0 +1,76 @@
+Size: ok
+
+Size: ok
+
+Snapshot paper-main: 720x540 mapped=true visible=true
+paper-main: 720x540
+Snapshot paper-note: 352x376 mapped=true visible=true
+paper-note: 352x376
+Snapshot paper-tools: 180x412 mapped=true visible=true
+paper-tools: 180x412
+Size: ok
+
+Size: ok
+
+Snapshot minimal-light-main: 720x540 mapped=true visible=true
+minimal-light-main: 720x540
+Snapshot minimal-light-note: 352x376 mapped=true visible=true
+minimal-light-note: 352x376
+Snapshot minimal-light-tools: 180x412 mapped=true visible=true
+minimal-light-tools: 180x412
+Size: ok
+
+Size: ok
+
+Snapshot minimal-dark-main: 720x540 mapped=true visible=true
+minimal-dark-main: 720x540
+Snapshot minimal-dark-note: 352x376 mapped=true visible=true
+minimal-dark-note: 352x376
+Snapshot minimal-dark-tools: 180x412 mapped=true visible=true
+minimal-dark-tools: 180x412
+Size: ok
+
+Size: ok
+
+Snapshot playful-main: 720x540 mapped=true visible=true
+playful-main: 720x540
+Snapshot playful-selected-hover: 720x540 mapped=true visible=true
+playful-selected-hover: 720x540
+Snapshot playful-long-selected: 720x540 mapped=true visible=true
+playful-long-selected: 720x540
+Snapshot playful-note: 352x376 mapped=true visible=true
+playful-note: 352x376
+Snapshot playful-tools: 180x412 mapped=true visible=true
+playful-tools: 180x412
+Size: ok
+
+Snapshot playful-minimum: 300x280 mapped=true visible=true
+playful-minimum: 300x280
+Size: ok
+
+Snapshot playful-main-tools: 263x487 mapped=true visible=true
+playful-main-tools: 263x487
+Font: Virgil 3 YOFF,cursive 14px, absolute=true
+Font: Virgil 3 YOFF,cursive 14px, absolute=true
+Font: Virgil 3 YOFF,cursive 17px, absolute=true
+Font: Virgil 3 YOFF,cursive 17px, absolute=true
+Font: Virgil 3 YOFF,cursive 20px, absolute=true
+Font: Virgil 3 YOFF,cursive 20px, absolute=true
+Font: Virgil 3 YOFF,cursive Bold 20px, absolute=true
+Font: Virgil 3 YOFF,cursive Bold 20px, absolute=true
+Playful shared S/M/L, weight, 16 colors with persistence, and three global fonts passed
+Size: ok
+
+Size: ok
+
+Snapshot playful-today-note: 352x376 mapped=true visible=true
+playful-today-note: 352x376
+Snapshot playful-today-tools: 180x412 mapped=true visible=true
+playful-today-tools: 180x412
+Size: ok
+
+Size: ok
+
+Snapshot playful-today-minimum: 300x280 mapped=true visible=true
+playful-today-minimum: 300x280
+Exact dimensions, selected reference content, tools preserving default/minimum note size passed

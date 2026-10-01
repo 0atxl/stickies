@@ -134,6 +134,10 @@ impl ManagerUi {
             self.list.append(&note_row(
                 note,
                 self.storage.is_archived(note.id).unwrap_or(false),
+                self.storage
+                    .note_dates(note.id)
+                    .ok()
+                    .map(|(_, updated)| updated),
             ));
         }
         self.notes.replace(notes);
@@ -260,6 +264,13 @@ impl ManagerUi {
     }
     fn sync_editor(&self) {
         let defaults = self.config.borrow().clone();
+        let (above, below) = match defaults.theme {
+            Theme::Paper => (1, 3),
+            Theme::Playful => (1, 3),
+            Theme::Minimal => (1, 3),
+        };
+        self.body.set_pixels_above_lines(above);
+        self.body.set_pixels_below_lines(below);
         if defaults.theme == Theme::Minimal {
             self.window.add_css_class("minimal");
         } else {
@@ -352,6 +363,14 @@ impl ManagerUi {
                         pin.set_visible(session.pinned());
                     }
                     let title = heading.first_child().and_downcast::<gtk::Label>().unwrap();
+                    if let Some(date) = title.next_sibling().and_downcast::<gtk::Label>() {
+                        date.set_text(&short_date(
+                            self.storage
+                                .note_dates(session.id())
+                                .ok()
+                                .map(|(_, updated)| updated),
+                        ));
+                    }
                     let live_title = session.title.text();
                     title.set_text(if live_title.is_empty() {
                         "Untitled note"
@@ -389,8 +408,6 @@ impl ManagerUi {
         self.controls.sync(&style, self.color.get(), defaults.theme);
         self.pattern_choice
             .set_selected(style.paper.map_or(0, |paper| paper as u32 + 1));
-        self.pattern_choice
-            .set_visible(defaults.theme != Theme::Minimal);
         self.edit_actions.set_sensitive(self.body.is_editable());
         self.controls.root.set_sensitive(self.body.is_editable());
         self.pattern_choice.set_sensitive(self.body.is_editable());
@@ -520,7 +537,7 @@ pub fn build_window(
         .application(application)
         .title("All Notes")
         .default_width(720)
-        .default_height(500)
+        .default_height(540)
         .width_request(680)
         .height_request(460)
         .build();
@@ -590,7 +607,6 @@ pub fn build_window(
     for (button, _) in &filters {
         filter_row.append(button);
     }
-    root.append(&filter_row);
     list_column.append(&scroll);
     content.append(&list_column);
     let pages = gtk::Stack::new();
@@ -686,6 +702,9 @@ pub fn build_window(
     let controls = NoteControls::new();
     let pattern_choice =
         gtk::DropDown::from_strings(&["Default pattern", "Plain", "Dots", "Square grid", "Ruled"]);
+    pattern_choice.set_tooltip_text(Some(
+        "Note canvas pattern; Default pattern follows Appearance",
+    ));
     let tools = gtk::Box::new(gtk::Orientation::Vertical, 8);
     tools.add_css_class("main-note-tools");
     let edit_actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
@@ -713,6 +732,7 @@ pub fn build_window(
     let tools_popover = gtk::Popover::new();
     tools_popover.set_child(Some(&tools_scroll));
     more.set_popover(Some(&tools_popover));
+    actions.add_css_class("note-actions");
     actions.append(&pin);
     actions.append(&popout);
     actions.append(&more);
@@ -741,21 +761,38 @@ pub fn build_window(
     drawer.set_max_sidebar_width(260.);
     drawer.set_sidebar_width_unit(adw::LengthUnit::Px);
     drawer.set_pin_sidebar(true);
-    drawer.set_content(Some(&content));
+    let workspace = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    workspace.append(&filter_row);
+    workspace.append(&content);
+    drawer.set_content(Some(&workspace));
     drawer.set_show_sidebar(false);
     drawer.set_vexpand(true);
-    let weak = drawer.downgrade();
+    let appearance_drawer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    appearance_drawer.add_css_class("appearance-drawer");
+    let appearance_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    appearance_header.add_css_class("appearance-header");
+    appearance_header.set_height_request(44);
+    let appearance_title = gtk::Label::new(Some("Appearance"));
+    appearance_title.set_xalign(0.);
+    appearance_title.set_hexpand(true);
+    appearance_header.append(&appearance_title);
+    appearance_drawer.append(&appearance_header);
     let change = callbacks.settings.clone();
-    let panel = crate::settings::build(
-        config.clone(),
-        move |c| change(c),
-        move || {
-            if let Some(d) = weak.upgrade() {
-                d.set_show_sidebar(false);
-            }
-        },
-    );
-    drawer.set_sidebar(Some(&panel));
+    let panel = crate::settings::build(config.clone(), move |c| change(c));
+    panel.set_vexpand(true);
+    appearance_drawer.append(&panel);
+    drawer.set_sidebar(Some(&appearance_drawer));
+    drawer.connect_show_sidebar_notify(|drawer| {
+        if drawer.shows_sidebar() && drawer.is_collapsed() {
+            // Allocate the native scrim again after it becomes visible, including without animation.
+            let weak = drawer.downgrade();
+            gtk::glib::idle_add_local_once(move || {
+                if let Some(drawer) = weak.upgrade() {
+                    drawer.queue_allocate();
+                }
+            });
+        }
+    });
     root.append(&drawer);
     let breakpoint =
         adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 979px").unwrap());
@@ -1035,7 +1072,7 @@ fn set_menu(menu: &gtk::MenuButton, buttons: &[&gtk::Button]) {
     popover.set_child(Some(&box_));
     menu.set_popover(Some(&popover));
 }
-fn note_row(note: &Note, archived: bool) -> gtk::ListBoxRow {
+fn note_row(note: &Note, archived: bool, updated: Option<i64>) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     appearance::set_color(&row, note.color);
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -1063,6 +1100,10 @@ fn note_row(note: &Note, archived: bool) -> gtk::ListBoxRow {
     let heading = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     title.set_hexpand(true);
     heading.append(&title);
+    let date = gtk::Label::new(Some(&short_date(updated)));
+    date.add_css_class("row-date");
+    date.set_tooltip_text(Some("Last updated"));
+    heading.append(&date);
     if archived {
         let badge = ui_assets::image("archive");
         badge.set_tooltip_text(Some("Archived"));
@@ -1078,4 +1119,12 @@ fn note_row(note: &Note, archived: bool) -> gtk::ListBoxRow {
     content.append(&text);
     row.set_child(Some(&content));
     row
+}
+
+fn short_date(millis: Option<i64>) -> String {
+    millis
+        .and_then(|ms| gtk::glib::DateTime::from_unix_local(ms / 1000).ok())
+        .and_then(|date| date.format("%b %-d").ok())
+        .map(|date| date.to_string())
+        .unwrap_or_default()
 }

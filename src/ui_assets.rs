@@ -72,7 +72,7 @@ fn set_icon(image: &gtk::DrawingArea, path: &str) {
         stride as i32,
     )
     .unwrap();
-    image.set_draw_func(move |widget, cr, _, _| {
+    image.set_draw_func(move |widget, cr, width, height| {
         let color = widget.style_context().color();
         cr.set_source_rgba(
             color.red().into(),
@@ -80,7 +80,12 @@ fn set_icon(image: &gtk::DrawingArea, path: &str) {
             color.blue().into(),
             color.alpha().into(),
         );
-        cr.scale(0.5, 0.5);
+        let side = f64::from(width.min(height));
+        cr.translate(
+            (f64::from(width) - side) / 2.,
+            (f64::from(height) - side) / 2.,
+        );
+        cr.scale(side / 36., side / 36.);
         let _ = cr.mask_surface(&mask, 0., 0.);
     });
 }

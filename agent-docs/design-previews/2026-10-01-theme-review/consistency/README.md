@@ -1,0 +1,15 @@
+# Cross-theme consistency and canvas-pattern review
+
+The user directly authorized correcting corner and line-spacing differences across themes, moving Appearance onto the filter row, and fixing existing dot/plain/square canvas patterns. This scope supersedes earlier differences only for these specific corrections. [Open the actual GTK review](preview.html). Screenshots are saved in each theme's separate consistency directory. Original references and previous reviews are preserved.
+
+Concrete causes were the 60px Minimal header versus 58px in Paper/Playful; differing 55/56/58px row content and divider treatment; Minimal's extra paragraph pixel; theme-only rounded segment interiors; Appearance's header being inside the body below the filter row; Minimal skipping pattern drawing entirely and hiding controls; and very faint pattern ink in light themes.
+
+Corrections use 58px header content, 55px row content, 5px gap before separate straight dividers, 1px above/3px below paragraphs, 8px controls and connected segment interiors, and 18px note corners. Paper's tear and Playful's seeded wave remain. The accepted 44px filter band, 24px pills, 10px top/bottom padding, 8px first-row gap and 240px sidebar remain. Theme colors, numeric typography and shadows are preserved.
+
+The Appearance header and close action are hosted by All Notes on the filter row; settings.rs retains the scrolling control body. The header is exactly 260px and aligns at x460 in a 720px window and x420 at the 680px minimum. Theme-specific padding was verified so the header does not shift in Paper or Light. This is a small relocation, not the separately planned Settings redesign.
+
+All themes now render the four existing patterns. Dark uses light ink; light themes use stronger dark ink, with 1px dots. Global Settings is labeled Canvas pattern and controls remain visible in Minimal. Both per-note pattern selectors remain available with tooltips explaining Default pattern. Existing override precedence and storage are preserved.
+
+Verification: formatting, 22 non-display tests, strict Clippy, release build, diff checks and GTK shared-editor regression pass. The disposable GTK helper selects actual Settings widgets, checks heading/header/row/paragraph/filter geometry, main 720x540/680x460 and note 352x376/300x280, tools preserving dimensions, selected Weekend Plans content, and long title/date rendering. All four global pattern choices persist and produce pairwise-different Cairo-only PNGs in both views. A reopened database retains a Grid note override; its rendered canvas stays identical after global Plain changes. Default clears the override and resumes global behavior. Final GTK logs have no warnings/errors.
+
+Remaining differences are intentional theme palettes, Inter/Virgil metrics, retained Paper tear/Playful outline, and native long-title scrolling at minimum size. Native pointer resizing, Escape, timers, edge anchoring and full milestone performance checks were not repeated. No desktop configuration changed. All changes remain under visual review; Minimal Dark is not approved. No commit or push.

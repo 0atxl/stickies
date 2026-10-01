@@ -1,0 +1,9 @@
+# Minimal Dark filter spacing correction
+
+The user authorized fixing the crowded filter band in one theme first and copying the verified spacing to the others. Minimal Dark was rendered and measured first. This Minimal Dark capture uses the copied 44px filter band with centered 24px pills, 10px above/below padding and an 8px divider-to-first-row gap. It changes only filter/list padding; typography, colors, selected fills, borders, icons and behavior remain theme-specific.
+
+[Open this theme's actual GTK captures](preview.html) or [the four-theme reference comparison](../../filter-spacing/preview.html). Screenshots use a disposable database/config/cache with matching Weekend Plans content, all six checklist items, five other entries, a long Project Ideas title and saved dates.
+
+GTK asserts exact spacing, 240px sidebar, All Notes 720x540 and 680x460, notes 352x376 and 300x280, matching selection and tools preserving both note dimensions. Hover uses a GTK state flag, not native pointer input. Formatting, 22 tests, strict Clippy, release build, diff and the GTK shared-editor regression pass. Default individual notes and tool captures are pixel-identical for every theme. Minimum note differences are confined to a Dark caret and a Light caret/scrollbar frame. No production code beyond assets/all-notes.css changed in this correction.
+
+The reference is a scaled visual guide. Header height, row height, theme typography, marker shapes and content stay at their prior theme values. The band now has the reference's fuller breathing room around a flat pill and a smaller first-row gap. Native pointer/Escape/timer checks were not repeated. No desktop configuration changed. Dark and this spacing correction remain under review. Existing Playful/Light approvals precede this requested spacing correction. No commit or push.

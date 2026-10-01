@@ -4,6 +4,9 @@ Started September 30, 2026; updated October 1, 2026. The references and initial 
 
 ## Sources and scope
 
+Playful, Minimal Light and Minimal Dark are visually approved. The user confirmed the review was already complete and explicitly requested commit and push before moving forward. This also approves the subsequent filter spacing, corner/paragraph consistency, canvas-pattern and unified Appearance corrections shown in the [final GTK gallery](design-previews/2026-10-01-theme-review/unified-appearance/preview.html). Include this implementation, documentation and saved previews in the checkpoint. This does not authorize starting the remaining Settings, edge or checklist stages. Native pointer/Escape/timer verification remains outstanding for the wider milestone. Earlier sections retain the historical approval sequence.
+
+
 The [September 30 reference set](design-references/2026-09-30/README.md) contains the original UI/UX document, nine images, and two SVG packs. The [October 1 update](design-references/2026-10-01/README.md) preserves the revised spec, Settings image and change report. Direct user decisions take precedence over conflicting reference text or example imagery. The reference update was documentation-only. The subsequent request authorizes completing the note controls. It does not authorize Settings, edge or checklist implementation, commit or push.
 
 Use the current Rust, GTK4/libadwaita, Layer Shell, SQLite, and shared `NoteSession` implementation. Preserve note data, live cross-view editing, autosave, failed-save retention, archive/restore, deletion Undo, and Copy text. Keep existing module responsibilities. No replacement editor, generic event system, new UI framework, or independent note buffers are needed.
@@ -14,7 +17,7 @@ Multi-monitor work, sync, custom/manual ordering, and release expansion remain l
 
 | Area | Intended behavior |
 |---|---|
-| All Notes window | Keep the compact 720x500 default and resizing. Retain the 240px list. The existing responsive drawer remains until the new Settings host and width are settled. |
+| All Notes window | Keep the compact 720x540 default and resizing. Retain the 240px list. The existing responsive drawer remains until the new Settings host and width are settled. |
 | Main note actions | Exactly three footer buttons: Pin, Pop out, and More. More contains checklist, text style, tag colors, and other existing note actions. |
 | Individual notes | Both docked and separate notes are resizable, with matching minimum sizes and a subtle hover-enhanced corner grip. Keep Close visible and long content inside a wrapping, vertically scrolling editor. |
 | Note toolbar | Hidden by default. A subtle opening control becomes clearer on hover; clicking opens a floating panel without changing note dimensions. Provide size, weight, and color controls directly in a compact layout based on `tools.png`. Keep the panel collapsible and accessible by keyboard. The revised spec formally confirms this arrangement. |
@@ -173,3 +176,72 @@ See the [controls verification and preview](design-previews/2026-10-01-note-cont
 ### Reference polish follow-up
 
 Implemented presentation polish on the existing controls and note drawings. Collection filters now span All Notes as in the reference, while the 720x500 default and 240px sidebar remain. Search, filters and tools use consistent rounded corners. No new controls or persistence changes were added. Text sizing and the separate Settings, checklist and edge-strip passes remain open. Preview review is still pending.
+
+### Focused Paper review
+
+Paper visual pass implemented at 720x500, with provisional 17px body and 30px title at Medium. Review the saved Paper comparison before applying these proportions to other themes. Checklist interaction behavior and Settings/edge work remain separate.
+
+Paper follow-up: approved 720x540 default, sidebar updated dates, slightly warmer window chrome and an irregular seeded tear. Minimum window and individual-note sizes remain unchanged.
+
+Paper spacing follow-up approved: keep the divider beneath the sidebar filters only, removing its continuation above the note preview, flatten filter pills to 24px, use 11px sidebar snippets and provisional 17px Medium note body text. Heading sizes remain unchanged.
+
+### One-theme approval cycles
+
+The current Playful implementation uses provisional 27/30/33px titles and 14/17/20px bodies, compact native checkboxes, pink theme selections, round sidebar dots, a smooth seeded dark outline and a stronger offset shadow. Shared drawing/font/line-spacing code contains separate theme choices; Paper and Minimal retain their previous values. No shared design-system refactor was introduced.
+
+Use the [Playful review record](design-previews/2026-10-01-theme-review/playful/README.md) for actual GTK dimensions, matching sample content, controls/font/persistence checks, regression renders and remaining differences. Existing tests, GTK shared-editor regression, formatting, strict Clippy, release build and diff checks pass. Native pointer/Escape/timer and full milestone performance checks remain pending.
+
+Playful is under review, with no final visual approval. Minimal Light and Minimal Dark are not started and not authorized. Stop after presenting Playful. Corrections remain in the same theme. Only explicit approval plus authorization for the next theme advances the cycle. Earlier all-theme plans do not override this rule. No commit or push is authorized.
+
+Playful sidebar correction: the user authorized the missing filter-band sidebar line and clearer highlight/divider separation. Implemented in Playful-only CSS, with straight separators outside rounded selected/hover fills and a 5px gap. See the [fresh review gallery](design-previews/2026-10-01-theme-review/playful/sidebar-polish/preview.html). Typography, controls and other themes remain unchanged. Verification passed; native pointer/Escape/timer checks were not repeated. Playful remains under review and neither Minimal theme is authorized. No commit or push.
+
+### Minimal Light approval cycle
+
+Playful is approved after its sidebar correction. The user authorized Minimal Light next, and that visual pass is implemented. Minimal Light has independently chosen provisional 25/28/31px titles and 14/17/20px bodies, a retained Inter default, compact native checkbox chrome, opaque white rounded notes, existing tag-colored top strips, a restrained shadow and blue tool selections. The compact sidebar keeps tag bars, saved dates, truncated long titles and separate straight dividers outside rounded highlights.
+
+See the [Minimal Light GTK review](design-previews/2026-10-01-theme-review/minimal-light/preview.html) and [verification record](design-previews/2026-10-01-theme-review/minimal-light/README.md). Shared typography/drawing/line-spacing changes have explicit Light-only branches; CSS excludes Minimal Dark. Paper, approved Playful and Dark were inspected for regressions. Formatting, 22 tests, strict Clippy, release build, the existing GTK regression, diff and disposable controls/font/dimension checks pass. Native pointer/Escape/timer checks remain unverified in this pass.
+
+Current status supersedes the historical approval notes above: Playful approved, Minimal Light under review, Minimal Dark not started and not authorized. Stop after presenting Light. No commit or push is authorized.
+
+
+### Minimal Dark approval cycle
+
+The user authorized Dark after reviewing Light. Dark now uses independently reviewed provisional 25/28/31px title and 14/17/20px body values, Inter by default, compact checkboxes and the same Minimal layout proportions. Its charcoal note, light border, restrained shadow, off-white ink, selected/hover fills and blue focus rings are scoped separately. Sidebar dividers stay outside rounded highlights; tag bars, dates and long-title truncation remain intact. Existing controls and behavior are reused.
+
+The [Dark GTK gallery](design-previews/2026-10-01-theme-review/minimal-dark/preview.html) includes original-reference comparisons, exact default/minimum dimensions, open tools, long sidebar titles and GTK hover/selection/focus/disabled examples. Formatting, 22 tests, Clippy, release build, GTK shared-editor regression, diff and disposable controls/font/persistence/dimension checks pass. Native pointer/Escape/timer checks were not repeated. Matched Paper/Playful/Light regression captures show preserved appearances, with only caret-frame differences for Paper/Playful. No shared design-system refactor was added.
+
+Current status supersedes historical entries: Playful approved, Minimal Light approved, Minimal Dark under review. Stop for Dark review. No commit or push is authorized.
+
+
+### Filter-band spacing correction across themes
+
+The user authorized fixing the short filter band and first-row gap in one theme first, then copying the verified behavior to all other themes. Minimal Dark was rendered/measured before copying. All four themes now have 10px above/below padding around their retained 24px pills, creating a 44px band, and an 8px divider-to-first-row gap. The sidebar stays 240px. Only eight theme-scoped CSS spacing declarations changed. Theme-specific colors, typography, icons, borders, selected fills, row sizes and behavior remain intact.
+
+The [four-theme GTK reference comparison](design-previews/2026-10-01-theme-review/filter-spacing/preview.html) links actual captures saved separately per theme. Default/minimum main windows, default/minimum individual notes, tools, hover and long title/date previews pass dimension/content/spacing assertions. Formatting, 22 tests, Clippy, release build, diff and GTK shared-editor regression pass. Native pointer/Escape/timer checks were not repeated. Default individual notes and tools remain pixel-identical; minimum-note variations are caret/scrollbar frames.
+
+This spacing-only request supersedes the earlier restriction for these two values. Playful and Light retain their prior appearance approvals; the requested correction and Dark remain under visual review. No commit or push.
+
+
+### Requested consistency and canvas-pattern correction
+
+The user authorized cross-theme corner/spacing fixes, Appearance on the filter row and dot/plain/square canvas choices working. Headers, rows, dividers, control corners and paragraph spacing now match across themes while retaining colors, font sizes, shadows and Paper/Playful silhouettes. Appearance's header and Close are hosted in the All Notes filter band, aligned with the existing 260px drawer at both window sizes. The settings builder retains its scrolling controls.
+
+Existing Plain/Dots/Grid/Ruled controls now draw in every theme, including Minimal, with visible dark/light ink. Controls are labeled Canvas pattern globally and remain available per note. Default pattern follows Appearance, while explicit overrides remain intact and persist. No note-session or storage change was needed. This is a targeted correction, not the pending Settings or checklist redesign.
+
+The [new GTK comparison](design-previews/2026-10-01-theme-review/consistency/preview.html) includes before/after, Appearance at default/minimum, pattern renders in both views, long sidebar titles/dates, individual default/minimum and open tools in separate theme directories. Formatting, 22 tests, strict Clippy, release build, diff and GTK shared-editor regression pass. GTK asserts geometry, dimensions, heading alignment, pairwise-distinct canvas drawings for all four persisted global choices, reopened note overrides and stable override rendering after global changes. Native pointer/Escape/timer checks were not repeated.
+
+Current status: requested corrections under visual review across all themes; Minimal Dark remains unapproved. Earlier Playful/Light approvals precede these corrections. No commit or push.
+
+
+### Unified Appearance animation and filter dimming
+
+The user authorized removing the Appearance back arrow and making its header/body appear as one panel, with filters dimming alongside notes. The header/body now share the existing native sidebar; filters/notes share its content area. This replaces the manual header visibility callback with native drawer behavior. A deferred allocation on opening keeps native dimming intact with reduced motion after wide-to-compact layout changes. Settings remains the toggle. Typography, palette, patterns and existing responsive wide behavior remain intact.
+
+The [fresh GTK gallery and native animation recording](design-previews/2026-10-01-theme-review/unified-appearance/preview.html) verify the four themes at default/minimum/wide sizes, scrolling, background filter modal hit testing, Settings toggling, individual-note sizes and tools. Opening/closing samples prove header/body move together while the filters stay stationary. Pixel comparisons confirm filter/note dimming in all themes with reduced motion; GTK also checks the native scrim size after responsive layout changes. Reduce motion is respected. Formatting, 22 tests, Clippy, release build, diff and GTK shared-editor regression pass. Native pointer/Escape/timer checks were not repeated.
+
+The correction remains under visual review; no theme approval is inferred. No commit or push.
+
+
+### Checkpoint approval
+
+On October 1, the user confirmed visual approval of the completed themes and corrections and explicitly requested commit and push before further work. That instruction supersedes pending-review and no-commit statements above for this checkpoint. No new implementation stage is started.

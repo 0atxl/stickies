@@ -1,0 +1,13 @@
+# Playful consistency and canvas-pattern correction
+
+The user authorized fixing cross-theme corner/line-spacing inconsistencies, moving Appearance onto the filter row, and fixing existing Plain/Dots/Square grid controls. [Review the actual GTK captures](preview.html), or [compare all themes](../../consistency/preview.html). This pass is under visual review. Dark has not been approved. Earlier Playful/Light approvals precede this correction.
+
+Headers use 58px content height, sidebar row content 55px with a separate 5px divider gap, and paragraph spacing is 1px above/3px below in both views. The approved 44px filter band, 24px pills, 10px above/below padding, 8px first-row gap and 240px sidebar remain. Control/group outer radii are 8px with connected segment interiors. Note corners use 18px; Paper's tear and Playful's seeded wave/outline remain. Theme colors, shadows, font families and numeric text sizes retain prior choices.
+
+Appearance's 260px header now occupies the same row as the filters and aligns with the drawer at both 720x540 and 680x460. The body scrolls independently beneath it. Existing show/close behavior is preserved.
+
+Minimal previously skipped drawing patterns and hid their controls. All themes now render existing Plain, Dots, Grid and Ruled choices, with more visible pattern ink and 1px dots. Minimal Dark uses light pattern ink. Global Settings is labeled Canvas pattern. Both per-note selectors remain available, and Default pattern follows Appearance. Explicit note overrides retain priority and persist. Tooltips explain that relationship. No existing user data or overrides were cleared.
+
+GTK verifies all four Settings patterns produce pairwise-different Cairo-only PNGs in both note views, config persistence, reopened note-style persistence, and identical override rendering when global Plain changes. It also verifies exact window/note default/minimum sizes, tools preserving dimensions, paragraph/row/filter values, matching selected content and Appearance header alignment. Formatting, 22 tests, strict Clippy, release build, diff checks and the existing GTK shared-editor regression pass. Final preview runs have no GTK warnings/errors.
+
+The before Settings comparison uses Paper to keep its initial selection fixture accurate; final Settings captures select each actual theme through its live controls. Pattern examples use all six Weekend Plans checklist items and fixed sidebar dates. Native pointer/Escape/timer checks were not repeated. No desktop configuration changed. No new design-system abstraction or Settings redesign was introduced. No commit or push.

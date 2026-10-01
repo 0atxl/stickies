@@ -78,17 +78,23 @@ pub fn apply_note_font(
         Font::Mono => "'JetBrains Mono', monospace",
         Font::Handwritten => "'Virgil 3 YOFF', cursive",
     };
-    // Provisional preview values. Medium preserves the current body size.
+    // Provisional preview values, reviewed separately for each theme.
     let adjustment = match style.text_size {
         crate::config::NoteTextSize::Small => -3,
         crate::config::NoteTextSize::Medium => 0,
         crate::config::NoteTextSize::Large => 3,
     };
-    let body_size = 21 + adjustment;
-    let title_size = if config.theme == Theme::Minimal {
-        20
-    } else {
-        23
+    let body_size = match config.theme {
+        Theme::Paper => 17,
+        Theme::Playful => 17,
+        Theme::Minimal if !dark(config) => 17,
+        Theme::Minimal => 17,
+    } + adjustment;
+    let title_size = match config.theme {
+        Theme::Paper => 30,
+        Theme::Minimal if !dark(config) => 28,
+        Theme::Minimal => 28,
+        Theme::Playful => 30,
     } + adjustment;
     let weight = match style.text_weight {
         crate::config::NoteTextWeight::Regular => 400,
@@ -189,15 +195,15 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .individual {{ --note-ink: #2d2c29; --rail-bg: #fbf8f0; --rail-line: #e3e0d8; --rail-selected: #ece8df; }}
         .individual.minimal {{ --note-ink: #292f36; --rail-bg: #ffffff; --rail-line: #cdd4db; --rail-selected: #dceaff; }}
         .individual.minimal-dark {{ --note-ink: #edf1f5; --rail-bg: #23262b; --rail-line: #424a55; --rail-selected: #37414d; }}
-        .individual.playful {{ --note-ink: #292a2d; --rail-bg: #faf9fc; --rail-line: #e3e0d8; --rail-selected: #f7e5ed; }}
+        .individual.playful {{ --note-ink: #202923; --rail-bg: #fffefe; --rail-line: #e6e1e5; --rail-selected: #ffe5ee; }}
         .individual .editor-card {{ color: var(--note-ink); padding: 26px 26px 28px 30px; }}
+        .individual .icon-control {{ border-radius: 8px; }}
         .individual .editor-title {{ font-size: 23px; }}
         .individual.minimal .editor-title {{ font-size: 20px; font-weight: 600; }}
         .individual .editor-body, .individual .editor-body text {{ font-size: 21px; }}
         .individual .note-rail {{ font-family: Inter, sans-serif; font-size: 12px; background: var(--rail-bg); color: var(--note-ink); border: 1px solid var(--rail-line); border-radius: 16px; padding: 12px; }}
         .individual .note-rail button, .individual .note-rail popover button, .individual .note-rail popover label {{ color: var(--note-ink); }}
         .individual .note-rail .icon-control:checked {{ background: var(--rail-selected); }}
-        .individual.playful .note-rail .icon-control:checked {{ background: #f5a4c7; color: #292a2d; }}
         .note-controls .text-controls {{ border: 1px solid var(--rail-line); border-radius: 8px; }}
         .note-controls .text-controls button {{ min-width: 0; min-height: 24px; padding: 3px 6px; border: 0; border-radius: 0; background: transparent; box-shadow: none; font-family: Inter, sans-serif; font-size: 12px; font-weight: 400; }}
         .note-controls .text-controls button:first-child {{ border-radius: 7px 0 0 7px; }}
@@ -205,7 +211,16 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .note-controls .text-controls button + button {{ border-left: 1px solid var(--rail-line); }}
         .note-controls .text-controls button:hover {{ background: var(--rail-selected); }}
         .note-controls .text-controls button:checked {{ background: var(--rail-selected); }}
-        .individual.playful .note-controls .text-controls button:checked {{ background: #f5a4c7; }}
+        .individual.playful .editor-card {{ padding: 26px 24px 28px; }}
+        .individual.playful .note-controls {{ --rail-line: #e6e1e5; --rail-selected: #ffe5ee; }}
+        .individual.playful .note-rail .icon-control:checked,
+        .individual.playful .note-controls .text-controls button:checked {{ background: #ffe5ee; color: #202923; box-shadow: inset 0 0 0 1px #ff4f91; }}
+        .individual.playful .note-controls .color-swatch:checked {{ outline-color: #ff4f91; }}
+        .individual.playful .note-controls button:focus-visible {{ outline: 2px solid #ff4f91; outline-offset: 2px; }}
+        .individual.playful .inline-check,
+        .management.playful .inline-check {{ min-height: 0; min-width: 0; padding: 0; margin: 0 8px 0 0; }}
+        .individual.playful .inline-check check,
+        .management.playful .inline-check check {{ min-width: 14px; min-height: 14px; padding: 0; margin: 0; -gtk-icon-size: 14px; border: 1.5px solid currentColor; border-radius: 3px; }}
         .individual .note-rail popover contents {{ background: var(--rail-bg); color: var(--note-ink); border: 1px solid var(--rail-line); padding: 8px; }}
         .individual .note-rail dropdown button {{ background: var(--rail-selected); color: var(--note-ink); border: 1px solid var(--rail-line); box-shadow: none; font-size: 12px; min-height: 24px; padding: 3px 6px; border-radius: 8px; }}
         .individual .note-tools contents {{ padding: 0; background: var(--rail-bg); border: none; border-radius: 16px; box-shadow: 0 4px 12px alpha(black, .15); }}
@@ -223,9 +238,38 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .note-controls {{ --note-ink: #2d2c29; --rail-line: #e3e0d8; --rail-selected: #ece8df; }}
         .individual.minimal .note-controls {{ --note-ink: #292f36; --rail-line: #cdd4db; --rail-selected: #dceaff; }}
         .individual.minimal-dark .note-controls {{ --note-ink: #edf1f5; --rail-line: #424a55; --rail-selected: #37414d; }}
+        .individual.minimal:not(.minimal-dark) {{ --note-ink: #252c34; --rail-bg: #ffffff; --rail-line: #dfe5ec; --rail-selected: #eaf3ff; }}
+        .individual.minimal:not(.minimal-dark) .editor-card {{ padding: 28px 24px 26px; }}
+        .individual.minimal:not(.minimal-dark) .note-controls {{ --note-ink: #252c34; --rail-line: #dfe5ec; --rail-selected: #eaf3ff; }}
+        .individual.minimal:not(.minimal-dark) .note-controls .text-controls button:checked {{ box-shadow: inset 0 0 0 1px #8ebeff; }}
+        .individual.minimal:not(.minimal-dark) .note-controls .color-swatch:checked {{ outline-color: #1687ff; }}
+        .individual.minimal:not(.minimal-dark) .note-controls button:focus-visible {{ outline: 2px solid #1687ff; outline-offset: 2px; }}
+        .individual.minimal:not(.minimal-dark) .inline-check,
+        .management.minimal:not(.minimal-dark) .inline-check {{ min-height: 0; min-width: 0; padding: 0; margin: 0 8px 0 0; }}
+        .individual.minimal:not(.minimal-dark) .inline-check check,
+        .management.minimal:not(.minimal-dark) .inline-check check {{ min-width: 14px; min-height: 14px; padding: 0; margin: 0; -gtk-icon-size: 14px; border: 1px solid currentColor; border-radius: 3px; }}
+        .individual.minimal-dark {{ --note-ink: #edf0f4; --rail-bg: #272c32; --rail-line: #414953; --rail-selected: #34465e; }}
+        .individual.minimal-dark .editor-card {{ padding: 28px 24px 26px; }}
+        .individual.minimal-dark .note-controls {{ --note-ink: #edf0f4; --rail-line: #414953; --rail-selected: #34465e; }}
+        .individual.minimal-dark .note-controls .text-controls button:hover {{ background: #2c3541; }}
+        .individual.minimal-dark .note-controls .text-controls button:checked {{ background: #34465e; box-shadow: inset 0 0 0 1px #66adff; }}
+        .individual.minimal-dark .note-controls .color-swatch:checked {{ outline-color: #66adff; }}
+        .individual.minimal-dark .note-rail button:focus-visible {{ outline: 2px solid #66adff; outline-offset: 2px; }}
+        .individual.minimal-dark .note-rail button:disabled {{ opacity: .4; }}
+        .individual.minimal-dark .inline-check,
+        .management.minimal-dark .inline-check {{ min-height: 0; min-width: 0; padding: 0; margin: 0 8px 0 0; }}
+        .individual.minimal-dark .inline-check check,
+        .management.minimal-dark .inline-check check {{ min-width: 14px; min-height: 14px; padding: 0; margin: 0; -gtk-icon-size: 14px; border: 1px solid currentColor; border-radius: 3px; }}
         .note-controls .color-swatch {{ min-width: 22px; min-height: 22px; padding: 0; border-radius: 50%; color: #23262b; border: 1px solid alpha(currentColor, .18); box-shadow: none; }}
         .note-controls .color-swatch:checked {{ outline: 2px solid var(--note-ink); outline-offset: 1px; }}
         .note-controls .type-label {{ font-family: Inter, sans-serif; font-size: 20px; }}
+        .individual:not(.minimal):not(.playful) .editor-card {{ padding: 28px 24px 26px 32px; }}
+        .individual:not(.minimal):not(.playful) .note-rail {{ --rail-bg: #fffdf8; --rail-line: #e5dfd5; }}
+        .individual:not(.minimal):not(.playful) .note-controls {{ --rail-selected: #ffe4c4; }}
+        .individual:not(.minimal):not(.playful) .inline-check,
+        .management:not(.minimal):not(.playful) .inline-check {{ min-height: 0; min-width: 0; padding: 0; margin: 0 7px 0 0; }}
+        .individual:not(.minimal):not(.playful) .inline-check check,
+        .management:not(.minimal):not(.playful) .inline-check check {{ min-width: 14px; min-height: 14px; padding: 0; margin: 0; -gtk-icon-size: 14px; border: 1.5px solid currentColor; border-radius: 2px; }}
         .note-controls .color-swatch:disabled {{ opacity: .4; }}
 
     "#));
@@ -240,8 +284,13 @@ pub fn paper_background(
     let area = gtk::DrawingArea::new();
     area.set_draw_func(move |_, cr, width, height| {
         let config = config.borrow();
-        let w = f64::from(width - 16).max(1.);
-        let h = f64::from(height - 16).max(1.);
+        let inset = if config.theme == Theme::Playful {
+            20
+        } else {
+            16
+        };
+        let w = f64::from(width - inset).max(1.);
+        let h = f64::from(height - inset).max(1.);
         cr.translate(8., 8.);
         let shape = if config.theme == Theme::Minimal {
             Shape::Square
@@ -249,9 +298,9 @@ pub fn paper_background(
             config.shape
         };
         let radius = match config.theme {
-            Theme::Minimal => (16., 16.),
+            Theme::Minimal => (18., 18.),
             Theme::Paper => (18., if shape == Shape::Square { 18. } else { 0. }),
-            Theme::Playful => (20., 20.),
+            Theme::Playful => (18., 18.),
         };
         for offset in (1..=if config.theme == Theme::Playful { 0 } else { 5 }).rev() {
             let _ = cr.save();
@@ -271,6 +320,10 @@ pub fn paper_background(
                 0.22,
                 if config.theme == Theme::Paper {
                     0.032
+                } else if config.theme == Theme::Minimal && !dark(&config) {
+                    0.025
+                } else if config.theme == Theme::Minimal && dark(&config) {
+                    0.045
                 } else {
                     0.018
                 },
@@ -280,7 +333,7 @@ pub fn paper_background(
         }
         if config.theme == Theme::Playful {
             let _ = cr.save();
-            cr.translate(4., 5.);
+            cr.translate(6., 7.);
             sheet_path(
                 cr,
                 w,
@@ -290,7 +343,7 @@ pub fn paper_background(
                 config.theme == Theme::Playful,
                 seed.get(),
             );
-            cr.set_source_rgba(0.16, 0.15, 0.14, 0.5);
+            cr.set_source_rgba(0.12, 0.16, 0.13, 0.45);
             let _ = cr.fill();
             let _ = cr.restore();
         }
@@ -304,10 +357,10 @@ pub fn paper_background(
             seed.get(),
         );
         let (r, g, b, a) = match config.theme {
-            Theme::Minimal if dark(&config) => (38. / 255., 42. / 255., 45. / 255., 1.),
-            Theme::Minimal => (0.99, 0.99, 0.99, 1.),
+            Theme::Minimal if dark(&config) => (39. / 255., 44. / 255., 50. / 255., 1.),
+            Theme::Minimal => (1., 1., 1., 1.),
             Theme::Paper if config.white_paper => (1., 1., 1., 1.),
-            Theme::Paper => (248. / 255., 241. / 255., 222. / 255., 1.),
+            Theme::Paper => (1., 0.966, 0.864, 1.),
             Theme::Playful => {
                 let (r, g, b) = color.get().fill();
                 (r, g, b, 1.)
@@ -316,23 +369,39 @@ pub fn paper_background(
         cr.set_source_rgba(r, g, b, a);
         let _ = cr.fill_preserve();
         if config.theme == Theme::Playful {
-            cr.set_source_rgb(0.16, 0.15, 0.14);
-            cr.set_line_width(3.);
+            cr.set_source_rgb(0.10, 0.12, 0.11);
+            cr.set_line_width(3.2);
+        } else if config.theme == Theme::Minimal && dark(&config) {
+            cr.set_source_rgba(0.75, 0.80, 0.86, 0.12);
+            cr.set_line_width(0.7);
         } else {
-            cr.set_source_rgba(0.22, 0.24, 0.27, 0.16);
+            cr.set_source_rgba(
+                0.22,
+                0.24,
+                0.27,
+                if config.theme == Theme::Minimal && !dark(&config) {
+                    0.12
+                } else {
+                    0.16
+                },
+            );
             cr.set_line_width(0.7);
         }
         let _ = cr.stroke_preserve();
         cr.clip();
-        if config.theme != Theme::Minimal {
-            cr.set_source_rgba(0.25, 0.27, 0.32, 0.07);
+        {
+            if config.theme == Theme::Minimal && dark(&config) {
+                cr.set_source_rgba(0.82, 0.87, 0.92, 0.14);
+            } else {
+                cr.set_source_rgba(0.25, 0.27, 0.32, 0.14);
+            }
             cr.set_line_width(0.7);
             match config.paper {
                 Paper::Plain => {}
                 Paper::Dots => {
                     for x in (16..width).step_by(20) {
                         for y in (60..height).step_by(20) {
-                            cr.arc(f64::from(x), f64::from(y), 0.7, 0., std::f64::consts::TAU);
+                            cr.arc(f64::from(x), f64::from(y), 1., 0., std::f64::consts::TAU);
                             let _ = cr.fill();
                         }
                     }
@@ -363,7 +432,7 @@ pub fn paper_background(
             if config.theme == Theme::Minimal {
                 cr.rectangle(0., 0., w, 5.);
             } else {
-                cr.rectangle(0., 0., 7., h);
+                cr.rectangle(0., 0., 9., h);
             }
             let _ = cr.fill();
         }
@@ -420,8 +489,8 @@ fn edge_path(
         cr.line_to(to.0, to.1);
         return;
     }
-    let step = if torn { 6. } else { 30. };
-    let amplitude = if torn { 2.6 } else { 2.3 };
+    let step = if torn { 6. } else { 48. };
+    let amplitude = if torn { 3.2 } else { 3.4 };
     let noise = |i: usize| {
         let mut n = seed.wrapping_add((i as u64).wrapping_mul(0x9e3779b97f4a7c15));
         n = (n ^ (n >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
@@ -435,12 +504,32 @@ fn edge_path(
         )
     };
     let mut points = vec![from];
-    for i in 1..=(len / step) as usize {
-        let t = i as f64 * step;
+    let mut t = 0.;
+    let mut i = 0;
+    loop {
+        i += 1;
+        // Uneven fiber breaks ride on broader, shallow dips in the paper edge.
+        t += if torn {
+            3. + (noise(i + 101) / amplitude + 1.) * 3.5
+        } else {
+            step
+        };
         if t >= len {
             break;
         }
-        points.push(point(t, noise(i) * ((len - t) / step).min(1.)));
+        let offset = if torn {
+            noise(i) * 0.45
+                + (t / 23. + (seed % 7) as f64).sin() * 2.1
+                + (t / 47. + (seed % 11) as f64).sin() * 1.5
+        } else {
+            noise(i)
+        };
+        let taper = if torn {
+            (t / 12.).min(1.) * ((len - t) / 12.).min(1.)
+        } else {
+            ((len - t) / step).min(1.)
+        };
+        points.push(point(t, offset * taper));
     }
     points.push(to);
     if torn {
