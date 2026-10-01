@@ -73,10 +73,31 @@ pub enum Font {
     Handwritten,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteTextSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteTextWeight {
+    #[default]
+    Regular,
+    Bold,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct NoteStyle {
-    pub font: Option<Font>,
+    // Read older overrides, but font family now comes only from Settings.
+    #[serde(rename = "font", skip_serializing)]
+    pub legacy_font: Option<Font>,
+    pub text_size: NoteTextSize,
+    pub text_weight: NoteTextWeight,
     pub paper: Option<Paper>,
     pub shape: Option<Shape>,
 }
@@ -84,9 +105,6 @@ pub struct NoteStyle {
 impl NoteStyle {
     pub fn resolve(&self, defaults: &Config) -> Config {
         let mut config = defaults.clone();
-        if let Some(font) = self.font {
-            config.font = font;
-        }
         if let Some(paper) = self.paper {
             config.paper = paper;
         }
@@ -317,11 +335,12 @@ mod tests {
         ] {
             assert!(invalid.validate().is_err());
         }
-        let style = NoteStyle {
-            font: Some(Font::Mono),
-            ..NoteStyle::default()
-        };
-        assert_eq!(style.resolve(&config).font, Font::Mono);
+        let style: NoteStyle = toml::from_str("font = 'mono'").unwrap();
+        assert_eq!(style.legacy_font, Some(Font::Mono));
+        assert_eq!(style.text_size, NoteTextSize::Medium);
+        assert_eq!(style.text_weight, NoteTextWeight::Regular);
+        assert_eq!(style.resolve(&config).font, config.font);
+        assert!(!toml::to_string(&style).unwrap().contains("font ="));
         assert_eq!(style.resolve(&config).paper, Paper::Grid);
     }
 

@@ -1,13 +1,13 @@
 .management {
   --app-bg: #fbf8f0; --ink: #2d2c29; --muted: #7d7971;
-  --hairline: #e3e0d8; --selected: #ece8df; --focus: #9a876c;
+  --hairline: #e3e0d8; --selected: #ece8df; --focus: #f58a26;
   background: var(--app-bg); color: var(--ink); font-family: Inter, sans-serif;
   font-size: 13px;
 }
 .management .main-header { min-height: 64px; padding: 0 20px; border-bottom: 1px solid var(--hairline); }
 .management .search-field { min-height: 34px; padding: 0 10px; border: 1px solid var(--hairline); background: transparent; color: var(--ink); box-shadow: none; border-radius: 6px; }
 .management .search-field:focus-within { outline: none; }
-.management .panel-title { font-size: 16px; font-weight: 600; }
+.management .panel-title { font-size: 23px; font-weight: 800; }
 .management searchentry { min-height: 34px; padding: 0 10px; background: transparent; color: var(--ink); border: 1px solid var(--hairline); border-radius: 6px; box-shadow: none; }
 .management searchentry text { background: transparent; color: var(--ink); }
 .management searchentry:focus-within { outline: none; }
@@ -17,17 +17,13 @@
 .management .note-list row { padding: 0; margin: 0 0 4px; border-radius: 8px; background: transparent; color: var(--ink); }
 .management .note-list row:hover { background: alpha(var(--selected), .55); }
 .management .note-list row:selected { background: var(--selected); }
-.management .row-content { min-height: 52px; padding: 0 14px 0 0; }
-.management .row-title { font-size: 14px; font-weight: 600; }
+.management .row-content { min-height: 60px; padding: 0 14px 0 0; }
+.management .row-title { font-size: 14px; font-weight: 700; }
 .management .row-snippet { font-size: 13px; color: var(--muted); }
 .management .tag-bar { min-width: 4px; border-radius: 2px; margin: 12px 12px 12px 0; }
-.management .note-yellow .tag-bar { background: #d98c2b; }
-.management .note-green .tag-bar { background: #6fae68; }
-.management .note-purple .tag-bar { background: #a98fd1; }
-.management .note-blue .tag-bar { background: #5b8def; }
 .management .editor-region { padding: 18px 28px 12px; }
-.management .inline-content { padding: 24px 30px 32px; }
-.management .inline-title { background: transparent; color: var(--ink); border: none; border-radius: 3px; box-shadow: none; padding: 0; min-height: 32px; font-size: 23px; }
+.management .inline-content { padding: 26px 26px 28px 30px; }
+.management .inline-title { background: transparent; color: var(--ink); border: none; border-radius: 3px; box-shadow: none; padding: 0; min-height: 32px; font-size: 23px; font-weight: 400; }
 .management .inline-body, .management .inline-body text { background: transparent; color: var(--ink); font-size: 21px; caret-color: var(--ink); }
 .management .inline-title:focus-within { outline: none; }
 .management .metadata { color: var(--muted); font-size: 11px; }
@@ -68,10 +64,10 @@
 .management .empty-action { padding: 9px 16px; border: 1px solid var(--hairline); background: var(--selected); color: var(--ink); border-radius: 6px; box-shadow: none; }
 
 .management menubutton.icon-control:hover { background: transparent; }
-.management .collection-filters { padding: 10px; border-bottom: 1px solid var(--hairline); }
+.management .collection-filters { padding: 8px 18px; border-bottom: 1px solid var(--hairline); }
 .management .collection-filters button { min-height: 26px; padding: 2px 8px; font-size: 12px; border: none; box-shadow: none; background: transparent; color: var(--muted); border-radius: 5px; }
 .management .collection-filters button:hover { background: alpha(var(--selected), .5); }
-.management .collection-filters button.selected { background: var(--selected); color: var(--ink); }
+.management .collection-filters button.selected { background: var(--focus); color: white; }
 .management .save-indicator { min-height: 16px; color: var(--muted); font-size: 12px; }
 .management .save-dot { opacity: .35; }
 @keyframes saving-dot { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
@@ -83,41 +79,40 @@
 
 /* Playful: neutral chrome, one pink selection accent, and colored notes. */
 .management.playful { --app-bg: #faf9fc; --ink: #292a2d; --muted: #77797c; --hairline: #e4e0e7; --selected: #f7e5ed; --focus: #e24c86; }
-.management.playful .panel-title { font-size: 17px; font-weight: 800; }
-.management.playful .search-field { background: white; border: 2px solid #292a2d; border-radius: 12px; }
+
+.management.playful .search-field { background: white; border: 1px solid var(--hairline); border-radius: 18px; }
 .management.playful .icon-control, .management.playful .icon-control > button { border-radius: 9px; }
-.management.playful .collection-filters button { border-radius: 9px; }
+.management.playful .collection-filters button { border-radius: 16px; }
 .management.playful .collection-filters button.selected { background: #e24c86; color: white; }
 .management.playful .note-list row { border-left: 2px solid transparent; border-radius: 8px; }
-.management.playful .note-list row:selected { background: var(--selected); border-left-color: #e24c86; }
-.management.playful .inline-title { font-weight: bold; }
+.management.playful .note-list row:selected { background: var(--selected); border-left-color: transparent; }
+
 .management.playful .appearance-panel { background: #faf9fc; }
 .management.playful .segments button:checked, .management.playful .pattern-choice:checked { border-color: #e24c86; }
 
 /* Minimal uses opaque light and dark surfaces. */
 .management.minimal {
-  --app-bg: #f1f2f4; --ink: #292f36; --muted: #646e79;
-  --hairline: #cdd4db; --selected: #d9e0e6; --focus: #657789;
-  --panel-bg: #edf0f3; border-radius: 0;
+  --app-bg: #fafafa; --ink: #292f36; --muted: #646e79;
+  --hairline: #e0e4e9; --selected: #eaf2ff; --focus: #5b8def;
+  --panel-bg: #f5f7fa; border-radius: 12px;
 }
 .management.minimal-dark {
   --app-bg: #23262b; --ink: #edf1f5; --muted: #aab4c0;
-  --hairline: #424a55; --selected: #37414d; --focus: #acbac9;
+  --hairline: #424a55; --selected: #37414d; --focus: #5b8def;
   --panel-bg: #282f38;
 }
 .management.minimal .appearance-panel, .management.minimal popover > contents { background: var(--panel-bg); }
-.management.minimal .search-field, .management.minimal .note-list row,
-.management.minimal .icon-control, .management.minimal .icon-control > button,
-.management.minimal .collection-filters button { border-radius: 0; }
+.management.minimal .note-list row,
+.management.minimal .icon-control, .management.minimal .icon-control > button { border-radius: 8px; }
 .management.minimal switch { background: var(--selected); }
 .management.minimal switch:checked { background: var(--focus); }
 
-/* Minimal and Playful use dots and separate selection borders. */
-.management.minimal .tag-bar, .management.playful .tag-bar {
+/* Only Playful uses dots. Paper and Minimal keep tag-colored bars. */
+.management.playful .tag-bar {
   min-width: 9px; min-height: 9px; border-radius: 50%; margin: 20px 10px;
 }
 .management.minimal .note-list row { border-left: 2px solid transparent; }
-.management.minimal .note-list row:selected { border-left-color: var(--focus); }
+.management.minimal .note-list row:selected { border-left-color: transparent; }
 .management.minimal .segments button:checked, .management.minimal .pattern-choice:checked,
 .management.playful .segments button:checked, .management.playful .pattern-choice:checked {
   background: var(--selected); border-color: var(--focus);
@@ -129,4 +124,25 @@
 }
 .management.minimal .segments, .management.minimal .segments button,
 .management.minimal .pattern-choice, .management.minimal .theme-sample,
-.management.minimal .empty-action { border-radius: 0; }
+.management.minimal .empty-action { border-radius: 8px; }
+
+.management.minimal .inline-title { font-size: 20px; font-weight: 600; }
+
+.management .main-note-tools { padding: 6px; }
+.management .note-controls { --note-ink: var(--ink); --rail-line: var(--hairline); --rail-selected: var(--selected); }
+.management .note-controls .text-controls { border: 1px solid var(--hairline); border-radius: 8px; }
+.management .note-controls .text-controls button { min-width: 0; padding: 3px 6px; border-radius: 0; }
+.management .note-controls .text-controls button:first-child { border-radius: 7px 0 0 7px; }
+.management .note-controls .text-controls button:last-child { border-radius: 0 7px 7px 0; }
+.management .note-controls .text-controls button + button { border-left: 1px solid var(--hairline); }
+.management .note-controls .text-controls button:checked { background: var(--selected); }
+.management .note-controls label { font-family: Inter, sans-serif; font-size: 11px; }
+
+.management .note-controls .color-swatch { min-width: 22px; min-height: 22px; padding: 0; border-radius: 50%; border: 1px solid alpha(var(--ink), .18); }
+.management .note-controls .color-swatch:checked { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.management .note-controls .type-label { font-size: 20px; }
+.management .note-controls .text-controls button:checked { box-shadow: inset 0 0 0 1px alpha(var(--focus), .35); }
+.management popover > contents { border-radius: 16px; }
+.management .search-field, .management searchentry { border-radius: 18px; }
+.management .collection-filters button { border-radius: 16px; }

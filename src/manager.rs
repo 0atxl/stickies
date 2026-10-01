@@ -1,7 +1,8 @@
 use crate::{
     app::{Note, NoteColor, NoteId},
     appearance,
-    config::{Config, Theme},
+    config::{Config, Paper, Theme},
+    note_controls::NoteControls,
     note_session::NoteSession,
     storage::{NoteCollection, NoteSort, Storage},
     ui_assets,
@@ -45,6 +46,12 @@ struct ManagerUi {
     pin: gtk::ToggleButton,
     popout: gtk::Button,
     more: gtk::MenuButton,
+    controls: NoteControls,
+    pattern_choice: gtk::DropDown,
+    syncing_style: Cell<bool>,
+    edit_actions: gtk::Box,
+    last_error: RefCell<Option<(NoteId, String)>>,
+    error_toast: RefCell<Option<adw::Toast>>,
     archive: gtk::Button,
     restore: gtk::Button,
     dates: gtk::Label,
@@ -67,6 +74,7 @@ pub struct ManagerWindow(Rc<ManagerUi>);
 impl ManagerWindow {
     pub fn present(&self) {
         self.0.window.present();
+        self.0.sync_editor();
     }
     pub fn refresh(&self) {
         self.0.refresh(None);
@@ -216,6 +224,10 @@ impl ManagerUi {
     }
     fn clear_editor(&self) {
         self.selected.set(None);
+        self.last_error.borrow_mut().take();
+        if let Some(toast) = self.error_toast.borrow_mut().take() {
+            toast.dismiss();
+        }
         self.subscription.borrow_mut().take();
         self.session.borrow_mut().take();
         self.title.set_buffer(&gtk::EntryBuffer::new(None::<&str>));
@@ -264,8 +276,14 @@ impl ManagerUi {
             self.window.remove_css_class("playful");
         }
         let session = self.session.borrow().clone();
+        let style = session.as_ref().map(|s| s.style()).unwrap_or_else(|| {
+            self.selected
+                .get()
+                .and_then(|id| self.storage.load_note_style(id).ok())
+                .unwrap_or_default()
+        });
+        self.resolved.replace(style.resolve(&defaults));
         if let Some(session) = session {
-            self.resolved.replace(session.style().resolve(&defaults));
             self.color.set(session.color());
             self.pin.set_active(session.pinned());
             self.pin.set_tooltip_text(Some(if session.pinned() {
@@ -274,7 +292,22 @@ impl ManagerUi {
                 "Pin note"
             }));
             let error = session.error();
-            self.save_state.set_text(error.as_deref().unwrap_or(""));
+            let error_key = error.clone().map(|message| (session.id(), message));
+            if (self.window.is_visible() || error_key.is_none())
+                && *self.last_error.borrow() != error_key
+            {
+                self.last_error.replace(error_key);
+                if let Some(toast) = self.error_toast.borrow_mut().take() {
+                    toast.dismiss();
+                }
+                if let Some(error) = &error {
+                    let toast = adw::Toast::builder().title(error).use_markup(false).build();
+                    self.toast.add_toast(toast.clone());
+                    self.error_toast.replace(Some(toast));
+                }
+            }
+            self.save_state
+                .set_text(if error.is_some() { "Save failed" } else { "" });
             if error.is_some() {
                 self.save_state.add_css_class("error");
             } else {
@@ -296,11 +329,15 @@ impl ManagerUi {
                 } else {
                     "Saved"
                 }));
-            if gtk::Settings::default().is_some_and(|s| s.is_gtk_enable_animations()) {
+            if !defaults.reduced_motion
+                && gtk::Settings::default().is_some_and(|s| s.is_gtk_enable_animations())
+            {
                 self.save_indicator.add_css_class("saving-motion");
             } else {
                 self.save_indicator.remove_css_class("saving-motion");
             }
+            self.save_indicator
+                .set_transition_duration(if defaults.reduced_motion { 0 } else { 140 });
             if let Some(index) = self
                 .notes
                 .borrow()
@@ -335,12 +372,10 @@ impl ManagerUi {
                 }
             }
         } else if let Some(id) = self.selected.get() {
-            self.resolved.replace(
-                self.storage
-                    .load_note_style(id)
-                    .unwrap_or_default()
-                    .resolve(&defaults),
-            );
+            self.last_error.borrow_mut().take();
+            if let Some(toast) = self.error_toast.borrow_mut().take() {
+                toast.dismiss();
+            }
             if let Some(note) = self.notes.borrow().iter().find(|n| n.id == id) {
                 self.color.set(note.color);
             }
@@ -350,7 +385,17 @@ impl ManagerUi {
             self.save_indicator
                 .set_tooltip_text(Some("Restore this note to edit it"));
         }
-        appearance::apply_note_font(&self.font, &self.resolved.borrow());
+        self.syncing_style.set(true);
+        self.controls.sync(&style, self.color.get(), defaults.theme);
+        self.pattern_choice
+            .set_selected(style.paper.map_or(0, |paper| paper as u32 + 1));
+        self.pattern_choice
+            .set_visible(defaults.theme != Theme::Minimal);
+        self.edit_actions.set_sensitive(self.body.is_editable());
+        self.controls.root.set_sensitive(self.body.is_editable());
+        self.pattern_choice.set_sensitive(self.body.is_editable());
+        self.syncing_style.set(false);
+        appearance::apply_note_font(&self.font, &self.resolved.borrow(), &style);
         self.seed
             .set(self.selected.get().map_or(0, |id| id.value()));
         self.background.queue_draw();
@@ -401,8 +446,12 @@ impl ManagerUi {
         }
         let result = match change {
             ManagerChange::Pin => {
-                let pinned = self.session.borrow().as_ref().is_some_and(|s| s.pinned());
-                self.storage.set_note_pinned(id, !pinned)
+                let session = self.session.borrow().clone();
+                if let Some(session) = session {
+                    session.set_pinned(!session.pinned())
+                } else {
+                    self.storage.set_note_pinned(id, true)
+                }
             }
             ManagerChange::Archive => self.storage.archive_note(id),
             ManagerChange::Restore => self.storage.restore_note(id),
@@ -410,7 +459,10 @@ impl ManagerUi {
         };
         if let Err(e) = result {
             self.sync_editor();
-            self.message(&format!("Could not update note: {e}"));
+            // Live pin failures are already reported by the shared session.
+            if change != ManagerChange::Pin || self.session.borrow().is_none() {
+                self.message(&format!("Could not update note: {e}"));
+            }
             return;
         }
         if matches!(change, ManagerChange::Archive | ManagerChange::Delete) {
@@ -454,7 +506,11 @@ pub fn build_window(
 ) -> ManagerWindow {
     let display = gtk::gdk::Display::default().expect("GTK display");
     let css = gtk::CssProvider::new();
-    css.load_from_resource("/dev/stickies/Stickies/all-notes.css");
+    css.load_from_data(&format!(
+        "{}\n{}",
+        include_str!("../assets/all-notes.css"),
+        appearance::palette_css()
+    ));
     gtk::style_context_add_provider_for_display(
         &display,
         &css,
@@ -534,7 +590,7 @@ pub fn build_window(
     for (button, _) in &filters {
         filter_row.append(button);
     }
-    list_column.append(&filter_row);
+    root.append(&filter_row);
     list_column.append(&scroll);
     content.append(&list_column);
     let pages = gtk::Stack::new();
@@ -551,7 +607,7 @@ pub fn build_window(
     let sheet = gtk::Overlay::new();
     sheet.set_child(Some(&background));
     sheet.set_vexpand(true);
-    let paper_content = gtk::Box::new(gtk::Orientation::Vertical, 28);
+    let paper_content = gtk::Box::new(gtk::Orientation::Vertical, 8);
     paper_content.add_css_class("inline-content");
     let title = gtk::Entry::new();
     title.add_css_class("inline-title");
@@ -564,9 +620,11 @@ pub fn build_window(
     body.set_wrap_mode(gtk::WrapMode::WordChar);
     body.set_pixels_above_lines(3);
     body.set_pixels_below_lines(5);
+    body.set_top_margin(6);
+    body.set_bottom_margin(8);
     let body_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
-        .vscrollbar_policy(gtk::PolicyType::External)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
         .vexpand(true)
         .child(&body)
         .build();
@@ -622,15 +680,39 @@ pub fn build_window(
     let restore = gtk::Button::with_label("Restore");
     let delete = gtk::Button::with_label("Delete");
     let copy = gtk::Button::with_label("Copy text");
-    let checklist = gtk::Button::with_label("Toggle checklist");
-    let bullet = gtk::Button::with_label("Bullet list");
-    let numbered = gtk::Button::with_label("Numbered list");
-    set_menu(
-        &more,
-        &[
-            &copy, &checklist, &bullet, &numbered, &archive, &restore, &delete,
-        ],
-    );
+    let checklist = ui_assets::icon("checklist", "Checklist · toggle current item");
+    let bullet = appearance::icon("view-list-bullet-symbolic", "Bullet list");
+    let numbered = appearance::icon("view-list-ordered-symbolic", "Numbered list");
+    let controls = NoteControls::new();
+    let pattern_choice =
+        gtk::DropDown::from_strings(&["Default pattern", "Plain", "Dots", "Square grid", "Ruled"]);
+    let tools = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    tools.add_css_class("main-note-tools");
+    let edit_actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    edit_actions.set_halign(gtk::Align::Center);
+    for button in [&checklist, &bullet, &numbered] {
+        edit_actions.append(button);
+    }
+    tools.append(&edit_actions);
+    tools.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    tools.append(&controls.root);
+    tools.append(&pattern_choice);
+    tools.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    let more_actions = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    for button in [&copy, &archive, &restore, &delete] {
+        button.set_hexpand(true);
+        more_actions.append(button);
+    }
+    tools.append(&more_actions);
+    let tools_scroll = gtk::ScrolledWindow::new();
+    tools_scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+    tools_scroll.set_vscrollbar_policy(gtk::PolicyType::Automatic);
+    tools_scroll.set_propagate_natural_height(true);
+    tools_scroll.set_max_content_height(420);
+    tools_scroll.set_child(Some(&tools));
+    let tools_popover = gtk::Popover::new();
+    tools_popover.set_child(Some(&tools_scroll));
+    more.set_popover(Some(&tools_popover));
     actions.append(&pin);
     actions.append(&popout);
     actions.append(&more);
@@ -706,6 +788,12 @@ pub fn build_window(
         pin,
         popout,
         more,
+        controls,
+        pattern_choice,
+        edit_actions,
+        syncing_style: Cell::new(false),
+        last_error: RefCell::new(None),
+        error_toast: RefCell::new(None),
         archive,
         restore,
         dates,
@@ -829,6 +917,74 @@ pub fn build_window(
             }
         });
     }
+    for (button, size) in &ui.controls.sizes {
+        let weak = Rc::downgrade(&ui);
+        let size = *size;
+        button.connect_toggled(move |button| {
+            if let Some(ui) = weak.upgrade()
+                && !ui.syncing_style.get()
+                && button.is_active()
+            {
+                let session = ui.session.borrow().clone();
+                if let Some(session) = session {
+                    let mut style = session.style();
+                    style.text_size = size;
+                    session.set_style(style);
+                }
+            }
+        });
+    }
+    for (button, weight) in &ui.controls.weights {
+        let weak = Rc::downgrade(&ui);
+        let weight = *weight;
+        button.connect_toggled(move |button| {
+            if let Some(ui) = weak.upgrade()
+                && !ui.syncing_style.get()
+                && button.is_active()
+            {
+                let session = ui.session.borrow().clone();
+                if let Some(session) = session {
+                    let mut style = session.style();
+                    style.text_weight = weight;
+                    session.set_style(style);
+                }
+            }
+        });
+    }
+    for (button, color) in &ui.controls.colors {
+        let weak = Rc::downgrade(&ui);
+        let color = *color;
+        button.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                let session = ui.session.borrow().clone();
+                if let Some(session) = session {
+                    session.set_color(color);
+                }
+            }
+        });
+    }
+    let weak = Rc::downgrade(&ui);
+    ui.pattern_choice.connect_selected_notify(move |choice| {
+        if let Some(ui) = weak.upgrade()
+            && !ui.syncing_style.get()
+        {
+            let session = ui.session.borrow().clone();
+            if let Some(session) = session {
+                let mut style = session.style();
+                style.paper = [
+                    None,
+                    Some(Paper::Plain),
+                    Some(Paper::Dots),
+                    Some(Paper::Grid),
+                    Some(Paper::Ruled),
+                ]
+                .get(choice.selected() as usize)
+                .copied()
+                .flatten();
+                session.set_style(style);
+            }
+        }
+    });
     let keys = gtk::EventControllerKey::new();
     let weak = Rc::downgrade(&ui);
     keys.connect_key_pressed(move |_, key, _, modifiers| {

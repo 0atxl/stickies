@@ -1,34 +1,34 @@
 # UI implementation plan
 
-Date: September 30, 2026. The user authorized stage 1 and a planning checkpoint commit on October 1, 2026. Application code is unchanged at this planning checkpoint. The active milestone remains final UI work and phase 5A/5B verification.
+Started September 30, 2026; updated October 1, 2026. The references and initial plan were committed as `65e3758`. Stage 1, individual Pin/text controls, and the remaining note-controls pass are implemented in the working tree. The active milestone remains final UI work and phase 5A/5B verification.
 
 ## Sources and scope
 
-The [saved reference set](design-references/2026-09-30/README.md) contains the original UI/UX document, nine images, and the two latest SVG packs. This plan records the user's later clarifications. Those clarifications take precedence over conflicting reference text or example imagery.
+The [September 30 reference set](design-references/2026-09-30/README.md) contains the original UI/UX document, nine images, and two SVG packs. The [October 1 update](design-references/2026-10-01/README.md) preserves the revised spec, Settings image and change report. Direct user decisions take precedence over conflicting reference text or example imagery. The reference update was documentation-only. The subsequent request authorizes completing the note controls. It does not authorize Settings, edge or checklist implementation, commit or push.
 
 Use the current Rust, GTK4/libadwaita, Layer Shell, SQLite, and shared `NoteSession` implementation. Preserve note data, live cross-view editing, autosave, failed-save retention, archive/restore, deletion Undo, and Copy text. Keep existing module responsibilities. No replacement editor, generic event system, new UI framework, or independent note buffers are needed.
 
-Multi-monitor work, sync, custom/manual ordering, and release expansion remain later roadmap work. Settings and checklist redesign depend on further user input. Stage 1 is authorized; later implementation stages and push still require their own authorization. The requested checkpoint commit covers the saved references and plan before stage 1 changes.
+Multi-monitor work, sync, custom/manual ordering, and release expansion remain later roadmap work. The Settings reference has arrived, but its draft scope and open behavior choices need settling. Checklist redesign still depends on further user input. Stage 1 and the requested removal of infinity, individual Always open Pin, size/weight rows and Settings-only font family are implemented. The remaining note-controls work is now authorized and implemented. The edge and Settings/checklist stages require their own authorization. The requested checkpoint commit covered the saved references and plan before stage 1 changes.
 
 ## Agreed target
 
 | Area | Intended behavior |
 |---|---|
-| All Notes window | Keep the compact 720x500 default and resizing. Retain the 240px list and current responsive drawer arrangement until the settings design is supplied. |
+| All Notes window | Keep the compact 720x500 default and resizing. Retain the 240px list. The existing responsive drawer remains until the new Settings host and width are settled. |
 | Main note actions | Exactly three footer buttons: Pin, Pop out, and More. More contains checklist, text style, tag colors, and other existing note actions. |
 | Individual notes | Both docked and separate notes are resizable, with matching minimum sizes and a subtle hover-enhanced corner grip. Keep Close visible and long content inside a wrapping, vertically scrolling editor. |
-| Note toolbar | Hidden by default. A subtle opening control becomes clearer on hover; clicking opens the toolbar. Provide the size, weight, and color controls directly in a compact layout based on `tools.png`. Keep the toolbar collapsible and accessible by keyboard. |
+| Note toolbar | Hidden by default. A subtle opening control becomes clearer on hover; clicking opens a floating panel without changing note dimensions. Provide size, weight, and color controls directly in a compact layout based on `tools.png`. Keep the panel collapsible and accessible by keyboard. The revised spec formally confirms this arrangement. |
 | Pin in All Notes | Persistent ordering preference. Pinned active notes remain ahead of unpinned active notes. |
-| Pin in an individual note | Always open for that view. It does not change persistent note ordering. Replace the separate infinity control with this role. Make the role clear in the tooltip and accessible label. |
+| Pin in an individual note | Implemented beside Checklist as Always open for that view. It does not change persistent note ordering. Infinity is removed from runtime assets; tooltip and accessible label identify the role. |
 | Inactivity | Normal individual views close after two minutes without input. Always open cancels the timer; turning it off starts a fresh two-minute period. Keep independent timers for each view. All Notes has no timeout. Close and Escape remain available with Always open enabled. Preserve failed-save protections. |
-| Fonts | Keep Virgil, Inter, and JetBrains Mono as note-content choices. A note's choice applies in the individual note and All Notes editor. App headings, lists, menus, and buttons use the UI font. |
-| Text sizing | Final title/body sizes and S/M/L values remain undecided until an actual preview. The proposed 18/21/24 values were not approved. Existing sizes may be used provisionally for the first review. |
+| Fonts | Keep Virgil, Inter, and JetBrains Mono as global Settings-only note fonts. Both editors follow Settings, including notes with older stored font overrides. App headings, lists, menus, and buttons use the UI font. |
+| Text sizing | Final title/body sizes and S/M/L values remain undecided until preview review. The requested rows use provisional body sizes of 18/21/24px. Medium retains the current body size, with titles adjusted by the same 3px steps. These values are not final design approval. |
 | Corners | Use rounded corners throughout the interface, including Minimal. Keep Paper's torn bottom and Playful's wavy outline as their edge treatments. |
 | Paper | Warm paper, soft shadow, shallow torn bottom, and a tag-colored side strip. The All Notes editor and individual note share the same appearance. |
 | Minimal Light/Dark | Fully opaque note fills, rounded corners, a tag-colored top strip, and soft shadows. Dark All Notes follows the light layout with dark colors. |
 | Playful | Tag-colored note fill, dark wavy outline, offset shadow, and pink theme accent. The pin badge shows the relevant pin state for its view. |
 | Sidebar tag markers | Playful uses dots. Paper and Minimal use vertical bars. Marker color follows the note's tag. Selection styling remains separate from tag color. |
-| Color choice | Expand beyond the current four colors to common colors in a compact swatch grid. Use the same chosen tag color for sidebar/edge markers, Paper/Minimal accents, and Playful fill. Do not add a separate Playful background-color setting. |
+| Color choice | The shared palette now has 16 common colors in a four-column grid. Use the same chosen tag color for sidebar/edge markers, Paper/Minimal accents, and Playful fill. Do not add a separate Playful background-color setting. |
 | Save feedback | Routine Saving/Saved status appears only in All Notes. Save failures use toasts in the affected visible view, including individual notes. Keep failed edits dirty and preserve the existing protection against discarding them. |
 | Archived notes | Keep the note's theme and appearance. Editing stays disabled until Restore. Retain a clear archived indication and Restore action rather than inventing another visual theme. |
 | Empty and no-result states | An empty collection shows a short No notes yet message and New note action. A search with no matches shows No matching notes and a way to clear the query. Keep existing data intact and do not seed example notes. |
@@ -42,7 +42,7 @@ An open docked note hides the tab list. Hover does not replace it with another n
 
 | Item | What remains needed | Can other work proceed? |
 |---|---|---|
-| Settings | User will supply the design. Settle its sections, controls, edge repositioning, and any shortcut choices then. | Yes, keep the current settings available. |
+| Settings | Image and fuller draft received. Prune/confirm sections, settle host/width, Minimal mode placement, along-edge presets, enablement semantics and Reposition save/cancel behavior. Shortcut defaults/registration remain open. | Yes, keep current Settings available until a specific implementation scope is authorized. |
 | Checklist | User will supply appearance and item behavior. Existing clickable checkboxes are functional but not visually approved. | Yes, preserve them while doing the other UI work. |
 | Text sizes | Review real note content at the intended compact dimensions before selecting title/body sizes and S/M/L values. | Yes, use current sizes provisionally. |
 
@@ -59,21 +59,21 @@ Responsibilities: `appearance.rs`, `assets/all-notes.css`, `editor.rs`, `manager
 - Bring all four appearances toward the saved references while retaining the compact All Notes size.
 - Use matching note fills, tag accents, corner treatments, borders, and shadows in the All Notes editor and individual note. Scale geometry to available space without scaling the chosen text size automatically.
 - Reuse `sheet_path` and `edge_path` for Paper tears and Playful waves. Tune the result visually; no separate `wobbly_border.rs` implementation is required.
-- Show only the three main footer actions. Build a compact expandable individual toolbar and a subtle hover-enhanced opening control. Fit its width to the inline controls rather than adopting the original document's 40px width blindly.
+- Show only the three main footer actions. Use a compact floating individual tool panel and a subtle hover-enhanced opening control. Opening the panel preserves the writing area and window size. Fit its width to the inline controls rather than adopting the original document's 40px width blindly.
 - Make the editor layout flexible and allow both docked and separate notes to resize. Use matching minimum sizes and a subtle hover-enhanced corner grip. Use the window's normal resize path for separate notes and update the docked editor's requested size for the Layer Shell view. Keep an edge-docked note anchored and within available space during resizing. Preserve safe text margins, wrapping, and vertical scrolling. Avoid reserving a large empty toolbar gutter while the toolbar is closed.
 - Keep the current text sizes provisional. Present the same sample note in All Notes and an individual window, with toolbar closed/open, and review actual title/body size, padding, and control proportions.
 
 Acceptance: Paper, Playful, Minimal Light, and Minimal Dark remain readable at the compact window size; note appearance matches between views; the toolbar stays unobtrusive when closed; both docked and separate resized notes neither clip controls nor stretch border shapes badly. Docked resizing remains within available space on each edge. User reviews this preview before final text sizes are committed.
 
-### 2. Note controls, colors, pin roles, and save feedback
+### 2. Note controls, colors, pin roles, and save feedback, implemented
 
 Responsibilities: `editor.rs`, `manager.rs`, `note_session.rs`, `app.rs`, `config.rs`, `storage.rs`, `migrations`, styles, and bundled icons.
 
 - Wire the same note tools into the individual toolbar and All Notes More surface. Keep Copy text, bullet/numbered lists, Archive/Restore, and Delete available where applicable through the existing coordinator/actions. Use existing concrete controls and handlers; share small pieces only where both views need them.
 - Keep ordering pin state in `NoteSession`. Use the existing per-view Always open toggle and timer for the individual pin icon, so it cannot reorder the note. Preserve explicit close behavior and independent timers.
 - Expand the shared color choices and preserve the meanings of existing saved colors. The existing SQLite `notes.color` CHECK constraint allows only four values, so include a small transactional migration for the additional colors. Preserve note IDs, text, dates, pin/order values, archived/deleted state, and related note styles. Update storage parsing, CSS, drawing, and both pickers together. Use a compact grid with readable selected/focus states. Exact shades are calibrated during preview.
-- After the size review, extend the existing per-note appearance data only as needed for note-wide text size and Regular/Bold. `note_styles.settings` already stores serialized TOML, so compatible defaulted fields may be sufficient for these style additions without another database migration. Do not revive the retired global `font_size` setting.
-- Keep the selected note font and appearance live across all views and after restart.
+- The separately requested S/M/L and Regular/Bold controls now extend the existing per-note style TOML with defaulted fields. No database migration is needed. Keep the numeric sizes provisional until review. Do not revive the retired global `font_size` setting.
+- Keep the global note font and per-note appearance live across all views and after restart.
 - Remove routine save status from individual headers. Show save-error toasts when a new failure occurs, without repeating the same toast on every buffer notification. Keep the error and dirty text in the existing session so a disappearing toast cannot discard failed edits.
 - Import or create only the SVGs actually used by the approved controls. Extend the established SVG style rather than generating raster icons. Review the Aa/color/filter/grid gaps noted in the reference inventory and replace the retired controls where needed.
 
@@ -89,15 +89,27 @@ Responsibilities: `main.rs`, `app.rs`, `storage.rs`, `manager.rs`, `config.rs`, 
 - Add search within the strip. Give its input/results a readable width, search active notes beyond the four visible slots, share the existing search behavior where possible, and support keyboard selection and Escape. A result opens the existing shared session as the docked note. The original document's Enter-with-no-match action creates a note from the query; show that action clearly in the no-result state and verify that it updates All Notes and the edge. No separate centered search window is needed.
 - Keep the docked note's resolved theme, tag treatment, buffer, and explicit close behavior. Add the small non-interactive pointer without changing its input region or obscuring text.
 - Gate custom motion on reduced motion and system-disabled animation. Keep hover leave grace and prevent accidental edge grazes from opening the deck.
-- Retain the existing reposition behavior until the forthcoming settings design settles its replacement. Do not silently introduce a long-press or customize mode from the draft document.
+- Retain existing reposition behavior until the received Settings draft's customize mode is settled and authorized. The image provides a Reposition entry button, but its visual drag state and commit/cancel behavior remain open. Do not silently add a long-press gesture.
 
 Acceptance: creating a blank note updates the edge immediately; the four active notes match All Notes order; typing in edge search does not corrupt ordering; click/keyboard actions work on every edge; hover cannot replace an open docked note; reduced motion and fullscreen/DND behavior still work.
 
-### 4. Checklist and settings after their specifications arrive
+### 4. Settings reference received; checklist specification pending
 
 Checklist responsibilities: `note_session.rs`, `editor.rs`, `manager.rs`, and note styles/drawing. Preserve the shared buffer, plain-text markers, Copy text, and persistence unless the approved checklist behavior explicitly changes them. Use the existing `TextChildAnchor`/`CheckButton` work as the starting point, and compare its result with the user's design. Implement hand-drawn completion marks only after their appearance and behavior are settled.
 
-Settings responsibilities: `settings.rs`, `config.rs`, `manager.rs`, and coordinator calls for existing desktop preferences. Integrate the supplied design into the compact window. Keep live appearance updates, per-note overrides, and rejected-write recovery. Do not add draft settings sections merely because they occur in the original document.
+Settings responsibilities: `settings.rs`, `config.rs`, `manager.rs`, `main.rs`, `autostart.rs`, styles and only the icons actually needed. Use the [received Settings reference](design-references/2026-10-01/settings.png) and the scoped planning table below. Preserve compact All Notes, live appearance changes, per-note pattern/shape/size/weight and rejected-write recovery. Font family remains global. The draft section list is not yet a commitment to implement every section.
+
+| Draft section | Controls and intended presentation | Existing foundation and work still needed |
+|---|---|---|
+| Appearance | Three theme swatches; global Handwritten/Clean/Mono segments; Plain/Dots/Grid/Ruled segments; Reduce motion. UI font, section dividers and outlined selection states match the image. | Existing controls and persistence can be reused. Change heading to Settings and use Close. Keep Minimal System/Light/Dark and the theme-default font reset capability even though the image omits them; settle placement. |
+| Edge Strip | Enable switch, Left/Right/Top/Bottom anchor, along-edge position presets and Reposition. | Config stores anchor and normalized `marker_offset`; dormant-marker dragging exists. `edge_hover_enabled` disables hover, not the entire strip. Define true strip enablement and what happens to an open docked note before wiring a switch. Reuse offset persistence for presets; propose Top/Center/Bottom on vertical anchors and Left/Center/Right on horizontal anchors. Settings is the pictured entry point to customize mode; do not add long-press implicitly. Settle visible drag state, commit/cancel and exit behavior. |
+| Behavior | Launch at login switch; default tag color for new notes in a compact picker. | Login config and autostart reconciliation exist. Both creation paths currently use Yellow; a shared configurable default must reach All Notes, edge creation and later search-created notes without recoloring existing notes. Reuse the expanded shared palette rather than limiting it to the image's four samples. |
+| Shortcuts | Readable quick-search and new-note key badges. | No active global bindings are currently registered in the code. The image's Super combinations are examples. Display only actual registered bindings or a clear unassigned state. Default combinations, global registration and optional remapping need separate decisions after core UI stabilization; do not edit desktop configuration as part of this reference update. |
+| About | App icon, actual build version and View on GitHub. | Reuse project metadata and application icon. Verify the repository URL during implementation and add only missing GitHub/Reposition icons. Example version text is not a new release request. |
+
+Use one vertically scrollable Settings surface with section headers, not tabs. Scale spacing to the chosen compact host instead of copying the portrait image's pixel dimensions. Final placement as an overlay drawer or separate window, and its width, remain open. No new monitor picker, sync section, always-on-top control or per-note font-family setting is inferred from this image.
+
+Acceptance for an eventual approved Settings pass: controls fit the compact host, are keyboard accessible and recover their saved state after rejected writes; global font changes reach both editors; Minimal modes remain available; strip enablement and repositioning preserve unsaved notes; anchor/presets work on all four edges and survive restart; default color affects only new notes from every creation entry point; launch at login still reconciles correctly; shortcut badges accurately reflect availability; About uses real metadata. These are planned checks, not passed tests.
 
 Adapt the [manual checklist](manual-testing.md) to the implemented design, including the single edge layout, the two pin roles, and any approved resizing behavior. If product terminology needs changing, update the relevant context document at that point rather than renaming the domain model to match an icon.
 
@@ -116,3 +128,48 @@ Adapt the [manual checklist](manual-testing.md) to the implemented design, inclu
 Start with stage 1's compact visual preview: consistent note appearance, rounded controls, three-button main footer, a hidden compact toolbar, and resizable docked/separate notes. Keep text sizes provisional, reuse the existing border drawing and save/session model, and leave pending checklist/settings behavior in place. Verify the preview across all four appearances before proceeding to the controls/persistence and edge passes.
 
 The stored originals remain unchanged throughout implementation. Record later approved decisions in this plan and `current-milestone.md`, and update the implementation checks as behavior changes.
+
+## Stage 1 preview, October 1, 2026
+
+The first implementation pass is ready for review. The references and plan were committed as `65e3758`; the stage 1 code and verification records remain uncommitted. The [preview gallery](design-previews/2026-10-01-stage1/preview.html) contains real GTK renders of the same disposable note in all four appearances, including default, minimum, and larger individual-note sizes. [Verification details](design-previews/2026-10-01-stage1/README.md) distinguish this pass from the remaining controls work.
+
+Implemented matching note drawing between views, Paper side accents, Minimal rounded corners and top accents, shared Playful fills/outlines/shadows, rounded controls, the agreed sidebar marker shapes, and horizontal More dots. All Notes keeps its compact default and three footer actions. The individual tool panel opens on click, collapses, and keeps its existing font/color/list controls available without reserving a gutter. It uses a GTK popover because mapped-window size requests do not reliably grow and shrink the window after compositor resizing.
+
+Both note types resize with a 300x280 minimum. Separate notes retain floating initialization and enable native resizing after their surface enters a monitor. Docked notes keep their position along the edge, clamp to available space, and place the resize grip away from the anchor. Right/Bottom layer surfaces keep a fixed origin on their resizing axis; only the actual note is in the input region. Pointer tests confirmed an 80x40 drag grows the note by 80x40 on every edge. Escape closes both types with Always open and the tool panel enabled.
+
+The existing 21px body and 23px Paper/Playful or 20px Minimal title sizes remain provisional. S/M/L, Regular/Bold, expanded colors, the final pin roles, and save-feedback presentation belong to stage 2 after preview review. The current checklist and settings remain available pending their supplied designs. Stage 1 does not authorize implementing those later stages.
+
+## Requested individual tools revision, October 1, 2026
+
+The user's follow-up authorizes the individual panel's Pin and text controls ahead of the rest of stage 2. Infinity is removed from the panel and runtime icon resources. Pin sits beside Checklist and reuses that view's Always open timer. The ordering control is now only in All Notes. Close and Escape remain available with Pin enabled.
+
+S/M/L and Regular/Bold replace the per-note font dropdown. Changes persist in `note_styles.settings`, update every live editor, and leave the compact tool panel hidden until opened. Regular and Bold set note text to weights 400 and 700. S/M/L body values are provisional 18/21/24px; Paper/Playful titles use 20/23/26px and Minimal titles use 17/20/23px. Font family comes only from global Settings; legacy font overrides still decode but are ignored and are not written back. Paper and shape overrides remain intact.
+
+The [tools preview](design-previews/2026-10-01-tools/README.md) records the renders and verification. The focused-panel Escape path now uses the note's normal Close action, including its failed-save guard. Pointer/keyboard checks passed on all four docked edges and from the nested More menu. The remaining color expansion, All Notes More controls, save-feedback changes, checklist/settings designs, and edge strip stay in their planned passes.
+
+## Updated reference review and proposed next steps, October 1, 2026
+
+The revised spec changes only the individual-tools clarification in section 3.1 and Settings draft in section 3.3. Its floating-panel, infinity/Pin and global-font corrections are already implemented. The received Settings image adds visual guidance and a fuller control list; it does not authorize implementation. The source still contains older conflicting rail dimensions, Pin behavior, fonts, All Notes size and checklist status. See the [change report](design-references/2026-10-01/README.md) for the carry-forward decisions.
+
+1. Review the saved compact UI and size previews; settle final numeric sizes when ready. Confirm/prune Settings sections and resolve the host, Minimal modes, position and Reposition details. Obtain the pending checklist item specification.
+2. Completed after the user authorized note controls: All Notes More parity, broader shared colors and their migration, and main-only routine save status with error toasts. Individual Pin and size/weight were reused.
+3. Continue with the four-note edge strip, shared ordering and integrated search. Coordinate its enablement and positioning with the settled Settings choices rather than building two unrelated mechanisms.
+4. Implement the settled Settings surface and checklist revision in separately authorized passes. Actual global shortcuts can follow core UI stabilization.
+5. Finish the existing visual, save-failure, desktop and performance checks before closing the milestone.
+
+The reference review stopped at documentation. The later instruction, "complete the note controls", authorizes the controls pass described below.
+
+
+## Completed note controls, October 1, 2026
+
+All Notes More and the individual panel share `note_controls.rs` for S/M/L, Regular/Bold and the four-column palette. Main More also exposes Checklist, bullet/numbered lists and the existing pattern override; Copy, Archive/Restore and Delete fit in a compact action row. The main footer remains exactly Pin / Pop out / More. Archived content and editing controls remain read-only until Restore. Font family remains a global Settings choice.
+
+The 16 colors are Amber, Orange, Red, Pink, Sage, Lime, Teal, Cyan, Blue, Indigo, Lilac, Magenta, Brown, Gray, Black and White. The original four storage names and shades remain unchanged. Paper/Minimal accents and markers use the tag accent; Playful uses its corresponding soft fill, including readable neutral fills. `003_note_colors.sql` updates schema 3 in a transaction and preserves every existing note column and style entry. Migration preservation, rollback, archive/delete Undo and color reopen tests cover the persistence changes.
+
+Individual routine save status and inline errors are removed. Each view reports a new save failure with a plain-text toast, retains the session's error/dirty state and suppresses repeated notifications for the same failure. Successful retry clears stale error toasts. All Notes keeps its save indicator and reduced-motion behavior. Main ordering Pin failures use the same shared error reporting rather than a duplicate action toast. Close/switch safeguards are unchanged.
+
+See the [controls verification and preview](design-previews/2026-10-01-note-controls/README.md). Text sizes remain provisional, Settings/checklist decisions are pending and the edge redesign has not started. This pass is uncommitted.
+
+### Reference polish follow-up
+
+Implemented presentation polish on the existing controls and note drawings. Collection filters now span All Notes as in the reference, while the 720x500 default and 240px sidebar remain. Search, filters and tools use consistent rounded corners. No new controls or persistence changes were added. Text sizing and the separate Settings, checklist and edge-strip passes remain open. Preview review is still pending.

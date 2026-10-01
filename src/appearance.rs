@@ -44,20 +44,15 @@ pub fn toggle(name: &str, label: &str) -> gtk::ToggleButton {
     button
 }
 
-pub fn color_class(color: NoteColor) -> &'static str {
-    match color {
-        NoteColor::Yellow => "note-yellow",
-        NoteColor::Blue => "note-blue",
-        NoteColor::Purple => "note-purple",
-        NoteColor::Green => "note-green",
-    }
+pub fn color_class(color: NoteColor) -> String {
+    format!("note-{}", color.name())
 }
 
 pub fn set_color(widget: &impl IsA<gtk::Widget>, color: NoteColor) {
-    for class in ["note-yellow", "note-blue", "note-purple", "note-green"] {
-        widget.remove_css_class(class);
+    for color in NoteColor::ALL {
+        widget.remove_css_class(&color_class(color));
     }
-    widget.add_css_class(color_class(color));
+    widget.add_css_class(&color_class(color));
 }
 
 pub fn dark(config: &Config) -> bool {
@@ -72,16 +67,64 @@ pub fn dark(config: &Config) -> bool {
     }
 }
 
-pub fn apply_note_font(provider: &gtk::CssProvider, config: &Config) {
+pub fn apply_note_font(
+    provider: &gtk::CssProvider,
+    config: &Config,
+    style: &crate::config::NoteStyle,
+) {
     let font = match config.font {
         Font::Theme if config.theme != Theme::Minimal => "'Virgil 3 YOFF', cursive",
         Font::Theme | Font::Grotesk => "Inter, sans-serif",
         Font::Mono => "'JetBrains Mono', monospace",
         Font::Handwritten => "'Virgil 3 YOFF', cursive",
     };
+    // Provisional preview values. Medium preserves the current body size.
+    let adjustment = match style.text_size {
+        crate::config::NoteTextSize::Small => -3,
+        crate::config::NoteTextSize::Medium => 0,
+        crate::config::NoteTextSize::Large => 3,
+    };
+    let body_size = 21 + adjustment;
+    let title_size = if config.theme == Theme::Minimal {
+        20
+    } else {
+        23
+    } + adjustment;
+    let weight = match style.text_weight {
+        crate::config::NoteTextWeight::Regular => 400,
+        crate::config::NoteTextWeight::Bold => 700,
+    };
     provider.load_from_data(&format!(
-        ".editor-title, .editor-body, .editor-body text, .inline-title, .inline-body, .inline-body text {{ font-family: {font}; }}"
+        ".editor-title, .editor-body, .editor-body text, .inline-title, .inline-body, .inline-body text {{ font-family: {font}; font-weight: {weight}; }}
+         .editor-title, .inline-title {{ font-size: {title_size}px; }}
+         .editor-body, .editor-body text, .inline-body, .inline-body text {{ font-size: {body_size}px; }}"
     ));
+}
+
+pub fn palette_css() -> String {
+    NoteColor::ALL
+        .into_iter()
+        .map(|color| {
+            let class = color_class(color);
+            let (r, g, b) = color.accent();
+            let swatch_ink = if matches!(
+                color,
+                NoteColor::Black | NoteColor::Indigo | NoteColor::Brown | NoteColor::Magenta
+            ) {
+                "white"
+            } else {
+                "#23262b"
+            };
+            format!(
+                ".icon-control.{class} {{ color: rgb({r},{g},{b}); }}
+            .note-tab.{class} {{ border-left-color: rgb({r},{g},{b}); }}
+            .edge-pill.{class}, .management .{class} .tag-bar,
+            .note-controls .color-swatch.{class} {{ background: rgb({r},{g},{b}); }}
+            .note-controls .color-swatch.{class} {{ color: {swatch_ink}; }}
+            "
+            )
+        })
+        .collect::<String>()
 }
 
 pub fn apply(provider: &gtk::CssProvider, config: &Config) {
@@ -97,22 +140,27 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         Font::Mono => "'JetBrains Mono', monospace",
         Font::Handwritten => "'Virgil 3 YOFF', cursive",
     };
+    let palette_css = palette_css();
     let tab_colors = if config.theme == Theme::Playful {
-        ".note-tab.note-yellow { background: #faf0bd; } .note-tab.note-blue { background: #b8d9f5; } .note-tab.note-purple { background: #e0c7f5; } .note-tab.note-green { background: #c5ebdc; }"
+        NoteColor::ALL
+            .into_iter()
+            .map(|color| {
+                let (r, g, b) = color.fill();
+                format!(
+                    ".note-tab.{} {{ background: rgb({:.0},{:.0},{:.0}); }}",
+                    color_class(color),
+                    r * 255.,
+                    g * 255.,
+                    b * 255.
+                )
+            })
+            .collect::<String>()
     } else {
-        ""
+        String::new()
     };
-    let radius = if config.theme == Theme::Playful {
-        14
-    } else {
-        0
-    };
+    let radius = 12;
     provider.load_from_data(&format!(r#"
         .edge-window, .hit-area, .note-window {{ background: transparent; }}
-        .icon-control.note-yellow {{ color: #c99932; }}
-        .icon-control.note-blue {{ color: #639cd1; }}
-        .icon-control.note-purple {{ color: #ac83bf; }}
-        .icon-control.note-green {{ color: #73a681; }}
         .metadata, .dim-label {{ color: {muted}; font-size: 11px; }}
         .editor-title {{ background: transparent; color: inherit; border: none; outline: none; box-shadow: none; font-family: {font}; font-weight: 400; padding: 0; min-width: 0; }}
         .editor-body, .editor-body text {{ background: transparent; color: inherit; font-family: {font}; }}
@@ -128,57 +176,57 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .strip-control {{ background: {bg}; color: {fg}; border: 1px solid {line}; border-radius: 50%; padding: 5px; }}
         .note-tab {{ background: {bg}; color: {fg}; border: 1px solid {line}; border-left-width: 3px; border-radius: {radius}px; padding: 8px 12px; box-shadow: 0 3px 8px alpha(black, 0.12); }}
         .note-tab:hover {{ background: mix({bg}, {fg}, 0.08); }}
-        .note-tab.note-yellow {{ border-left-color: #c99932; }}
-        .note-tab.note-blue {{ border-left-color: #639cd1; }}
-        .note-tab.note-purple {{ border-left-color: #ac83bf; }}
-        .note-tab.note-green {{ border-left-color: #73a681; }}
+        {palette_css}
         {tab_colors}
         .tab-title {{ font-family: {font}; font-size: 13px; }}
         .edge-pill {{ min-width: 5px; min-height: 16px; border-radius: 3px; margin: 3px 0; }}
-        .edge-pill.note-yellow {{ background: #c99932; }}
-        .edge-pill.note-blue {{ background: #639cd1; }}
-        .edge-pill.note-purple {{ background: #ac83bf; }}
-        .edge-pill.note-green {{ background: #73a681; }}
         popover contents {{ padding: 4px; }}
         popover button, popover modelbutton {{ min-height: 24px; padding: 4px 8px; font-size: 12px; }}
         scrollbar.vertical, scrollbar.vertical:hover {{ min-width: 6px; background: transparent; }}
         scrollbar.vertical slider, scrollbar.vertical:hover slider {{ min-width: 3px; min-height: 24px; margin: 0 1px; border: none; border-radius: 3px; }}
         scrollbar.horizontal, scrollbar.horizontal:hover {{ min-height: 6px; background: transparent; }}
         scrollbar.horizontal slider, scrollbar.horizontal:hover slider {{ min-height: 3px; min-width: 24px; margin: 1px 0; border: none; border-radius: 3px; }}
-        .save-error {{ color: #b54343; font-size: 11px; }}
         .individual {{ --note-ink: #2d2c29; --rail-bg: #fbf8f0; --rail-line: #e3e0d8; --rail-selected: #ece8df; }}
-        .individual.minimal {{ --note-ink: #292f36; --rail-bg: #f1f2f4; --rail-line: #cdd4db; --rail-selected: #d9e0e6; }}
+        .individual.minimal {{ --note-ink: #292f36; --rail-bg: #ffffff; --rail-line: #cdd4db; --rail-selected: #dceaff; }}
         .individual.minimal-dark {{ --note-ink: #edf1f5; --rail-bg: #23262b; --rail-line: #424a55; --rail-selected: #37414d; }}
         .individual.playful {{ --note-ink: #292a2d; --rail-bg: #faf9fc; --rail-line: #e3e0d8; --rail-selected: #f7e5ed; }}
-        .individual .editor-card {{ color: var(--note-ink); padding: 26px 20px 28px 32px; }}
+        .individual .editor-card {{ color: var(--note-ink); padding: 26px 26px 28px 30px; }}
         .individual .editor-title {{ font-size: 23px; }}
         .individual.minimal .editor-title {{ font-size: 20px; font-weight: 600; }}
         .individual .editor-body, .individual .editor-body text {{ font-size: 21px; }}
-        .individual .note-rail {{ background: var(--rail-bg); color: var(--note-ink); border: 1px solid var(--rail-line); border-radius: 6px; padding: 4px 2px; box-shadow: 0 3px 6px alpha(black, 0.12); }}
+        .individual .note-rail {{ font-family: Inter, sans-serif; font-size: 12px; background: var(--rail-bg); color: var(--note-ink); border: 1px solid var(--rail-line); border-radius: 16px; padding: 12px; }}
         .individual .note-rail button, .individual .note-rail popover button, .individual .note-rail popover label {{ color: var(--note-ink); }}
         .individual .note-rail .icon-control:checked {{ background: var(--rail-selected); }}
         .individual.playful .note-rail .icon-control:checked {{ background: #f5a4c7; color: #292a2d; }}
+        .note-controls .text-controls {{ border: 1px solid var(--rail-line); border-radius: 8px; }}
+        .note-controls .text-controls button {{ min-width: 0; min-height: 24px; padding: 3px 6px; border: 0; border-radius: 0; background: transparent; box-shadow: none; font-family: Inter, sans-serif; font-size: 12px; font-weight: 400; }}
+        .note-controls .text-controls button:first-child {{ border-radius: 7px 0 0 7px; }}
+        .note-controls .text-controls button:last-child {{ border-radius: 0 7px 7px 0; }}
+        .note-controls .text-controls button + button {{ border-left: 1px solid var(--rail-line); }}
+        .note-controls .text-controls button:hover {{ background: var(--rail-selected); }}
+        .note-controls .text-controls button:checked {{ background: var(--rail-selected); }}
+        .individual.playful .note-controls .text-controls button:checked {{ background: #f5a4c7; }}
         .individual .note-rail popover contents {{ background: var(--rail-bg); color: var(--note-ink); border: 1px solid var(--rail-line); padding: 8px; }}
-        .individual .note-rail .color-swatch {{ min-width: 26px; min-height: 26px; padding: 0; border-radius: 50%; color: #23262b; border: 2px solid transparent; box-shadow: none; }}
-        .individual .note-rail .color-swatch:checked {{ border-color: var(--note-ink); }}
-        .individual .note-rail .color-swatch.note-yellow {{ background: #d98c2b; }}
-        .individual .note-rail .color-swatch.note-blue {{ background: #5b8def; }}
-        .individual .note-rail .color-swatch.note-purple {{ background: #a98fd1; }}
-        .individual .note-rail .color-swatch.note-green {{ background: #6fae68; }}
-        .individual .note-rail dropdown button {{ background: var(--rail-selected); color: var(--note-ink); border: 1px solid var(--rail-line); box-shadow: none; font-size: 12px; min-height: 24px; padding: 4px 8px; }}
-        .individual .rail-grip {{ padding: 0; box-shadow: none; background: transparent; border: none; min-width: 24px; min-height: 32px; }}
-        .individual .rail-grip-mark {{ background: #a5a7a7; min-width: 3px; min-height: 24px; border-radius: 2px; }}
-        .individual .rail-grip:hover .rail-grip-mark {{ background: var(--note-ink); }}
-        .individual.minimal .note-rail, .individual.minimal .icon-control {{ border-radius: 0; }}
+        .individual .note-rail dropdown button {{ background: var(--rail-selected); color: var(--note-ink); border: 1px solid var(--rail-line); box-shadow: none; font-size: 12px; min-height: 24px; padding: 3px 6px; border-radius: 8px; }}
+        .individual .note-tools contents {{ padding: 0; background: var(--rail-bg); border: none; border-radius: 16px; box-shadow: 0 4px 12px alpha(black, .15); }}
+        .individual .rail-grip > button {{ padding: 3px; min-width: 22px; min-height: 22px; }}
+        .individual .tool-label {{ font-family: Inter, sans-serif; font-size: 11px; color: var(--note-ink); }}
+        .individual .rail-grip {{ opacity: .4; padding: 3px; min-width: 22px; min-height: 22px; color: var(--note-ink); }}
+        .individual .rail-grip:hover, .individual .rail-grip:focus-visible {{ opacity: 1; background: alpha(currentColor, .08); }}
+        .individual .note-resize {{ padding: 2px; min-width: 20px; min-height: 20px; border: none; border-radius: 6px; box-shadow: none; background: transparent; color: var(--note-ink); opacity: .3; }}
+        .individual .note-resize:hover, .individual .note-resize:focus-visible {{ opacity: .9; background: alpha(currentColor, .08); }}
+        .individual .note-resize.north-resize {{ padding: 0; min-width: 16px; min-height: 16px; }}
         .inline-check {{ margin-right: 8px; color: inherit; }}
         .inline-check check {{ color: inherit; min-width: 16px; min-height: 16px; border-radius: 3px; border: 1px solid currentColor; background: transparent; box-shadow: none; }}
         .inline-check check:checked {{ background: #30353b; border-color: #30353b; color: white; }}
         .individual.minimal-dark .inline-check check:checked, .management.minimal-dark .inline-check check:checked {{ background: #edf1f5; border-color: #edf1f5; color: #23262b; }}
-        .individual .note-save {{ color: var(--note-ink); font-family: Inter; font-size: 16px; min-width: 18px; }}
-        @keyframes note-saving {{ 0%, 100% {{ opacity: .25; }} 50% {{ opacity: 1; }} }}
-        .individual .saving-motion .note-save-dot {{ animation: note-saving 900ms ease-in-out infinite; }}
-        .individual .saving-motion .dot-1 {{ animation-delay: 150ms; }}
-        .individual .saving-motion .dot-2 {{ animation-delay: 300ms; }}
+        .note-controls {{ --note-ink: #2d2c29; --rail-line: #e3e0d8; --rail-selected: #ece8df; }}
+        .individual.minimal .note-controls {{ --note-ink: #292f36; --rail-line: #cdd4db; --rail-selected: #dceaff; }}
+        .individual.minimal-dark .note-controls {{ --note-ink: #edf1f5; --rail-line: #424a55; --rail-selected: #37414d; }}
+        .note-controls .color-swatch {{ min-width: 22px; min-height: 22px; padding: 0; border-radius: 50%; color: #23262b; border: 1px solid alpha(currentColor, .18); box-shadow: none; }}
+        .note-controls .color-swatch:checked {{ outline: 2px solid var(--note-ink); outline-offset: 1px; }}
+        .note-controls .type-label {{ font-family: Inter, sans-serif; font-size: 20px; }}
+        .note-controls .color-swatch:disabled {{ opacity: .4; }}
 
     "#));
 }
@@ -190,9 +238,8 @@ pub fn paper_background(
     seed: Rc<std::cell::Cell<u64>>,
 ) -> gtk::DrawingArea {
     let area = gtk::DrawingArea::new();
-    area.set_draw_func(move |area, cr, width, height| {
+    area.set_draw_func(move |_, cr, width, height| {
         let config = config.borrow();
-        let individual = area.has_css_class("individual-sheet");
         let w = f64::from(width - 16).max(1.);
         let h = f64::from(height - 16).max(1.);
         cr.translate(8., 8.);
@@ -202,27 +249,11 @@ pub fn paper_background(
             config.shape
         };
         let radius = match config.theme {
-            Theme::Minimal => 0.,
-            Theme::Paper if individual => 24.,
-            Theme::Paper => 10.,
-            Theme::Playful if individual => 24.,
-            Theme::Playful => 16.,
+            Theme::Minimal => (16., 16.),
+            Theme::Paper => (18., if shape == Shape::Square { 18. } else { 0. }),
+            Theme::Playful => (20., 20.),
         };
-        let radius = (
-            radius,
-            if config.theme == Theme::Paper && individual {
-                0.
-            } else {
-                radius
-            },
-        );
-        for offset in (1..=if config.theme == Theme::Playful && !individual {
-            0
-        } else {
-            5
-        })
-            .rev()
-        {
+        for offset in (1..=if config.theme == Theme::Playful { 0 } else { 5 }).rev() {
             let _ = cr.save();
             cr.translate(0., f64::from(offset));
             sheet_path(
@@ -247,9 +278,9 @@ pub fn paper_background(
             let _ = cr.fill();
             let _ = cr.restore();
         }
-        if config.theme == Theme::Playful && !individual {
+        if config.theme == Theme::Playful {
             let _ = cr.save();
-            cr.translate(3., 4.);
+            cr.translate(4., 5.);
             sheet_path(
                 cr,
                 w,
@@ -259,7 +290,7 @@ pub fn paper_background(
                 config.theme == Theme::Playful,
                 seed.get(),
             );
-            cr.set_source_rgba(0.16, 0.15, 0.14, 0.85);
+            cr.set_source_rgba(0.16, 0.15, 0.14, 0.5);
             let _ = cr.fill();
             let _ = cr.restore();
         }
@@ -273,28 +304,20 @@ pub fn paper_background(
             seed.get(),
         );
         let (r, g, b, a) = match config.theme {
-            Theme::Minimal if individual && dark(&config) => {
-                (38. / 255., 42. / 255., 45. / 255., 1.)
-            }
-            Theme::Minimal if individual => (238. / 255., 240. / 255., 243. / 255., 1.),
-            Theme::Minimal if dark(&config) => (0.14, 0.16, 0.19, 1.),
-            Theme::Minimal => (0.97, 0.98, 0.99, 1.),
+            Theme::Minimal if dark(&config) => (38. / 255., 42. / 255., 45. / 255., 1.),
+            Theme::Minimal => (0.99, 0.99, 0.99, 1.),
             Theme::Paper if config.white_paper => (1., 1., 1., 1.),
-            Theme::Paper if individual => (248. / 255., 241. / 255., 222. / 255., 1.),
-            Theme::Paper => (246. / 255., 239. / 255., 219. / 255., 1.),
-            Theme::Playful => match color.get() {
-                NoteColor::Yellow => (0.98, 0.93, 0.74, 1.),
-                NoteColor::Blue => (0.71, 0.85, 1., 1.),
-                NoteColor::Purple => (0.86, 0.80, 0.94, 1.),
-                NoteColor::Green if individual => (0.81, 0.97, 0.85, 1.),
-                NoteColor::Green => (0.65, 0.96, 0.86, 1.),
-            },
+            Theme::Paper => (248. / 255., 241. / 255., 222. / 255., 1.),
+            Theme::Playful => {
+                let (r, g, b) = color.get().fill();
+                (r, g, b, 1.)
+            }
         };
         cr.set_source_rgba(r, g, b, a);
         let _ = cr.fill_preserve();
         if config.theme == Theme::Playful {
             cr.set_source_rgb(0.16, 0.15, 0.14);
-            cr.set_line_width(if individual { 2.5 } else { 2. });
+            cr.set_line_width(3.);
         } else {
             cr.set_source_rgba(0.22, 0.24, 0.27, 0.16);
             cr.set_line_width(0.7);
@@ -329,16 +352,19 @@ pub fn paper_background(
                 }
             }
         }
-        if config.theme == Theme::Minimal {
-            let (r, g, b) = match color.get() {
-                NoteColor::Yellow => (0.79, 0.60, 0.20),
-                NoteColor::Blue if individual => (0.24, 0.62, 0.91),
-                NoteColor::Blue => (0.39, 0.61, 0.82),
-                NoteColor::Purple => (0.67, 0.51, 0.75),
-                NoteColor::Green => (0.45, 0.65, 0.51),
-            };
+        if config.theme != Theme::Playful {
+            let (r, g, b) = color.get().accent();
+            let (r, g, b) = (
+                f64::from(r) / 255.,
+                f64::from(g) / 255.,
+                f64::from(b) / 255.,
+            );
             cr.set_source_rgb(r, g, b);
-            cr.rectangle(0., 0., w, if individual { 3. } else { 2. });
+            if config.theme == Theme::Minimal {
+                cr.rectangle(0., 0., w, 5.);
+            } else {
+                cr.rectangle(0., 0., 7., h);
+            }
             let _ = cr.fill();
         }
     });

@@ -4,6 +4,7 @@ mod autostart;
 mod config;
 mod editor;
 mod manager;
+mod note_controls;
 mod note_session;
 mod platform;
 mod settings;
@@ -47,6 +48,7 @@ struct Ui {
     storage: Rc<Storage>,
     sessions: RefCell<HashMap<NoteId, Weak<note_session::NoteSession>>>,
     docked: RefCell<Option<Rc<editor::Editor>>>,
+    docked_offset: Cell<Option<(ScreenEdge, i32)>>,
     deck: RefCell<AppState>,
     separate: RefCell<HashMap<NoteId, SeparateNote>>,
     manager: RefCell<Option<manager::ManagerWindow>>,
@@ -56,12 +58,6 @@ struct Ui {
 
 impl Ui {
     fn refresh(self: &Rc<Self>) {
-        if let Some(editor) = self.docked.borrow().as_ref() {
-            editor.sync_pin();
-        }
-        for note in self.separate.borrow().values() {
-            note.editor.sync_pin();
-        }
         if let Some(manager) = self.manager.borrow().as_ref() {
             manager.refresh();
         }
@@ -299,6 +295,57 @@ impl Ui {
                 ui.open_separate(id);
             }
         });
+        if !detached {
+            editor.set_docked_size(editor::WIDTH, editor::HEIGHT);
+            let drag = gtk::GestureDrag::new();
+            drag.set_button(1);
+            drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+            let start = Rc::new(Cell::new((editor::WIDTH, editor::HEIGHT)));
+            let pointer_start = Rc::new(Cell::new((0., 0.)));
+            let initial = start.clone();
+            let initial_pointer = pointer_start.clone();
+            let weak = Rc::downgrade(self);
+            let weak_editor = Rc::downgrade(&editor);
+            drag.connect_drag_begin(move |gesture, _, _| {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                if let Some(editor) = weak_editor.upgrade()
+                    && let Some(ui) = weak.upgrade()
+                    && let Some(pointer) = ui.docked_pointer(gesture)
+                {
+                    initial.set(editor.docked_size());
+                    initial_pointer.set(pointer);
+                    editor.activity();
+                }
+            });
+            let weak = Rc::downgrade(self);
+            let weak_editor = Rc::downgrade(&editor);
+            drag.connect_drag_update(move |gesture, _, _| {
+                if let Some(ui) = weak.upgrade()
+                    && let Some(editor) = weak_editor.upgrade()
+                    && let Some((x, y)) = ui.docked_pointer(gesture)
+                {
+                    let (start_x, start_y) = pointer_start.get();
+                    let (dx, dy) = (x - start_x, y - start_y);
+                    let edge = ui.config.borrow().edge;
+                    let (width, height) = start.get();
+                    let dx = if edge == ScreenEdge::Right { -dx } else { dx };
+                    let dy = if edge == ScreenEdge::Bottom { -dy } else { dy };
+                    let (max_width, max_height) = ui.note_limits();
+                    editor.set_docked_size(
+                        (width + dx as i32).clamp(editor::MIN_WIDTH, max_width),
+                        (height + dy as i32).clamp(editor::MIN_HEIGHT, max_height),
+                    );
+                    ui.place_edge();
+                }
+            });
+            editor.resize.add_controller(drag);
+            let weak = Rc::downgrade(self);
+            editor.connect_size_changed(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_input(false);
+                }
+            });
+        }
         Some(editor)
     }
     fn open_docked(self: &Rc<Self>, id: NoteId) {
@@ -319,7 +366,9 @@ impl Ui {
         self.marker.set_visible(false);
         self.window.set_keyboard_mode(KeyboardMode::OnDemand);
         self.docked.replace(Some(editor.clone()));
+        self.docked_offset.set(None);
         self.window.set_layer(Layer::Overlay);
+        self.place_edge();
         self.update_visibility();
         self.set_input(false);
         editor.body.grab_focus();
@@ -332,6 +381,7 @@ impl Ui {
             }
             editor.stop();
             self.docked.borrow_mut().take();
+            self.docked_offset.set(None);
             self.deck.borrow_mut().dispatch(Action::CollapseDeck);
             self.stack.remove(&editor.root);
             self.marker.set_visible(true);
@@ -364,6 +414,41 @@ impl Ui {
             .build();
         window.add_css_class("note-window");
         window.set_child(Some(&editor.root));
+        // Present as a fixed-size note first so the compositor keeps it floating.
+        // Allow resizing once the mapped surface enters its initial monitor.
+        window.connect_realize(|window| {
+            if let Some(surface) = window.surface() {
+                let weak = window.downgrade();
+                surface.connect_enter_monitor(move |_, _| {
+                    if let Some(window) = weak.upgrade() {
+                        window.set_resizable(true);
+                    }
+                });
+            }
+        });
+        let resize = gtk::GestureClick::new();
+        resize.set_button(1);
+        resize.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = window.downgrade();
+        resize.connect_pressed(move |gesture, _, _, _| {
+            if let Some(window) = weak.upgrade()
+                && let Some(surface) = window.surface()
+                && let Ok(toplevel) = surface.downcast::<gtk::gdk::Toplevel>()
+                && let Some(event) = gesture.current_event()
+                && let Some((x, y)) = event.position()
+            {
+                toplevel.begin_resize(
+                    gtk::gdk::SurfaceEdge::SouthEast,
+                    gesture.current_event_device().as_ref(),
+                    1,
+                    x,
+                    y,
+                    gesture.current_event_time(),
+                );
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+            }
+        });
+        editor.resize.add_controller(resize);
         let weak = Rc::downgrade(self);
         window.connect_close_request(move |window| {
             if let Some(ui) = weak.upgrade() {
@@ -387,6 +472,7 @@ impl Ui {
             glib::Propagation::Proceed
         });
         let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let weak = window.downgrade();
         keys.connect_key_pressed(move |_, key, _, _| {
             if key == gtk::gdk::Key::Escape {
@@ -499,6 +585,11 @@ impl Ui {
             .save(&config::config_path())
             .map_err(|e| e.to_string())?;
         let login_changed = self.config.borrow().launch_at_login != config.launch_at_login;
+        if self.config.borrow().edge != config.edge
+            || self.config.borrow().marker_offset != config.marker_offset
+        {
+            self.docked_offset.set(None);
+        }
         self.config.replace(config.clone());
         if let Some(settings) = gtk::Settings::default() {
             settings.set_gtk_enable_animations(self.system_animations && !config.reduced_motion);
@@ -547,9 +638,34 @@ impl Ui {
         self.stack.set_halign(halign);
         self.stack.set_valign(valign);
         let horizontal = matches!(config.edge, ScreenEdge::Top | ScreenEdge::Bottom);
-        let width = if horizontal { 720 } else { WIDTH };
-        self.root.set_size_request(width, HEIGHT);
-        self.window.set_default_size(width, HEIGHT);
+        let (width, height) = if let Some(editor) = self.docked.borrow().as_ref() {
+            let (max_width, max_height) = self.note_limits();
+            let (width, height) = editor.docked_size();
+            editor.set_docked_size(width.min(max_width), height.min(max_height));
+            editor.set_resize_edge(match config.edge {
+                ScreenEdge::Right => gtk::gdk::SurfaceEdge::SouthWest,
+                ScreenEdge::Bottom => gtk::gdk::SurfaceEdge::NorthEast,
+                _ => gtk::gdk::SurfaceEdge::SouthEast,
+            });
+            let (width, height) = editor.docked_size();
+            (width, height)
+        } else {
+            (if horizontal { 720 } else { WIDTH }, HEIGHT)
+        };
+        // Keep the layer's origin fixed on the axes that would otherwise move
+        // during resizing. The input region still contains only the note.
+        let (surface_width, surface_height) = if self.docked.borrow().is_some() {
+            let (max_width, max_height) = self.note_limits();
+            match config.edge {
+                ScreenEdge::Right => (max_width, height),
+                ScreenEdge::Bottom => (width, max_height),
+                _ => (width, height),
+            }
+        } else {
+            (width, height)
+        };
+        self.root.set_size_request(surface_width, surface_height);
+        self.window.set_default_size(surface_width, surface_height);
         if let Some(display) = gtk::gdk::Display::default()
             && let Some(monitor) = display
                 .monitors()
@@ -560,14 +676,25 @@ impl Ui {
             let available = if horizontal {
                 geometry.width() - width
             } else {
-                geometry.height() - HEIGHT
+                geometry.height() - height
             };
             let perpendicular = if horizontal { Edge::Left } else { Edge::Top };
             self.window.set_anchor(perpendicular, true);
-            self.window.set_margin(
-                perpendicular,
-                (available.max(0) as f64 * config.marker_offset) as i32,
-            );
+            let available = available.max(0);
+            let default_offset = (f64::from(available) * config.marker_offset) as i32;
+            let offset = if self.docked.borrow().is_some() {
+                let offset = self
+                    .docked_offset
+                    .get()
+                    .filter(|(edge, _)| *edge == config.edge)
+                    .map_or(default_offset, |(_, offset)| offset)
+                    .clamp(0, available);
+                self.docked_offset.set(Some((config.edge, offset)));
+                offset
+            } else {
+                default_offset
+            };
+            self.window.set_margin(perpendicular, offset);
         }
         self.window.set_layer(
             if config.hide_in_fullscreen && self.docked.borrow().is_none() {
@@ -581,6 +708,42 @@ impl Ui {
         drop(config);
         self.set_input(!self.revealed.get() && self.docked.borrow().is_none());
     }
+    fn note_limits(&self) -> (i32, i32) {
+        gtk::gdk::Display::default()
+            .and_then(|display| {
+                display
+                    .monitors()
+                    .item(0)
+                    .and_downcast::<gtk::gdk::Monitor>()
+            })
+            .map(|monitor| {
+                let geometry = monitor.geometry();
+                (
+                    geometry.width().max(editor::MIN_WIDTH),
+                    geometry.height().max(editor::MIN_HEIGHT),
+                )
+            })
+            .unwrap_or((720, 500))
+    }
+    fn docked_pointer(&self, gesture: &gtk::GestureDrag) -> Option<(f64, f64)> {
+        let (x, y) = gesture.current_event()?.position()?;
+        let surface = self.window.surface()?;
+        let (width, height) = self.note_limits();
+        // Gesture offsets are relative to the moving grip. Use surface coordinates
+        // and our layer anchors so the corner follows the pointer while resizing.
+        Some(match self.config.borrow().edge {
+            ScreenEdge::Left => (x, y + f64::from(self.window.margin(Edge::Top))),
+            ScreenEdge::Right => (
+                x + f64::from(width - surface.width()),
+                y + f64::from(self.window.margin(Edge::Top)),
+            ),
+            ScreenEdge::Top => (x + f64::from(self.window.margin(Edge::Left)), y),
+            ScreenEdge::Bottom => (
+                x + f64::from(self.window.margin(Edge::Left)),
+                y + f64::from(height - surface.height()),
+            ),
+        })
+    }
     fn set_input(&self, dormant: bool) {
         let Some(surface) = self.window.surface() else {
             return;
@@ -588,14 +751,33 @@ impl Ui {
         let width = surface.width();
         let height = surface.height();
         let edge = self.config.borrow().edge;
+        if let Some(editor) = self.docked.borrow().as_ref() {
+            let bounds = editor.root.compute_bounds(&self.root);
+            let (x, y, w, h) = bounds.map_or_else(
+                || {
+                    let (w, h) = editor.docked_size();
+                    (0, 0, w, h)
+                },
+                |bounds| {
+                    (
+                        bounds.x() as i32,
+                        bounds.y() as i32,
+                        bounds.width().ceil() as i32,
+                        bounds.height().ceil() as i32,
+                    )
+                },
+            );
+            surface.set_input_region(Some(&gtk::cairo::Region::create_rectangle(
+                &gtk::cairo::RectangleInt::new(x, y, w, h),
+            )));
+            return;
+        }
         let (w, h) = if dormant {
             if matches!(edge, ScreenEdge::Top | ScreenEdge::Bottom) {
                 (150, 20)
             } else {
                 (20, 180)
             }
-        } else if self.docked.borrow().is_some() {
-            (editor::WIDTH, editor::HEIGHT)
         } else if matches!(edge, ScreenEdge::Top | ScreenEdge::Bottom) {
             (700, 190)
         } else {
@@ -728,6 +910,7 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
         provider,
         storage,
         docked: RefCell::new(None),
+        docked_offset: Cell::new(None),
         deck: RefCell::new(AppState::new(Vec::new())),
         separate: RefCell::new(HashMap::new()),
         manager: RefCell::new(None),
@@ -825,6 +1008,7 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
     }
     root.add_controller(drag);
     let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     {
         let weak = Rc::downgrade(&ui);
         keys.connect_key_pressed(move |_, key, _, _| {

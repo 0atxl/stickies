@@ -18,7 +18,7 @@ Stickies is a small, native Linux scratchpad. It uses Rust, GTK4/libadwaita, Way
 
 Documentation cleanup, the audit, and confirmed unused-code cleanup are complete. The UI checkpoint is committed as `fe97c94`. Remaining audit findings are listed in [code-audit.md](code-audit.md).
 
-1. Implement the approved UI revision in [ui-implementation-plan.md](ui-implementation-plan.md), starting with an authorized compact visual preview. The saved references and later user clarifications define its target. Both docked and separate notes are to be resizable. Settings, checklist behavior, and final text sizes remain pending.
+1. Continue the UI revision in [ui-implementation-plan.md](ui-implementation-plan.md) through separately authorized passes. The compact visual preview, resizing and complete note controls are implemented in the working tree, including All Notes More parity, the 16-color palette and save-error toasts. The [updated spec and Settings image](design-references/2026-10-01/README.md) are stored for planning; Settings sections/behavior, checklist behavior and final text sizes remain unsettled. The user authorized completion of note controls. Edge redesign, Settings and checklist implementation still require separately approved scopes.
 2. Resolve the remaining approved fixes and platform checks before closing phases 5A and 5B.
 3. Continue with cursor-following multi-monitor behavior, Google Drive sync, compositor validation, and packaging/release.
 

@@ -17,7 +17,6 @@
   <file>icons/playful/checklist.svg</file>
   <file>icons/playful/chevron-left.svg</file>
   <file>icons/playful/close.svg</file>
-  <file>icons/playful/infinity.svg</file>
   <file>icons/playful/more-dots.svg</file>
   <file>icons/playful/palette.svg</file>
   <file>icons/playful/pin-filled.svg</file>
@@ -27,7 +26,6 @@
   <file>icons/playful/settings-gear.svg</file>
   <file>icons/playful/sort.svg</file>
 <file>icons/stickies-pin-filled-symbolic.svg</file>
-<file>icons/stickies-infinity-symbolic.svg</file>
 <file>icons/stickies-checklist-symbolic.svg</file>
 <file>icons/stickies-palette-symbolic.svg</file>
 </gresource></gresources>

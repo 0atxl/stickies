@@ -9,7 +9,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::app::{Note, NoteColor, NoteId};
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -314,6 +314,12 @@ impl Storage {
         if version < 2 {
             let transaction = self.connection.transaction()?;
             transaction.execute_batch(include_str!("../migrations/002_note_style.sql"))?;
+            transaction.pragma_update(None, "user_version", 2)?;
+            transaction.commit()?;
+        }
+        if version < 3 {
+            let transaction = self.connection.transaction()?;
+            transaction.execute_batch(include_str!("../migrations/003_note_colors.sql"))?;
             transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             transaction.commit()?;
         }
@@ -374,22 +380,14 @@ fn stored_note_from_row(
 }
 
 const fn color_name(color: NoteColor) -> &'static str {
-    match color {
-        NoteColor::Yellow => "yellow",
-        NoteColor::Blue => "blue",
-        NoteColor::Purple => "purple",
-        NoteColor::Green => "green",
-    }
+    color.name()
 }
 
 fn parse_color(color: &str) -> Result<NoteColor, StorageError> {
-    match color {
-        "yellow" => Ok(NoteColor::Yellow),
-        "blue" => Ok(NoteColor::Blue),
-        "purple" => Ok(NoteColor::Purple),
-        "green" => Ok(NoteColor::Green),
-        _ => Err(StorageError::InvalidColor(color.to_owned())),
-    }
+    NoteColor::ALL
+        .into_iter()
+        .find(|value| value.name() == color)
+        .ok_or_else(|| StorageError::InvalidColor(color.to_owned()))
 }
 
 fn unix_timestamp_millis() -> i64 {
@@ -454,16 +452,134 @@ mod tests {
             storage.load_note_style(note.id).unwrap(),
             crate::config::NoteStyle::default()
         );
+        storage
+            .connection
+            .execute(
+                "INSERT INTO note_styles (note_id, settings) VALUES (?1, ?2)",
+                params![
+                    note.id.value() as i64,
+                    "font = 'mono'\npaper = 'dots'\nshape = 'torn'"
+                ],
+            )
+            .unwrap();
+        let legacy = storage.load_note_style(note.id).unwrap();
+        assert_eq!(legacy.legacy_font, Some(crate::config::Font::Mono));
+        assert_eq!(legacy.text_size, crate::config::NoteTextSize::Medium);
+        assert_eq!(legacy.text_weight, crate::config::NoteTextWeight::Regular);
+        assert_eq!(
+            legacy.resolve(&crate::config::Config::default()).font,
+            crate::config::Font::Theme
+        );
         let style = crate::config::NoteStyle {
-            font: Some(crate::config::Font::Mono),
+            text_size: crate::config::NoteTextSize::Large,
+            text_weight: crate::config::NoteTextWeight::Bold,
             paper: Some(crate::config::Paper::Dots),
             shape: Some(crate::config::Shape::Torn),
+            ..crate::config::NoteStyle::default()
         };
         storage.save_note_style(note.id, &style).unwrap();
         assert_eq!(storage.load_note_style(note.id).unwrap(), style);
         storage.archive_note(note.id).unwrap();
         storage.restore_note(note.id).unwrap();
         assert_eq!(storage.load_note_style(note.id).unwrap(), style);
+    }
+
+    #[test]
+    fn palette_migration_preserves_notes_styles_and_metadata() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/001_initial.sql"))
+            .unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/002_note_style.sql"))
+            .unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO notes VALUES
+            (1, 'Amber', 'Active', 'yellow', 0, 20, 111, 222, NULL, NULL),
+            (2, 'Blue', 'Pinned', 'blue', 1, 10, 333, 444, NULL, NULL),
+            (3, 'Lilac', 'Archived', 'purple', 0, 30, 555, 666, 777, NULL),
+            (4, 'Sage', 'Deleted', 'green', 1, 40, 888, 999, 1000, 1001);
+            INSERT INTO note_styles VALUES (2, 'text_size = \"large\"');",
+            )
+            .unwrap();
+        connection.pragma_update(None, "user_version", 2).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        fn snapshot(connection: &Connection) -> Vec<Vec<rusqlite::types::Value>> {
+            connection
+                .prepare("SELECT * FROM notes ORDER BY id")
+                .unwrap()
+                .query_map([], |row| (0..10).map(|i| row.get(i)).collect())
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        }
+        let before = snapshot(&connection);
+        let mut storage = Storage { connection };
+        storage.migrate().unwrap();
+        assert_eq!(snapshot(&storage.connection), before);
+        assert_eq!(
+            storage.load_note_style(NoteId::new(2)).unwrap().text_size,
+            crate::config::NoteTextSize::Large
+        );
+        assert_eq!(
+            storage
+                .connection
+                .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        for color in NoteColor::ALL {
+            let note = storage
+                .create_note(color.label(), "Palette", color)
+                .unwrap();
+            storage.archive_note(note.id).unwrap();
+            storage.delete_note(note.id).unwrap();
+            storage.undo_delete(note.id).unwrap();
+            storage.restore_note(note.id).unwrap();
+            assert_eq!(storage.load_note(note.id).unwrap().color, color);
+        }
+    }
+
+    #[test]
+    fn failed_palette_migration_rolls_back_tables_and_version() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/001_initial.sql"))
+            .unwrap();
+        connection
+            .execute_batch(include_str!("../migrations/002_note_style.sql"))
+            .unwrap();
+        // A corrupt orphan style must reject the migration without dropping data.
+        connection
+            .execute_batch("INSERT INTO note_styles VALUES (99, 'text_size = \"large\"');")
+            .unwrap();
+        connection.pragma_update(None, "user_version", 2).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        let mut storage = Storage { connection };
+        let note = storage
+            .create_note("Keep", "Content", NoteColor::Blue)
+            .unwrap();
+        assert!(storage.migrate().is_err());
+        assert_eq!(storage.load_note(note.id).unwrap(), note);
+        assert_eq!(
+            storage
+                .connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            storage.load_note_style(NoteId::new(99)).unwrap().text_size,
+            crate::config::NoteTextSize::Large
+        );
+        assert_eq!(storage.connection.query_row("SELECT count(*) FROM sqlite_master WHERE name IN ('notes_new', 'note_styles_new')", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
     }
 
     #[test]

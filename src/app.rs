@@ -17,6 +17,123 @@ pub enum NoteColor {
     Blue,
     Purple,
     Green,
+    Orange,
+    Red,
+    Pink,
+    Lime,
+    Teal,
+    Cyan,
+    Indigo,
+    Magenta,
+    Brown,
+    Gray,
+    Black,
+    White,
+}
+
+impl NoteColor {
+    pub const ALL: [Self; 16] = [
+        Self::Yellow,
+        Self::Orange,
+        Self::Red,
+        Self::Pink,
+        Self::Green,
+        Self::Lime,
+        Self::Teal,
+        Self::Cyan,
+        Self::Blue,
+        Self::Indigo,
+        Self::Purple,
+        Self::Magenta,
+        Self::Brown,
+        Self::Gray,
+        Self::Black,
+        Self::White,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Yellow => "yellow",
+            Self::Blue => "blue",
+            Self::Purple => "purple",
+            Self::Green => "green",
+            Self::Orange => "orange",
+            Self::Red => "red",
+            Self::Pink => "pink",
+            Self::Lime => "lime",
+            Self::Teal => "teal",
+            Self::Cyan => "cyan",
+            Self::Indigo => "indigo",
+            Self::Magenta => "magenta",
+            Self::Brown => "brown",
+            Self::Gray => "gray",
+            Self::Black => "black",
+            Self::White => "white",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Yellow => "Amber",
+            Self::Blue => "Blue",
+            Self::Purple => "Lilac",
+            Self::Green => "Sage",
+            Self::Orange => "Orange",
+            Self::Red => "Red",
+            Self::Pink => "Pink",
+            Self::Lime => "Lime",
+            Self::Teal => "Teal",
+            Self::Cyan => "Cyan",
+            Self::Indigo => "Indigo",
+            Self::Magenta => "Magenta",
+            Self::Brown => "Brown",
+            Self::Gray => "Gray",
+            Self::Black => "Black",
+            Self::White => "White",
+        }
+    }
+
+    pub const fn accent(self) -> (u8, u8, u8) {
+        match self {
+            Self::Yellow => (217, 140, 43),
+            Self::Blue => (91, 141, 239),
+            Self::Purple => (169, 143, 209),
+            Self::Green => (111, 174, 104),
+            Self::Orange => (239, 117, 48),
+            Self::Red => (218, 72, 72),
+            Self::Pink => (232, 103, 156),
+            Self::Lime => (153, 185, 57),
+            Self::Teal => (43, 153, 143),
+            Self::Cyan => (45, 169, 201),
+            Self::Indigo => (101, 105, 201),
+            Self::Magenta => (183, 77, 177),
+            Self::Brown => (154, 112, 82),
+            Self::Gray => (136, 144, 153),
+            Self::Black => (50, 54, 61),
+            Self::White => (244, 244, 244),
+        }
+    }
+
+    pub const fn fill(self) -> (f64, f64, f64) {
+        match self {
+            Self::Yellow => (0.98, 0.93, 0.74),
+            Self::Blue => (0.71, 0.85, 1.),
+            Self::Purple => (0.86, 0.80, 0.94),
+            Self::Green => (0.75, 0.97, 0.81),
+            Self::Orange => (1., 0.83, 0.67),
+            Self::Red => (1., 0.77, 0.76),
+            Self::Pink => (1., 0.81, 0.89),
+            Self::Lime => (0.89, 0.95, 0.68),
+            Self::Teal => (0.69, 0.91, 0.86),
+            Self::Cyan => (0.71, 0.92, 0.97),
+            Self::Indigo => (0.80, 0.82, 0.96),
+            Self::Magenta => (0.95, 0.78, 0.93),
+            Self::Brown => (0.88, 0.81, 0.73),
+            Self::Gray => (0.85, 0.88, 0.91),
+            Self::Black => (0.73, 0.76, 0.80),
+            Self::White => (0.98, 0.98, 0.98),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

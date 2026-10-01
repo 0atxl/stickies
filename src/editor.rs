@@ -1,7 +1,8 @@
 use crate::{
     app::{NoteColor, NoteId},
     appearance,
-    config::{Config, Font, Paper, Theme},
+    config::{Config, Paper, Theme},
+    note_controls::NoteControls,
     note_session::NoteSession,
     ui_assets,
 };
@@ -14,6 +15,8 @@ use std::{
 
 pub const WIDTH: i32 = 352;
 pub const HEIGHT: i32 = 376;
+pub const MIN_WIDTH: i32 = 300;
+pub const MIN_HEIGHT: i32 = 280;
 
 pub struct Editor {
     pub root: gtk::Overlay,
@@ -22,8 +25,11 @@ pub struct Editor {
     pub close: gtk::Button,
     pub separate: gtk::Button,
     pub keep: gtk::ToggleButton,
-    pin: gtk::ToggleButton,
-    syncing_pin: Cell<bool>,
+    pub resize: gtk::Button,
+    toolbar: gtk::Popover,
+    docked_size: Cell<(i32, i32)>,
+    resize_edge: Rc<Cell<gtk::gdk::SurfaceEdge>>,
+    syncing_style: Cell<bool>,
     session: Rc<NoteSession>,
     subscription: RefCell<Option<Rc<dyn Fn()>>>,
     config: Rc<RefCell<Config>>,
@@ -31,12 +37,11 @@ pub struct Editor {
     font_provider: gtk::CssProvider,
     background: gtk::DrawingArea,
     color: Rc<Cell<NoteColor>>,
-    status: gtk::Label,
-    save_indicator: gtk::Stack,
-    rail_reveal: gtk::Revealer,
+    toast: adw::ToastOverlay,
+    last_error: RefCell<Option<String>>,
+    error_toast: RefCell<Option<adw::Toast>>,
     pattern_choice: gtk::DropDown,
-    color_buttons: Vec<(gtk::ToggleButton, NoteColor)>,
-    color_label: gtk::Label,
+    controls: NoteControls,
     timeout: RefCell<Option<glib::SourceId>>,
     on_timeout: Box<dyn Fn()>,
     stopped: Cell<bool>,
@@ -48,11 +53,10 @@ impl Editor {
         config: Rc<RefCell<Config>>,
         on_timeout: impl Fn() + 'static,
     ) -> Rc<Self> {
-        let pinned = session.pinned();
         let root = gtk::Overlay::new();
-        root.set_size_request(WIDTH, HEIGHT);
-        root.set_halign(gtk::Align::Start);
-        root.set_valign(gtk::Align::Start);
+        root.set_size_request(MIN_WIDTH, MIN_HEIGHT);
+        root.set_hexpand(true);
+        root.set_vexpand(true);
         root.add_css_class("individual");
         let color = Rc::new(Cell::new(session.color()));
         let style = session.style();
@@ -62,12 +66,12 @@ impl Editor {
             color.clone(),
             Rc::new(Cell::new(session.id().value())),
         );
-        background.set_margin_start(44);
-        background.add_css_class("individual-sheet");
-        root.set_child(Some(&background));
+        let sheet = gtk::Overlay::new();
+        sheet.set_hexpand(true);
+        sheet.set_vexpand(true);
+        sheet.set_child(Some(&background));
         let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
         content.add_css_class("editor-card");
-        content.set_margin_start(44);
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         let title = gtk::Entry::new();
         title.add_css_class("editor-title");
@@ -76,27 +80,29 @@ impl Editor {
         title.set_placeholder_text(Some("Untitled note"));
         title.set_buffer(&session.title);
         let keep = appearance::toggle(
-            "view-continuous-symbolic",
-            "Always open · ignore inactivity timeout",
+            "view-pin-symbolic",
+            "Pin · Always open, ignore inactivity timeout",
         );
-        keep.set_child(Some(&ui_assets::image("infinity")));
+        keep.set_child(Some(&ui_assets::image("pin")));
+        // gtk-rs gates this GTK 4.0 API behind its v4_10 feature.
+        unsafe extern "C" {
+            fn gtk_accessible_update_property(
+                accessible: *mut std::ffi::c_void,
+                first_property: gtk::ffi::GtkAccessibleProperty,
+                ...
+            );
+        }
+        // GTK copies the label during this call and borrows the live button.
+        unsafe {
+            gtk_accessible_update_property(
+                keep.as_ptr().cast(),
+                gtk::ffi::GTK_ACCESSIBLE_PROPERTY_LABEL,
+                c"Always open".as_ptr(),
+                -1i32,
+            );
+        }
         let close = ui_assets::icon("close", "Close note · Escape");
         header.append(&title);
-        let save_indicator = gtk::Stack::new();
-        save_indicator.set_transition_type(gtk::StackTransitionType::Crossfade);
-        save_indicator.set_transition_duration(140);
-        save_indicator.add_css_class("note-save");
-        let dots = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        for i in 0..3 {
-            let dot = gtk::Label::new(Some("·"));
-            dot.add_css_class("note-save-dot");
-            dot.add_css_class(&format!("dot-{i}"));
-            dots.append(&dot);
-        }
-        save_indicator.add_named(&dots, Some("saving"));
-        save_indicator.add_named(&gtk::Label::new(Some("✓")), Some("saved"));
-        save_indicator.add_named(&gtk::Label::new(Some("!")), Some("error"));
-        header.append(&save_indicator);
         header.append(&close);
         let body = gtk::TextView::with_buffer(&session.body);
         body.add_css_class("editor-body");
@@ -111,13 +117,10 @@ impl Editor {
         session.attach_view(&body);
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
-            .vscrollbar_policy(gtk::PolicyType::External)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
             .vexpand(true)
             .child(&body)
             .build();
-        let pin = appearance::toggle("view-pin-symbolic", "Pin · show before unpinned notes");
-        pin.set_child(Some(&ui_assets::image("pin")));
-        pin.set_active(pinned);
         let checklist = appearance::icon(
             "checkbox-checked-symbolic",
             "Checklist · toggle current item",
@@ -126,49 +129,7 @@ impl Editor {
         let bullet = appearance::icon("view-list-bullet-symbolic", "Bullet list");
         let numbered = appearance::icon("view-list-ordered-symbolic", "Numbered list");
         let separate = ui_assets::icon("popout", "Open away from edge");
-        let palette = gtk::MenuButton::builder()
-            .icon_name("applications-graphics-symbolic")
-            .tooltip_text("Note appearance")
-            .build();
-        palette.add_css_class("icon-control");
-        palette.set_direction(gtk::ArrowType::Right);
-        palette.set_child(Some(&ui_assets::image("palette")));
-        let popover = gtk::Popover::new();
-        popover.set_position(gtk::PositionType::Right);
-        let swatches = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-        let mut color_buttons = Vec::new();
-        for (color, label) in [
-            (NoteColor::Yellow, "Amber"),
-            (NoteColor::Blue, "Blue"),
-            (NoteColor::Purple, "Lilac"),
-            (NoteColor::Green, "Sage"),
-        ] {
-            let button = gtk::ToggleButton::new();
-            button.add_css_class("color-swatch");
-            button.add_css_class(appearance::color_class(color));
-            button.set_tooltip_text(Some(label));
-            button.set_label(if session.color() == color { "✓" } else { "" });
-            button.set_active(session.color() == color);
-            swatches.append(&button);
-            color_buttons.push((button, color));
-        }
-        let customization = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        customization.append(&gtk::Label::new(Some("This note")));
-        let color_label = gtk::Label::new(None);
-        customization.append(&color_label);
-        customization.append(&swatches);
-        let font_choice = gtk::DropDown::from_strings(&[
-            "Default font",
-            "Grotesk",
-            "JetBrains Mono",
-            "Handwritten",
-        ]);
-        font_choice.set_selected(match style.font {
-            Some(Font::Grotesk) => 1,
-            Some(Font::Mono) => 2,
-            Some(Font::Handwritten) => 3,
-            _ => 0,
-        });
+        let controls = NoteControls::new();
         let paper_choice = gtk::DropDown::from_strings(&[
             "Default pattern",
             "Plain",
@@ -177,12 +138,9 @@ impl Editor {
             "Ruled",
         ]);
         paper_choice.set_selected(style.paper.map_or(0, |paper| paper as u32 + 1));
-        customization.append(&font_choice);
-        customization.append(&paper_choice);
-        popover.set_child(Some(&customization));
-        palette.set_popover(Some(&popover));
-        let rail = gtk::Box::new(gtk::Orientation::Vertical, 24);
+        let rail = gtk::Box::new(gtk::Orientation::Vertical, 8);
         rail.add_css_class("note-rail");
+        rail.set_width_request(120);
         let collapse = ui_assets::icon("chevron", "Collapse note menu");
         let more = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
@@ -201,67 +159,94 @@ impl Editor {
         ] {
             button.set_label(label);
             more_tools.append(button);
-            let menu = more_popover.clone();
-            button.connect_clicked(move |_| menu.popdown());
+            let menu = more_popover.downgrade();
+            button.connect_clicked(move |_| {
+                if let Some(menu) = menu.upgrade() {
+                    menu.popdown();
+                }
+            });
         }
+        more_tools.append(&paper_choice);
         more_popover.set_child(Some(&more_tools));
         more.set_popover(Some(&more_popover));
-        rail.append(&collapse);
-        rail.append(&pin);
-        rail.append(&keep);
-        rail.append(&checklist);
-        rail.append(&palette);
+        let rail_header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        rail_header.set_halign(gtk::Align::Center);
+        for button in [&collapse, keep.upcast_ref(), &checklist] {
+            rail_header.append(button);
+        }
+        rail.append(&rail_header);
+        rail.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        rail.append(&controls.root);
+        rail.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        more.set_halign(gtk::Align::Center);
         rail.append(&more);
-        let rail_reveal = gtk::Revealer::new();
-        rail_reveal.set_transition_type(gtk::RevealerTransitionType::SlideRight);
-        rail_reveal.set_transition_duration(if config.borrow().reduced_motion {
-            0
-        } else {
-            120
-        });
-        rail_reveal.set_child(Some(&rail));
-        rail_reveal.set_halign(gtk::Align::Start);
-        rail_reveal.set_valign(gtk::Align::Start);
-        rail_reveal.set_margin_top(12);
-        rail_reveal.set_margin_start(8);
-        let grip = gtk::Button::new();
+        let toolbar = gtk::Popover::new();
+        toolbar.set_autohide(false);
+        toolbar.set_has_arrow(false);
+        toolbar.set_position(gtk::PositionType::Left);
+        toolbar.add_css_class("note-tools");
+        toolbar.set_child(Some(&rail));
+        let toast = adw::ToastOverlay::new();
+        toast.set_child(Some(&sheet));
+        root.set_child(Some(&toast));
+        let grip = gtk::MenuButton::new();
+        grip.add_css_class("icon-control");
         grip.add_css_class("rail-grip");
-        grip.set_tooltip_text(Some("Open note menu"));
-        grip.set_halign(gtk::Align::Start);
-        grip.set_valign(gtk::Align::Start);
-        let grip_mark = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        grip_mark.add_css_class("rail-grip-mark");
-        grip_mark.set_halign(gtk::Align::Center);
-        grip_mark.set_valign(gtk::Align::Center);
-        grip.set_child(Some(&grip_mark));
-        grip.set_margin_start(24);
-        grip.set_margin_top(18);
-        let reveal = rail_reveal.clone();
-        grip.connect_clicked(move |button| {
-            reveal.set_reveal_child(true);
-            button.set_visible(false);
-        });
-        let reveal = rail_reveal.clone();
-        let handle = grip.clone();
+        grip.set_tooltip_text(Some("Open note tools"));
+        grip.set_child(Some(&ui_assets::image("more")));
+        grip.set_popover(Some(&toolbar));
+        header.prepend(&grip);
+        let panel = toolbar.downgrade();
         collapse.connect_clicked(move |_| {
-            reveal.set_reveal_child(false);
-            handle.set_visible(true);
+            if let Some(panel) = panel.upgrade() {
+                panel.popdown();
+            }
         });
-        let status = gtk::Label::new(None);
-        status.add_css_class("save-error");
-        status.set_visible(false);
-        status.set_wrap(true);
         let window_handle = gtk::WindowHandle::new();
         window_handle.set_child(Some(&header));
         content.append(&window_handle);
         content.append(&scroll);
-        content.append(&status);
-        root.add_overlay(&content);
-        root.set_measure_overlay(&content, true);
-        root.add_overlay(&rail_reveal);
-        root.add_overlay(&grip);
+        sheet.add_overlay(&content);
+        sheet.set_measure_overlay(&content, true);
+        let resize = gtk::Button::new();
+        resize.add_css_class("note-resize");
+        resize.set_tooltip_text(Some("Resize note"));
+        resize.set_margin_end(12);
+        resize.set_margin_bottom(12);
+        resize.set_halign(gtk::Align::End);
+        resize.set_valign(gtk::Align::End);
+        resize.set_cursor_from_name(Some("se-resize"));
+        let resize_edge = Rc::new(Cell::new(gtk::gdk::SurfaceEdge::SouthEast));
+        let mark = gtk::DrawingArea::new();
+        mark.set_size_request(16, 16);
+        let corner = resize_edge.clone();
+        mark.set_draw_func(move |area, cr, w, h| {
+            let color = area.style_context().color();
+            cr.set_source_rgba(
+                color.red().into(),
+                color.green().into(),
+                color.blue().into(),
+                1.,
+            );
+            if corner.get() == gtk::gdk::SurfaceEdge::SouthWest {
+                cr.translate(f64::from(w), 0.);
+                cr.scale(-1., 1.);
+            } else if corner.get() == gtk::gdk::SurfaceEdge::NorthEast {
+                cr.translate(0., f64::from(h));
+                cr.scale(1., -1.);
+            }
+            cr.set_line_width(1.4);
+            cr.set_line_cap(gtk::cairo::LineCap::Round);
+            for inset in [3., 8.] {
+                cr.move_to(inset, 13.);
+                cr.line_to(13., inset);
+            }
+            let _ = cr.stroke();
+        });
+        resize.set_child(Some(&mark));
+        sheet.add_overlay(&resize);
         let font_provider = gtk::CssProvider::new();
-        appearance::apply_note_font(&font_provider, &resolved.borrow());
+        appearance::apply_note_font(&font_provider, &resolved.borrow(), &style);
         title
             .style_context()
             .add_provider(&font_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
@@ -274,8 +259,10 @@ impl Editor {
             close,
             separate,
             keep,
-            pin: pin.clone(),
-            syncing_pin: Cell::new(false),
+            resize,
+            docked_size: Cell::new((WIDTH, HEIGHT)),
+            resize_edge,
+            syncing_style: Cell::new(false),
             session: session.clone(),
             subscription: RefCell::new(None),
             config,
@@ -283,100 +270,102 @@ impl Editor {
             font_provider,
             background,
             color,
-            status,
-            save_indicator,
-            rail_reveal,
+            toast,
+            last_error: RefCell::new(None),
+            error_toast: RefCell::new(None),
+            toolbar,
             pattern_choice: paper_choice.clone(),
-            color_buttons,
-            color_label,
+            controls,
             timeout: RefCell::new(None),
             on_timeout: Box::new(on_timeout),
             stopped: Cell::new(false),
         });
-        for (choice, field) in [(&font_choice, 0), (&paper_choice, 1)] {
+        // Popovers handle Escape before the containing window receives it.
+        for panel in [&editor.toolbar, &more_popover] {
+            let keys = gtk::EventControllerKey::new();
+            keys.set_propagation_phase(gtk::PropagationPhase::Capture);
             let weak = Rc::downgrade(&editor);
-            choice.connect_selected_notify(move |choice| {
+            keys.connect_key_pressed(move |_, key, _, _| {
                 if let Some(editor) = weak.upgrade() {
-                    if editor.syncing_pin.get() {
-                        return;
+                    editor.activity();
+                    if key == gtk::gdk::Key::Escape {
+                        editor.close.emit_clicked();
+                        return glib::Propagation::Stop;
                     }
+                }
+                glib::Propagation::Proceed
+            });
+            panel.add_controller(keys);
+        }
+        for (button, size) in &editor.controls.sizes {
+            let size = *size;
+            let weak = Rc::downgrade(&editor);
+            button.connect_toggled(move |button| {
+                if let Some(editor) = weak.upgrade()
+                    && button.is_active()
+                    && !editor.syncing_style.get()
+                {
                     let mut style = editor.session.style();
-                    let selected = choice.selected() as usize;
-                    match field {
-                        0 => {
-                            style.font = [
-                                None,
-                                Some(Font::Grotesk),
-                                Some(Font::Mono),
-                                Some(Font::Handwritten),
-                            ][selected]
-                        }
-                        _ => {
-                            style.paper = [
-                                None,
-                                Some(Paper::Plain),
-                                Some(Paper::Dots),
-                                Some(Paper::Grid),
-                                Some(Paper::Ruled),
-                            ][selected]
-                        }
-                    }
+                    style.text_size = size;
                     editor.session.set_style(style);
+                    editor.activity();
+                }
+            });
+        }
+        for (button, weight) in &editor.controls.weights {
+            let weight = *weight;
+            let weak = Rc::downgrade(&editor);
+            button.connect_toggled(move |button| {
+                if let Some(editor) = weak.upgrade()
+                    && button.is_active()
+                    && !editor.syncing_style.get()
+                {
+                    let mut style = editor.session.style();
+                    style.text_weight = weight;
+                    editor.session.set_style(style);
+                    editor.activity();
                 }
             });
         }
         let weak = Rc::downgrade(&editor);
+        paper_choice.connect_selected_notify(move |choice| {
+            if let Some(editor) = weak.upgrade()
+                && !editor.syncing_style.get()
+            {
+                let mut style = editor.session.style();
+                style.paper = [
+                    None,
+                    Some(Paper::Plain),
+                    Some(Paper::Dots),
+                    Some(Paper::Grid),
+                    Some(Paper::Ruled),
+                ][choice.selected() as usize];
+                editor.session.set_style(style);
+            }
+        });
+        let weak = Rc::downgrade(&editor);
         editor.subscription.replace(Some(session.subscribe(move || {
             if let Some(editor) = weak.upgrade() {
-                editor.syncing_pin.set(true);
-                let style = editor.session.style();
-                font_choice.set_selected(match style.font {
-                    Some(Font::Grotesk) => 1,
-                    Some(Font::Mono) => 2,
-                    Some(Font::Handwritten) => 3,
-                    _ => 0,
-                });
-                paper_choice.set_selected(style.paper.map_or(0, |p| p as u32 + 1));
-                editor.syncing_pin.set(false);
-                editor.sync_pin();
                 editor.refresh_appearance();
-                let error = editor.session.error();
-                editor.status.set_text(error.as_deref().unwrap_or(""));
-                editor.status.set_visible(error.is_some());
             }
         })));
-        if let Some(error) = session.error() {
-            editor.error(&error);
-        }
         {
             let weak = Rc::downgrade(&editor);
             editor.keep.connect_toggled(move |_| {
                 if let Some(e) = weak.upgrade() {
+                    e.refresh_appearance();
                     e.activity();
                 }
             });
         }
-        {
-            let weak = Rc::downgrade(&editor);
-            pin.connect_toggled(move |button| {
-                if let Some(e) = weak.upgrade() {
-                    if e.syncing_pin.get() {
-                        return;
-                    }
-                    e.session.set_pinned(button.is_active());
-                    e.activity();
-                }
-            });
-        }
-        for (button, color) in &editor.color_buttons {
+        for (button, color) in &editor.controls.colors {
             let color = *color;
             let weak = Rc::downgrade(&editor);
-            let popover = popover.clone();
             button.connect_clicked(move |_| {
                 if let Some(e) = weak.upgrade() {
                     e.session.set_color(color);
+                    e.activity();
                 }
-                popover.popdown();
             });
         }
         for (button, prefix) in [(checklist, "- [ ] "), (bullet, "- "), (numbered, "1. ")] {
@@ -437,34 +426,82 @@ impl Editor {
     pub fn id(&self) -> NoteId {
         self.session.id()
     }
-    fn error(&self, message: &str) {
-        self.status.set_text(message);
-        self.status.set_visible(true);
+    pub fn connect_size_changed(&self, callback: impl Fn() + 'static) {
+        self.background.connect_resize(move |_, _, _| callback());
+    }
+    pub fn docked_size(&self) -> (i32, i32) {
+        self.docked_size.get()
+    }
+    pub fn set_docked_size(&self, width: i32, height: i32) {
+        let size = (width.max(MIN_WIDTH), height.max(MIN_HEIGHT));
+        self.docked_size.set(size);
+        self.root.set_size_request(size.0, size.1);
+    }
+    pub fn set_resize_edge(&self, edge: gtk::gdk::SurfaceEdge) {
+        self.toolbar
+            .set_position(if edge == gtk::gdk::SurfaceEdge::SouthEast {
+                gtk::PositionType::Right
+            } else {
+                gtk::PositionType::Left
+            });
+        self.resize_edge.set(edge);
+        let left = edge == gtk::gdk::SurfaceEdge::SouthWest;
+        let top = edge == gtk::gdk::SurfaceEdge::NorthEast;
+        if top {
+            self.resize.add_css_class("north-resize");
+        } else {
+            self.resize.remove_css_class("north-resize");
+        }
+        self.resize.set_halign(if left {
+            gtk::Align::Start
+        } else {
+            gtk::Align::End
+        });
+        self.resize.set_valign(if top {
+            gtk::Align::Start
+        } else {
+            gtk::Align::End
+        });
+        self.resize.set_margin_start(if left { 12 } else { 0 });
+        self.resize.set_margin_end(if left {
+            0
+        } else if top {
+            10
+        } else {
+            12
+        });
+        self.resize.set_margin_top(if top { 10 } else { 0 });
+        self.resize.set_margin_bottom(if top { 0 } else { 12 });
+        self.resize.set_cursor_from_name(Some(if left {
+            "sw-resize"
+        } else if top {
+            "ne-resize"
+        } else {
+            "se-resize"
+        }));
+        self.resize.queue_draw();
     }
     pub fn flush(&self) -> bool {
         self.session.flush()
     }
     pub fn stop(&self) {
+        self.toolbar.popdown();
         self.stopped.set(true);
         if let Some(s) = self.timeout.borrow_mut().take() {
             s.remove();
         }
     }
-    pub fn sync_pin(&self) {
-        self.syncing_pin.set(true);
-        self.pin.set_active(self.session.pinned());
-        self.syncing_pin.set(false);
-    }
     pub fn refresh_appearance(self: &Rc<Self>) {
-        self.resolved
-            .replace(self.session.style().resolve(&self.config.borrow()));
-        appearance::apply_note_font(&self.font_provider, &self.resolved.borrow());
+        let style = self.session.style();
+        self.syncing_style.set(true);
+        self.controls
+            .sync(&style, self.session.color(), self.config.borrow().theme);
+        self.pattern_choice
+            .set_selected(style.paper.map_or(0, |p| p as u32 + 1));
+        self.syncing_style.set(false);
+        self.resolved.replace(style.resolve(&self.config.borrow()));
+        appearance::apply_note_font(&self.font_provider, &self.resolved.borrow(), &style);
         self.color.set(self.session.color());
-        for (button, color) in &self.color_buttons {
-            let selected = *color == self.session.color();
-            button.set_active(selected);
-            button.set_label(if selected { "✓" } else { "" });
-        }
         self.background.queue_draw();
         let config = self.resolved.borrow();
         for (class, enabled) in [
@@ -481,39 +518,20 @@ impl Editor {
                 self.root.remove_css_class(class);
             }
         }
-        self.color_label.set_text(match config.theme {
-            Theme::Paper => "Tag color in All Notes",
-            Theme::Minimal => "Top accent color",
-            Theme::Playful => "Note fill color",
-        });
         self.pattern_choice
             .set_visible(config.theme != Theme::Minimal);
-        self.rail_reveal
-            .set_transition_duration(if config.reduced_motion { 0 } else { 120 });
         ui_assets::refresh_icons(self.root.upcast_ref(), config.theme == Theme::Playful, true);
         let error = self.session.error();
-        self.save_indicator
-            .set_visible_child_name(if error.is_some() {
-                "error"
-            } else if self.session.is_dirty() {
-                "saving"
-            } else {
-                "saved"
-            });
-        self.save_indicator
-            .set_tooltip_text(Some(if error.is_some() {
-                "Could not save note"
-            } else if self.session.is_dirty() {
-                "Saving"
-            } else {
-                "Saved"
-            }));
-        if !config.reduced_motion
-            && gtk::Settings::default().is_some_and(|s| s.is_gtk_enable_animations())
-        {
-            self.save_indicator.add_css_class("saving-motion");
-        } else {
-            self.save_indicator.remove_css_class("saving-motion");
+        if *self.last_error.borrow() != error {
+            self.last_error.replace(error.clone());
+            if let Some(toast) = self.error_toast.borrow_mut().take() {
+                toast.dismiss();
+            }
+            if let Some(error) = error {
+                let toast = adw::Toast::builder().title(error).use_markup(false).build();
+                self.toast.add_toast(toast.clone());
+                self.error_toast.replace(Some(toast));
+            }
         }
     }
     pub fn activity(self: &Rc<Self>) {

@@ -1,7 +1,7 @@
 use crate::{
     app::{Note, NoteColor, NoteId},
     config::NoteStyle,
-    storage::Storage,
+    storage::{Storage, StorageError},
 };
 use gtk::{glib, prelude::*};
 use std::{
@@ -255,8 +255,9 @@ impl NoteSession {
         self.notify();
     }
 
-    pub fn set_pinned(&self, pinned: bool) {
-        match self.storage.set_note_pinned(self.id(), pinned) {
+    pub fn set_pinned(&self, pinned: bool) -> Result<(), StorageError> {
+        let result = self.storage.set_note_pinned(self.id(), pinned);
+        match &result {
             Ok(()) => {
                 self.pinned.set(pinned);
                 self.pin_error.borrow_mut().take();
@@ -268,6 +269,7 @@ impl NoteSession {
             }
         }
         self.notify();
+        result
     }
 
     pub fn sync_pin(&self) {
@@ -481,6 +483,66 @@ mod tests {
                 .is_active()
         );
 
+        for color in NoteColor::ALL {
+            swatch(second.root.upcast_ref(), color.label())
+                .unwrap()
+                .emit_clicked();
+            assert_eq!(session.color(), color);
+            assert!(
+                swatch(first.root.upcast_ref(), color.label())
+                    .unwrap()
+                    .is_active()
+            );
+            assert!(session.flush());
+            assert_eq!(
+                Storage::open(&path).unwrap().load_note(id).unwrap().color,
+                color
+            );
+        }
+        // Leave one pending color edit for the closing-view autosave check.
+        swatch(second.root.upcast_ref(), "Blue")
+            .unwrap()
+            .emit_clicked();
+
+        first.keep.set_active(true);
+        assert!(!second.keep.is_active(), "Always open belongs to one view");
+        assert!(!session.pinned(), "individual Pin must not change ordering");
+        assert!(!storage.load_note(id).unwrap().pinned);
+        first.keep.set_active(false);
+
+        swatch(first.root.upcast_ref(), "Large text")
+            .unwrap()
+            .emit_clicked();
+        swatch(first.root.upcast_ref(), "Bold text")
+            .unwrap()
+            .emit_clicked();
+        let text_style = session.style();
+        assert_eq!(text_style.text_size, crate::config::NoteTextSize::Large);
+        assert_eq!(text_style.text_weight, crate::config::NoteTextWeight::Bold);
+        assert_eq!(storage.load_note_style(id).unwrap(), text_style);
+        assert!(
+            swatch(second.root.upcast_ref(), "Large text")
+                .unwrap()
+                .is_active()
+        );
+        assert!(
+            swatch(second.root.upcast_ref(), "Bold text")
+                .unwrap()
+                .is_active()
+        );
+        assert!(
+            !swatch(second.root.upcast_ref(), "Medium text")
+                .unwrap()
+                .is_active()
+        );
+        assert!(
+            !swatch(second.root.upcast_ref(), "Regular text")
+                .unwrap()
+                .is_active()
+        );
+
+        // Count content saves separately from these immediate style writes.
+        saves.set(0);
         // A closing view must not cancel the other view's pending autosave.
         first.stop();
         drop(first);
@@ -493,6 +555,11 @@ mod tests {
         assert_eq!(saved.title, "Shared title");
         assert_eq!(saved.body, "- [x] Shared body");
         let reopened = NoteSession::new(saved, storage.clone(), || {});
+        assert_eq!(reopened.style(), text_style);
+        assert_eq!(
+            Storage::open(&path).unwrap().load_note_style(id).unwrap(),
+            text_style
+        );
         let reopened_view = gtk::TextView::with_buffer(&reopened.body);
         reopened.attach_view(&reopened_view);
         let reopened_check = reopened
@@ -569,14 +636,14 @@ mod tests {
         assert_eq!(storage.load_note(id).unwrap().body, "- [ ] Replacement");
 
         connection.execute_batch("CREATE TRIGGER reject_pin BEFORE UPDATE ON notes BEGIN SELECT RAISE(FAIL, 'pin failure'); END;").unwrap();
-        session.set_pinned(true);
+        assert!(session.set_pinned(true).is_err());
         assert!(session.error().unwrap().contains("Could not change pin"));
         session.body.insert_at_cursor("!");
         assert!(!session.flush());
         connection
             .execute_batch("DROP TRIGGER reject_pin;")
             .unwrap();
-        session.set_pinned(true);
+        session.set_pinned(true).unwrap();
         assert!(
             session.error().unwrap().contains("Keep this note open"),
             "pin retry must not hide body-save failure"
@@ -591,6 +658,19 @@ mod tests {
                 .error()
                 .unwrap()
                 .contains("Could not save appearance")
+        );
+        assert_eq!(
+            session.style(),
+            text_style,
+            "failed style writes retain the previous style"
+        );
+        swatch(second.root.upcast_ref(), "Small text")
+            .unwrap()
+            .emit_clicked();
+        assert!(
+            swatch(second.root.upcast_ref(), "Large text")
+                .unwrap()
+                .is_active()
         );
         connection
             .execute_batch("DROP TRIGGER reject_style;")
