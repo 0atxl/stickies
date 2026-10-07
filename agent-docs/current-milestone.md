@@ -2,22 +2,17 @@
 
 ## Status and next steps
 
-The user confirmed the visual review is complete and explicitly requested committing and pushing before further work. Playful, Minimal Light and Minimal Dark are approved, along with the filter spacing, corner/paragraph consistency, canvas-pattern and unified Appearance corrections. The [final four-theme GTK gallery](design-previews/2026-10-01-theme-review/unified-appearance/preview.html) records the reviewed result. This authorization covers the current checkpoint and push; it does not start the remaining Settings, edge or checklist stages. Native pointer, Escape and timer checks remain outstanding for the broader milestone.
+The theme and Appearance review is approved and committed/pushed as `b63a1b1`, "Polish reviewed themes and unify Appearance drawer". Paper, Playful, Minimal Light and Minimal Dark retain their approved note appearance and text sizes. The [theme gallery](design-previews/2026-10-01-theme-review/unified-appearance/preview.html) records that checkpoint.
 
+The October 7 lightweight edge implementation keeps titled tabs and utilities beside an open note or Search panel. The [new GTK gallery and recordings](design-previews/2026-10-07-lightweight-edge/preview.html) and [review record](design-previews/2026-10-07-lightweight-edge/README.md) cover the implementation and verification. Both layer windows retain fixed screen geometry; edge state changes and CSS feedback have no animation. Tabs/Search keep transient fullscreen/DND policy, while committed notes retain their visibility protection. The approved note appearances and previous uncommitted work remain. The user authorized committing this checkpoint on October 7. No push or further implementation is authorized by that request. Wider milestone checks remain open. Earlier dated sections record historical behavior and review states.
 
-The core note app, All Notes window, and Paper, Playful, Minimal Light/Dark appearances are implemented. The latest committed application-code checkpoint is `8ec7c37`, including shared note controls and reference polish. The references and implementation plan are committed as `65e3758`. The authorized stage 1 visual preview is implemented and verified in the working tree; visual approval is pending. The user also authorized the individual panel's Pin, size, and weight controls, with font family limited to global Settings. The user has now authorized completion of the remaining note controls. All Notes More parity, the expanded shared palette and save feedback are implemented in the working tree. Edge-strip work remains unfinished.
-
-Documentation cleanup, the code audit and the approved unused-code cleanup are complete. The UI checkpoint is committed locally. On September 30, 2026, the user supplied final visual references and clarified the next UI revision. The originals are saved in [design-references/2026-09-30](design-references/2026-09-30/README.md), and the work order is in [ui-implementation-plan.md](ui-implementation-plan.md). Storing the references and writing the plan did not change application code.
-
-The updated spec and Settings image are saved in [design-references/2026-10-01](design-references/2026-10-01/README.md). Only the individual-tools clarifications and the fuller Settings draft changed from the original spec. The tools corrections are already implemented; Settings scope/behavior, checklist design and final text sizes remain pending. The reference update was documentation-only. The subsequent request, "complete the note controls", authorizes the remaining controls pass; Settings, edge and checklist implementation remain outside that scope. Separate audit findings remain open in code-audit.md. Complete the outstanding checks before declaring phases 5A and 5B finished. Do not start multi-monitor or sync implementation during this milestone.
-
-The remaining product scope and work order are in [implementation.md](implementation.md).
+The current milestone remains final UI work and phase 5A/5B verification. Settings host/behavior, checklist redesign, installed login launch, final performance and remaining compositor checks are unfinished. Multi-monitor, sync and custom ordering remain later work. The [implementation plan](ui-implementation-plan.md), [manual checklist](manual-testing.md) and [open audit findings](code-audit.md) define the remaining scope. The stored reference documents are visual guidance; direct user decisions take precedence.
 
 ## Agreed UI revision
 
-Direct user decisions below take precedence over conflicting details in both saved UI/UX versions and earlier UI plans. Stage 1 implements appearance, layout, floating tools and resizing. Individual Pin, size and weight are also implemented. The remaining note controls are implemented. Edge strip, Settings and checklist work follow the implementation plan and need their own authorization.
+Direct user decisions below take precedence over conflicting details in both saved UI/UX versions and earlier UI plans. Stage 1 implements appearance, layout, floating tools and resizing. Individual Pin, size and weight are also implemented. The remaining note controls are implemented. The edge strip is implemented and under review. Settings and checklist work follow the implementation plan and need their own authorization.
 
-- Four edge notes in the same ordering as All Notes. Replace the two existing title layouts with the reference's vertical tabs. Use resting dots, New note/Search/All Notes utility controls, integrated search, and one theme-following docked note with a decorative pointer. Custom ordering remains later work.
+- Four edge notes in the same ordering as All Notes. Replace the two existing title layouts with vertical tabs on Left/Right and upright horizontal tabs on Top/Bottom. Use resting dots, New note/Search/All Notes utility controls, integrated search, and one theme-following docked note with a decorative pointer. Custom ordering remains later work.
 - Keep All Notes compact at a 720x540 default and resizable. Its footer stays Pin / Pop out / More. More contains the other note tools. Keep the existing 240px list and responsive drawer arrangement until the received Settings draft's host and width are settled.
 - Make both docked and separate individual notes resizable, with matching minimum sizes and a subtle hover-enhanced corner grip. Preserve edge anchoring, wrapping, and vertical scrolling for long content.
 - Keep the individual toolbar hidden by default. Its subtle opening control becomes clearer on hover and opens on click. The expanded toolbar shows compact size, weight, and color controls based on `tools.png`. Keep Close visible. Routine save status appears only in All Notes; errors use toasts in the affected view.
@@ -30,7 +25,7 @@ Direct user decisions below take precedence over conflicting details in both sav
 
 ## Existing behavior to preserve
 
-- Pinned active notes precede unpinned notes. Overflow stays available in All Notes. Opening a docked note hides the titles. Closing or Escape restores them. Hover does not replace an open note.
+- Pinned active notes precede unpinned notes. Overflow stays available in All Notes. Tabs and utilities remain visible and stationary beside docked notes and Search. Closing or Escape returns to the same expanded strip position. Clicking a different tab switches notes after a successful flush; hover never replaces an open note. Failed saves retain the editor. Edge reveal, collapse, switching and resizing have no animation, including with reduced motion disabled.
 - Open away from edge creates or focuses a separate window without removing or reordering the note. Several different notes can remain open. No attachment/detachment animations.
 - The current All Notes drawer is 260px and overlays below 980px. Individual notes default to 352x376 and resize to a minimum of 300x280. The tool panel floats beside the note without changing those dimensions.
 - All Notes has a directly editable note, shared live title/body with individual windows, search/sort, and Pin / Pop out / More actions. Copy text copies the live body. Archive, restore, and deletion Undo are implemented.
@@ -58,8 +53,8 @@ Direct user decisions below take precedence over conflicting details in both sav
 
 Use [manual-testing.md](manual-testing.md) for the current checkpoint and [ui-implementation-plan.md](ui-implementation-plan.md) for the revision's acceptance checks. Update the manual checklist as the revision lands.
 
-- Final user review of All Notes, individual notes, themes, toolbar controls and text sizes. Settle the received Settings draft and obtain the pending checklist item design before their implementation passes.
-- Finish the single vertical edge-strip design and integrated search. Verify four-note ordering, pointer targeting, title readability, all four edges, keyboard focus, and reduced motion.
+- Review the new edge strip and apply any requested corrections. Settle the Settings host/behavior and obtain the checklist item design before their implementation passes.
+- Review the implemented edge-strip previews. Complete any visual corrections within this pass before proceeding to Settings or checklist work. See its review record for native and GTK checks.
 - Verify the two-minute timeout and Always open with the final UI.
 - Verify fullscreen hides the strip while open notes stay visible. DND currently reads Omarchy shell state; other notification servers are not supported yet.
 - Verify installed launch after login. A generated autostart entry alone does not prove this works.
@@ -211,3 +206,41 @@ The user confirmed that visual review was already complete and requested commit 
 | Minimal Dark | Approved, including subsequent corrections |
 
 The shared filter spacing, corner/paragraph consistency, canvas patterns and unified Appearance drawer corrections are also approved. No theme in this cycle remains under review or not started. The checkpoint includes implementation, review documentation and separately saved GTK previews. Formatting, 22 tests, strict Clippy, release build, diff checks and the GTK shared-editor regression passed at the reviewed code state. Native pointer/Escape/timer and broad phase 5A/5B checks remain outstanding. No later milestone work is authorized by this checkpoint request.
+
+## Edge-strip review, October 1, 2026
+
+The authorized edge pass uses four active notes in the same live Recent/Title ordering as All Notes, including pinned priority. Reopening All Notes retains that sort within the current app session. Older layout/count fields still load, while runtime uses four vertical tabs. The coordinator receives successful blank-note creation immediately. Storage shares the existing ordering clauses; no database migration or custom ordering was added.
+
+Resting dots are 8px with 6px gaps. Tabs are 34x80px, with 4px gaps and rotated Inter 11px/600 titles. The slightly longer tabs keep Groceries readable. New note, Search and All Notes use 34x28px rectangles and the existing icon packs. Left/Right arrange the tabs vertically; Top/Bottom arrange those same vertical tabs across the edge. Long titles truncate with full-title tooltips.
+
+Search stays in the strip at 288x300px, queries active titles/bodies including overflow, supports Up/Down and Enter, and creates a note titled from a nonempty query when no result exists. Escape restores tabs. Search opens around the initiating utility button along the edge so resizing does not move the pointer outside the panel and discard focus. Losing focus to another window restores tabs. Focus still follows compositor policy. Opening a result reuses the existing shared session and separate-window reuse rules.
+
+Hover has a 140ms dwell and 350ms leave grace. Normal tab hover shifts 4px over 140ms, and stack transitions take 180ms. Reduced motion and system-disabled animation suppress both. Marker dragging is preserved; rejected drags cannot reset its position after a tab/utility click.
+
+The edge surface fits resting/tabs/search content. Docked Right/Bottom retain the existing transparent extent needed for stable resizing, with only the note in the input region. Layer placement ignores panel exclusive zones without reserving workspace space, matching the screen geometry used for clamping and preventing end positions from extending beyond the display. The decorative pointer has no hit target and uses each theme's sheet fill and border. Approved editors and text sizes are unchanged.
+
+The [review record](design-previews/2026-10-01-edge-strip/README.md) contains verification results and remaining differences. Edge appearance is under review. Settings and checklist redesign have not started. No commit or push for this pass.
+
+Edge verification completed: formatting, strict Clippy, 23 non-display tests, the existing shared-editor GTK regression, release build and diff checks passed. The complete corrected native probe passed four-edge interactions, marker dragging, real search typing/Enter, click-away, sorting/reopen and motion checks. GTK captures passed every theme/anchor at default and minimum note sizes and both end positions. DND/layer policy passed isolated checks. Actual fullscreen coverage, installed login, timer independence and final performance remain wider milestone checks. Visual edge approval is pending.
+
+
+## Edge transition and orientation correction, October 3, 2026
+
+The user's recording demonstrates malformed intermediate states despite earlier functional checks. The authorized correction removes the differently sized Stack crossfade and per-tab hover translation, keeps Right/Bottom transparent extent constant across states, limits input to visible content and avoids clearing retained anchors. An isolated transition-disabled check established that removing crossfade alone was insufficient. Fresh native recordings reproduce the before failures and show the corrected opening, closing and Search rendering. [Correction evidence and launch commands](design-previews/2026-10-01-edge-strip/correction-2026-10-03/README.md) accompany the updated gallery; all earlier artifacts remain.
+
+Top/Bottom now have measured, capped horizontal tabs with upright labels, aligned utilities and truncation/tooltips. Left/Right orientation and all approved note appearances remain. Group spacing is 12px; dwell/leave grace remain 140/350ms. Utility hover retains an opaque theme fill, with fresh native checks of all three utilities in every theme. All four edges pass held resting-marker dragging, native search/Enter/Escape, resizing and repeated cycles. Transparent extent passes click-through to disposable All Notes. Four-theme GTK captures check default/minimum notes, Search and both ends; horizontal long-title, fewer-note and empty states pass. The review launcher verifies the current release executable and isolates notes/config and D-Bus on every edge.
+
+Formatting, strict locked Clippy, 23 ordinary tests, the focused GTK geometry regression, existing shared-editor GTK regression, release build and diff checks pass. No Settings/reposition selector, checklist redesign, persistence change, desktop configuration change, commit or push. Reposition discoverability remains unresolved because dragging starts only on resting dots before hover reveals tabs. Original recording review uses extracted frames; direct browser playback of that local file is blocked by browser policy. Saved disposable before/final-after recordings were inspected at normal speed in the gallery and through intermediate frames. Visual/hands-on approval and wider milestone checks remain pending. Stop for this review.
+
+
+## Lightweight persistent edge strip, October 7, 2026
+
+The user's explicit implementation request supersedes hiding tabs while content is open and removes all edge animation. The [review record](design-previews/2026-10-07-lightweight-edge/README.md) explains the stable geometry, disjoint input regions, focus handoff, save guards and verification. The [gallery](design-previews/2026-10-07-lightweight-edge/preview.html) keeps all four themes and edges, normal-speed native recordings and approved-note regression views. Earlier captures remain untouched.
+
+Marker dragging remains available only from resting dots and has the same discoverability limitation. Settings, checklist redesign, custom ordering, sync, multi-monitor, desktop configuration and later milestone work remain outside this pass. Stop for visual and hands-on review; do not treat implementation or test results as approval. No commit or push.
+
+## Edge checkpoint authorization, October 7, 2026
+
+The user requested a commit of the accumulated edge work through the lightweight persistent-tab implementation. This supersedes the earlier no-commit instruction for this scope. Include the existing edge ordering, Search, orientation corrections, stable placement, focus/save safeguards and tracked verification documentation. The gallery and recordings remain saved locally under the existing agent-docs ignore rule. No push was requested.
+
+The next proposed implementation pass is Settings. The current gear opens Appearance only: theme, Minimal mode, global font/reset, canvas pattern and reduced motion. Edge controls and Behavior controls from the draft are not exposed there. Resolve the Settings host, true strip enablement and reposition commit/cancel behavior before implementation. Shortcut registration and checklist redesign still require their own decisions. Installed-login, timer/Always open and final performance verification remain open.

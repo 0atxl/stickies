@@ -4,14 +4,13 @@ Started September 30, 2026; updated October 1, 2026. The references and initial 
 
 ## Sources and scope
 
-Playful, Minimal Light and Minimal Dark are visually approved. The user confirmed the review was already complete and explicitly requested commit and push before moving forward. This also approves the subsequent filter spacing, corner/paragraph consistency, canvas-pattern and unified Appearance corrections shown in the [final GTK gallery](design-previews/2026-10-01-theme-review/unified-appearance/preview.html). Include this implementation, documentation and saved previews in the checkpoint. This does not authorize starting the remaining Settings, edge or checklist stages. Native pointer/Escape/timer verification remains outstanding for the wider milestone. Earlier sections retain the historical approval sequence.
-
+The prior theme and unified Appearance review is approved and committed/pushed as `b63a1b1`. The user subsequently authorized stage 3, the edge-strip redesign. Its [GTK gallery](design-previews/2026-10-01-edge-strip/preview.html) is under visual review. Settings and checklist redesign remain unstarted and require their own approved scope. This edge pass does not authorize commit or push. Earlier dated sections retain the historical approval sequence.
 
 The [September 30 reference set](design-references/2026-09-30/README.md) contains the original UI/UX document, nine images, and two SVG packs. The [October 1 update](design-references/2026-10-01/README.md) preserves the revised spec, Settings image and change report. Direct user decisions take precedence over conflicting reference text or example imagery. The reference update was documentation-only. The subsequent request authorizes completing the note controls. It does not authorize Settings, edge or checklist implementation, commit or push.
 
 Use the current Rust, GTK4/libadwaita, Layer Shell, SQLite, and shared `NoteSession` implementation. Preserve note data, live cross-view editing, autosave, failed-save retention, archive/restore, deletion Undo, and Copy text. Keep existing module responsibilities. No replacement editor, generic event system, new UI framework, or independent note buffers are needed.
 
-Multi-monitor work, sync, custom/manual ordering, and release expansion remain later roadmap work. The Settings reference has arrived, but its draft scope and open behavior choices need settling. Checklist redesign still depends on further user input. Stage 1 and the requested removal of infinity, individual Always open Pin, size/weight rows and Settings-only font family are implemented. The remaining note-controls work is now authorized and implemented. The edge and Settings/checklist stages require their own authorization. The requested checkpoint commit covered the saved references and plan before stage 1 changes.
+Multi-monitor work, sync, custom/manual ordering, and release expansion remain later roadmap work. The Settings reference has arrived, but its draft scope and open behavior choices need settling. Checklist redesign still depends on further user input. Stage 1 and the requested removal of infinity, individual Always open Pin, size/weight rows and Settings-only font family are implemented. The remaining note-controls work is now authorized and implemented. The edge stage is now authorized. Settings/checklist stages require their own authorization. The requested checkpoint commit covered the saved references and plan before stage 1 changes.
 
 ## Agreed target
 
@@ -36,7 +35,7 @@ Multi-monitor work, sync, custom/manual ordering, and release expansion remain l
 | Archived notes | Keep the note's theme and appearance. Editing stays disabled until Restore. Retain a clear archived indication and Restore action rather than inventing another visual theme. |
 | Empty and no-result states | An empty collection shows a short No notes yet message and New note action. A search with no matches shows No matching notes and a way to clear the query. Keep existing data intact and do not seed example notes. |
 | Decorations | No automatic title underline. When underlines or strike-through are used with Virgil, their appearance should be scribbled. Checklist completion styling awaits the user's checklist behavior specification. A general rich-text underline feature is not defined by this visual request. |
-| Edge notes | Four active notes in the same order as All Notes. Custom ordering is later work. Replace the adjacent/overlapping designs with the single vertical title-tab design from the edge image. |
+| Edge notes | Four active notes in the same order as All Notes. Custom ordering is later work. Replace the adjacent/overlapping designs with vertical title tabs on Left/Right and upright horizontal title tabs on Top/Bottom, following the October 3 correction. |
 | Edge interaction | Resting tag dots, hover-revealed tabs, New note/Search/All Notes utility controls, and integrated search. Clicking opens one editable docked note. Its theme and tag treatment match the same note elsewhere. Include the decorative pointer shown in the reference. |
 
 An open docked note hides the tab list. Hover does not replace it with another note. Close or Escape returns to the tabs. Opening away from the edge creates or focuses a separate window without removing the note from the deck. Several different notes can remain open. Preserve the existing behavior for these interactions unless a later approved decision changes it.
@@ -84,14 +83,16 @@ Acceptance: changing a note's color/font/style updates every live view; migrated
 
 ### 3. Edge strip redesign
 
+Implemented and under review on October 1, 2026. The [review record](design-previews/2026-10-01-edge-strip/README.md) records exact dimensions, behavior, checks and remaining differences. No Settings enablement/customize mode or checklist redesign was added.
+
 Responsibilities: `main.rs`, `app.rs`, `storage.rs`, `manager.rs`, `config.rs`, appearance, and any needed icons.
 
 - Limit the edge deck to four active notes. Share the main list's ordering choice through the existing coordinator and storage paths. Preserve pinned priority. Exclude archived/deleted notes and keep overflow available in All Notes.
-- Replace the two current tab layouts with the reference's vertical design. Adapt placement to all four edges, clamp the cluster and docked note to available space, and preserve readable titles and useful hit targets. Accept older configuration safely if the old layout setting is retired.
-- Implement resting dots, a short hover dwell, tabs, and the three rectangular utility controls. Put them in the arrangement from the reference; do not retain the older opposite-end arrangement by accident.
+- Replace the two current tab layouts with the reference's vertical design. Adapt placement to all four edges, clamp the cluster and docked note to available space, and preserve readable titles and useful hit targets. The October 3 authorization supersedes vertical tabs on Top/Bottom with wide, shallow tabs and upright labels. Accept older configuration safely if the old layout setting is retired.
+- Implement resting dots, a short hover dwell, tabs, and the three small icon-only utility controls. Put them in the arrangement from the reference; do not retain the older opposite-end arrangement by accident.
 - Add search within the strip. Give its input/results a readable width, search active notes beyond the four visible slots, share the existing search behavior where possible, and support keyboard selection and Escape. A result opens the existing shared session as the docked note. The original document's Enter-with-no-match action creates a note from the query; show that action clearly in the no-result state and verify that it updates All Notes and the edge. No separate centered search window is needed.
-- Keep the docked note's resolved theme, tag treatment, buffer, and explicit close behavior. Add the small non-interactive pointer without changing its input region or obscuring text.
-- Gate custom motion on reduced motion and system-disabled animation. Keep hover leave grace and prevent accidental edge grazes from opening the deck.
+- Keep tabs and utilities visible beside one inward-opening note or Search panel. Preserve the resolved note theme, buffer and explicit close behavior. A small non-interactive pointer identifies the originating control. Keep input limited to visible strip/content rectangles. Save successfully before replacing or closing an editor; failed saves retain it.
+- Remove all edge motion, regardless of reduced motion or system animation settings. Keep stable layer geometry across states, disable edge CSS transitions, and verify compositor behavior with normal-speed recordings and intermediate frames. Preserve hover dwell and leave grace.
 - Retain existing reposition behavior until the received Settings draft's customize mode is settled and authorized. The image provides a Reposition entry button, but its visual drag state and commit/cancel behavior remain open. Do not silently add a long-press gesture.
 
 Acceptance: creating a blank note updates the edge immediately; the four active notes match All Notes order; typing in edge search does not corrupt ordering; click/keyboard actions work on every edge; hover cannot replace an open docked note; reduced motion and fullscreen/DND behavior still work.
@@ -245,3 +246,23 @@ The correction remains under visual review; no theme approval is inferred. No co
 ### Checkpoint approval
 
 On October 1, the user confirmed visual approval of the completed themes and corrections and explicitly requested commit and push before further work. That instruction supersedes pending-review and no-commit statements above for this checkpoint. No new implementation stage is started.
+
+## Edge-strip implementation under review
+
+The user authorized stage 3 after the theme checkpoint. `main.rs` owns strip/search state, placement and native interactions. `manager.rs` reports successful creation and live sort changes through its existing callbacks. `storage.rs` applies the same pinned-first ordering for main and edge queries. Search uses the existing shared session/editor; overflow inclusion is temporary in-memory deck state. No shared design-system refactor or persistence migration was introduced.
+
+Review four 34x80px vertical tabs, 8px resting dots, three grouped 34x28px utilities, the 288x300px integrated search and theme-specific docked pointers in the [gallery](design-previews/2026-10-01-edge-strip/preview.html). Note themes, text sizes, tools, timers and failed-save protections retain their approved implementation. The native tests use isolated data and the disposable application's own widgets. Settings/checklist, multi-monitor, sync and custom ordering remain outside this pass. Stop for visual review before starting another scope.
+
+
+## Edge correction review, October 3, 2026
+
+The recording-driven correction is implemented within stage 3. State changes are immediate, Right/Bottom retain stable transparent extent with visible-content input regions, anchors retain intended values, and hover changes styling without moving tabs. Top/Bottom now use measured/capped horizontal note buttons. The [correction record](design-previews/2026-10-01-edge-strip/correction-2026-10-03/README.md) links fresh GTK captures, intermediate-frame evidence, native recordings, checks, limitations and four-edge disposable launch commands. The gallery displays strips at natural GTK size and distinguishes earlier captures and verification from current evidence.
+
+All approved note appearances and ordering/search/session/save/timer behavior remain within the existing implementation. Marker dragging works through dwell when pressed while resting, but no discoverable reposition mode or edge selector was added. Those choices require their own authorization. Edge visual and hands-on review is pending. No later scope, commit or push is authorized.
+
+
+### October 7 persistent tabs and animation removal
+
+The [lightweight review](design-previews/2026-10-07-lightweight-edge/README.md) supersedes the October 1 hidden-tab behavior and remaining October 3 compositor-motion allowance. `main.rs` coordinates a fixed strip window and content window, measured child placement, disjoint input regions, native focus transfer and save-guarded replacement. `appearance.rs` limits styling changes to edge tabs, utilities and Search. `ui_assets.rs` adds a contrasting outline only when an icon belongs to an edge utility. Approved editor appearance, persistence and Appearance drawer animation remain.
+
+The expanded existing GTK regression checks persistent tab coordinates, bounds, default/minimum/resized notes, dirty-edit retention on failed replacement, reduced-motion/visibility policy, Search/creation and fewer/empty strips. The review record separates this coverage from actual native recordings and remaining review limitations. No new dependencies or later features. Visual and hands-on approval remains pending.

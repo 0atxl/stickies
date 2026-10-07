@@ -147,24 +147,19 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         Font::Handwritten => "'Virgil 3 YOFF', cursive",
     };
     let palette_css = palette_css();
-    let tab_colors = if config.theme == Theme::Playful {
-        NoteColor::ALL
-            .into_iter()
-            .map(|color| {
-                let (r, g, b) = color.fill();
-                format!(
-                    ".note-tab.{} {{ background: rgb({:.0},{:.0},{:.0}); }}",
-                    color_class(color),
-                    r * 255.,
-                    g * 255.,
-                    b * 255.
-                )
-            })
-            .collect::<String>()
-    } else {
-        String::new()
-    };
-    let radius = 12;
+    let tab_colors = NoteColor::ALL
+        .into_iter()
+        .map(|color| {
+            let (r, g, b) = color.fill();
+            format!(
+                ".note-tab.{} {{ background: rgb({:.0},{:.0},{:.0}); color: #202624; }}",
+                color_class(color),
+                r * 255.,
+                g * 255.,
+                b * 255.
+            )
+        })
+        .collect::<String>();
     provider.load_from_data(&format!(r#"
         .edge-window, .hit-area, .note-window {{ background: transparent; }}
         .metadata, .dim-label {{ color: {muted}; font-size: 11px; }}
@@ -179,13 +174,27 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .icon-control:hover {{ background: alpha(currentColor, 0.09); }}
         .icon-control:checked {{ background: alpha(currentColor, 0.17); }}
         .icon-control > button {{ background: transparent; border: none; box-shadow: none; color: inherit; }}
-        .strip-control {{ background: {bg}; color: {fg}; border: 1px solid {line}; border-radius: 50%; padding: 5px; }}
-        .note-tab {{ background: {bg}; color: {fg}; border: 1px solid {line}; border-left-width: 3px; border-radius: {radius}px; padding: 8px 12px; box-shadow: 0 3px 8px alpha(black, 0.12); }}
-        .note-tab:hover {{ background: mix({bg}, {fg}, 0.08); }}
+        .strip-control {{ background: transparent; color: {fg}; border: none; border-radius: 8px; padding: 0; min-width: 32px; min-height: 26px; }}
+        .strip-control:hover {{ background: mix({bg}, {fg}, 0.08); }}
+        .note-tab {{ background: {bg}; color: {fg}; border: 1px solid {line}; border-left-width: 1px; border-radius: 8px; padding: 0; min-width: 0; min-height: 0; box-shadow: 0 2px 5px alpha(black, 0.12); }}
+        .note-tab:hover {{ background: mix({bg}, {fg}, 0.08); box-shadow: 0 2px 5px alpha(black, 0.12), inset 0 0 0 1px alpha({fg}, 0.22); }}
         {palette_css}
         {tab_colors}
-        .tab-title {{ font-family: {font}; font-size: 13px; }}
-        .edge-pill {{ min-width: 5px; min-height: 16px; border-radius: 3px; margin: 3px 0; }}
+        .note-tab.edge-active {{ box-shadow: inset 0 0 0 2px alpha(black, .45); }}
+        .strip-control.edge-active {{ background: {bg}; box-shadow: inset 0 0 0 1px {line}; }}
+        .edge-window .note-tab, .edge-window .strip-control, .edge-search, .edge-search * {{ transition: none; animation: none; }}
+        .tab-title {{ font-family: Inter, sans-serif; font-size: 11px; font-weight: 600; }}
+        .edge-marker {{ padding: 6px; }}
+        .edge-pill {{ min-width: 8px; min-height: 8px; border-radius: 50%; margin: 0; }}
+        .edge-search {{ font-family: Inter, sans-serif; font-size: 13px; background: {bg}; color: {fg}; border: 1px solid {line}; border-radius: 10px; padding: 8px; }}
+        .edge-search searchentry {{ min-height: 30px; background: transparent; color: {fg}; border: 1px solid {line}; border-radius: 8px; box-shadow: none; }}
+        .edge-search list {{ background: transparent; }}
+        .edge-search row {{ color: {fg}; padding: 8px; border-radius: 6px; }}
+        .edge-search row:selected {{ background: alpha({fg}, .12); }}
+        .edge-search row:hover {{ background: alpha({fg}, .06); }}
+        .edge-search .edge-result-title {{ font-size: 13px; }}
+        .edge-search .edge-create-result {{ background: transparent; color: {fg}; border: none; box-shadow: none; font-size: 12px; padding: 8px; }}
+        .edge-window .note-tab:focus-visible, .edge-window .strip-control:focus-visible, .edge-search row:focus-visible {{ outline: 2px solid {fg}; outline-offset: -2px; }}
         popover contents {{ padding: 4px; }}
         popover button, popover modelbutton {{ min-height: 24px; padding: 4px 8px; font-size: 12px; }}
         scrollbar.vertical, scrollbar.vertical:hover {{ min-width: 6px; background: transparent; }}
@@ -553,94 +562,4 @@ fn edge_path(
             );
         }
     }
-}
-
-pub fn animate_tab_on_hover(
-    fixed: &gtk::Fixed,
-    tab: &gtk::Button,
-    x: f64,
-    y: f64,
-    edge: crate::config::ScreenEdge,
-    overlapping: bool,
-) {
-    use crate::config::ScreenEdge;
-    let dx = match edge {
-        ScreenEdge::Right => -9.,
-        ScreenEdge::Left => 9.,
-        _ => 0.,
-    };
-    let dy = match edge {
-        ScreenEdge::Top => 9.,
-        ScreenEdge::Bottom => -9.,
-        _ => 0.,
-    };
-    let state = Rc::new(std::cell::Cell::new((x, y, 0.)));
-    let generation = Rc::new(std::cell::Cell::new(0_u64));
-    let motion = gtk::EventControllerMotion::new();
-    let weak_fixed = fixed.downgrade();
-    let weak_tab = tab.downgrade();
-    let position = state.clone();
-    let serial = generation.clone();
-    motion.connect_enter(move |_, _, _| {
-        if let (Some(fixed), Some(tab)) = (weak_fixed.upgrade(), weak_tab.upgrade()) {
-            animate_tab(
-                &fixed,
-                &tab,
-                position.clone(),
-                serial.clone(),
-                (x + dx, y + dy, if overlapping { -3. } else { 0. }),
-            );
-        }
-    });
-    let weak_fixed = fixed.downgrade();
-    let weak_tab = tab.downgrade();
-    motion.connect_leave(move |_| {
-        if let (Some(fixed), Some(tab)) = (weak_fixed.upgrade(), weak_tab.upgrade()) {
-            animate_tab(&fixed, &tab, state.clone(), generation.clone(), (x, y, 0.));
-        }
-    });
-    tab.add_controller(motion);
-}
-
-fn animate_tab(
-    fixed: &gtk::Fixed,
-    tab: &gtk::Button,
-    position: Rc<std::cell::Cell<(f64, f64, f64)>>,
-    serial: Rc<std::cell::Cell<u64>>,
-    target: (f64, f64, f64),
-) {
-    let generation = serial.get().wrapping_add(1);
-    serial.set(generation);
-    let start = position.get();
-    let started = std::time::Instant::now();
-    let fixed = fixed.downgrade();
-    tab.add_tick_callback(move |tab, _| {
-        if serial.get() != generation {
-            return gtk::glib::ControlFlow::Break;
-        }
-        let Some(fixed) = fixed.upgrade() else {
-            return gtk::glib::ControlFlow::Break;
-        };
-        let elapsed = (started.elapsed().as_secs_f64() / 0.14).min(1.);
-        let t = 1. - (1. - elapsed).powi(3);
-        let next = (
-            start.0 + (target.0 - start.0) * t,
-            start.1 + (target.1 - start.1) * t,
-            start.2 + (target.2 - start.2) * t,
-        );
-        position.set(next);
-        fixed.set_child_transform(
-            tab,
-            Some(
-                &gtk::gsk::Transform::new()
-                    .translate(&gtk::graphene::Point::new(next.0 as f32, next.1 as f32))
-                    .rotate(next.2 as f32),
-            ),
-        );
-        if elapsed >= 1. {
-            gtk::glib::ControlFlow::Break
-        } else {
-            gtk::glib::ControlFlow::Continue
-        }
-    });
 }

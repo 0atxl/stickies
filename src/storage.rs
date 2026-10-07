@@ -153,15 +153,16 @@ impl Storage {
         }
     }
 
-    pub fn load_deck_notes(&self, limit: usize) -> Result<Vec<Note>, StorageError> {
+    pub fn load_deck_notes(&self, limit: usize, sort: NoteSort) -> Result<Vec<Note>, StorageError> {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-        let mut statement = self.connection.prepare(
+        let order = note_order(NoteCollection::Active, sort);
+        let mut statement = self.connection.prepare(&format!(
             "SELECT id, title, body, color, pinned
              FROM notes
              WHERE archived_at IS NULL AND deleted_at IS NULL
-             ORDER BY pinned DESC, updated_at DESC, sort_order ASC, id DESC
-             LIMIT ?1",
-        )?;
+             ORDER BY {order}
+             LIMIT ?1"
+        ))?;
         let rows = statement.query_map([limit], note_from_row)?;
 
         rows.map(|row| {
@@ -233,20 +234,7 @@ impl Storage {
             NoteCollection::Active => "archived_at IS NULL",
             NoteCollection::Archived => "archived_at IS NOT NULL",
         };
-        let order_clause = match (collection, sort) {
-            (NoteCollection::Active | NoteCollection::All, NoteSort::Recent) => {
-                "pinned DESC, updated_at DESC, sort_order ASC, id DESC"
-            }
-            (NoteCollection::Active | NoteCollection::All, NoteSort::Title) => {
-                "pinned DESC, title COLLATE NOCASE ASC, updated_at DESC, id DESC"
-            }
-            (NoteCollection::Archived, NoteSort::Recent) => {
-                "updated_at DESC, sort_order ASC, id DESC"
-            }
-            (NoteCollection::Archived, NoteSort::Title) => {
-                "title COLLATE NOCASE ASC, updated_at DESC, id DESC"
-            }
-        };
+        let order_clause = note_order(collection, sort);
         let sql = format!(
             "SELECT id, title, body, color, pinned
              FROM notes
@@ -396,10 +384,64 @@ fn unix_timestamp_millis() -> i64 {
         .map_or(0, |duration| duration.as_millis() as i64)
 }
 
+fn note_order(collection: NoteCollection, sort: NoteSort) -> &'static str {
+    match (collection, sort) {
+        (NoteCollection::Active | NoteCollection::All, NoteSort::Recent) => {
+            "pinned DESC, updated_at DESC, sort_order ASC, id DESC"
+        }
+        (NoteCollection::Active | NoteCollection::All, NoteSort::Title) => {
+            "pinned DESC, title COLLATE NOCASE ASC, updated_at DESC, id DESC"
+        }
+        (NoteCollection::Archived, NoteSort::Recent) => "updated_at DESC, sort_order ASC, id DESC",
+        (NoteCollection::Archived, NoteSort::Title) => {
+            "title COLLATE NOCASE ASC, updated_at DESC, id DESC"
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn edge_slots_follow_main_sort_and_search_reaches_overflow() {
+        let mut storage = Storage {
+            connection: Connection::open_in_memory().unwrap(),
+        };
+        storage.migrate().unwrap();
+        let notes: Vec<_> = ["Z", "B", "A", "D", "C", "E", "Archived", "Deleted"]
+            .into_iter()
+            .map(|title| storage.create_note(title, "Text", NoteColor::Blue).unwrap())
+            .collect();
+        storage
+            .connection
+            .execute_batch("UPDATE notes SET updated_at = id * 100; UPDATE notes SET updated_at = 900 WHERE title = 'Z'; UPDATE notes SET updated_at = 800 WHERE title = 'B';")
+            .unwrap();
+        storage.set_note_pinned(notes[0].id, true).unwrap();
+        storage.set_note_pinned(notes[1].id, true).unwrap();
+        storage.archive_note(notes[6].id).unwrap();
+        storage.delete_note(notes[7].id).unwrap();
+        for (sort, titles) in [
+            (NoteSort::Recent, ["Z", "B", "E", "C"]),
+            (NoteSort::Title, ["B", "Z", "A", "C"]),
+        ] {
+            let edge = storage.load_deck_notes(4, sort).unwrap();
+            assert_eq!(
+                edge.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(),
+                titles
+            );
+            let main = storage
+                .search_notes(NoteCollection::Active, "", sort)
+                .unwrap();
+            assert_eq!(edge, main[..4]);
+            assert_eq!(main.len(), 6);
+        }
+        let overflow = storage
+            .search_notes(NoteCollection::Active, "D", NoteSort::Title)
+            .unwrap();
+        assert_eq!(overflow, vec![notes[3].clone()]);
+    }
 
     #[test]
     fn undo_delete_restores_the_previous_collection_and_pin() {
@@ -597,14 +639,20 @@ mod tests {
             .pragma_update(None, "query_only", true)
             .unwrap();
         assert!(storage.update_note(&note).is_err());
-        assert_eq!(storage.load_deck_notes(5).unwrap()[0].body, "Saved");
+        assert_eq!(
+            storage.load_deck_notes(5, NoteSort::Recent).unwrap()[0].body,
+            "Saved"
+        );
 
         storage
             .connection
             .pragma_update(None, "query_only", false)
             .unwrap();
         storage.update_note(&note).unwrap();
-        assert_eq!(storage.load_deck_notes(5).unwrap()[0].body, "Unsaved");
+        assert_eq!(
+            storage.load_deck_notes(5, NoteSort::Recent).unwrap()[0].body,
+            "Unsaved"
+        );
     }
 
     #[test]
@@ -619,12 +667,22 @@ mod tests {
         ));
         {
             let storage = Storage::open(&path).expect("database should open");
-            assert!(storage.load_deck_notes(5).unwrap().is_empty());
+            assert!(
+                storage
+                    .load_deck_notes(5, NoteSort::Recent)
+                    .unwrap()
+                    .is_empty()
+            );
         }
 
         {
             let storage = Storage::open(&path).expect("empty database should reopen");
-            assert!(storage.load_deck_notes(5).unwrap().is_empty());
+            assert!(
+                storage
+                    .load_deck_notes(5, NoteSort::Recent)
+                    .unwrap()
+                    .is_empty()
+            );
             let mut note = storage
                 .create_note("Work", "Initial body", NoteColor::Yellow)
                 .expect("user note should be created");
@@ -637,7 +695,7 @@ mod tests {
         {
             let storage = Storage::open(&path).expect("database should reopen");
             let notes = storage
-                .load_deck_notes(5)
+                .load_deck_notes(5, NoteSort::Recent)
                 .expect("stored notes should load");
             assert_eq!(notes.len(), 1);
             assert_eq!(notes[0].title, "Work");
@@ -647,7 +705,12 @@ mod tests {
 
         {
             let storage = Storage::open(&path).expect("database should reopen after deletion");
-            assert!(storage.load_deck_notes(5).unwrap().is_empty());
+            assert!(
+                storage
+                    .load_deck_notes(5, NoteSort::Recent)
+                    .unwrap()
+                    .is_empty()
+            );
         }
 
         fs::remove_file(path).expect("test database should be removable");
@@ -691,7 +754,7 @@ mod tests {
             .expect("note should be created");
         assert_eq!(
             storage
-                .load_deck_notes(1)
+                .load_deck_notes(1, NoteSort::Recent)
                 .expect("limited deck should load")[0]
                 .id,
             second.id
@@ -708,7 +771,7 @@ mod tests {
         ));
         assert!(
             storage
-                .load_deck_notes(5)
+                .load_deck_notes(5, NoteSort::Recent)
                 .expect("deck should load")
                 .iter()
                 .all(|note| note.id != second.id)
@@ -845,7 +908,7 @@ mod tests {
         );
         assert!(
             storage
-                .load_deck_notes(5)
+                .load_deck_notes(5, NoteSort::Recent)
                 .expect("deck should load pinned note")[0]
                 .pinned
         );

@@ -86,6 +86,28 @@ fn set_icon(image: &gtk::DrawingArea, path: &str) {
             (f64::from(height) - side) / 2.,
         );
         cr.scale(side / 36., side / 36.);
+        if widget
+            .parent()
+            .is_some_and(|parent| parent.has_css_class("strip-control"))
+        {
+            // These icons sit directly on the desktop. A one-pixel contrasting
+            // outline keeps the original strokes readable on either background.
+            let halo = if color.red() + color.green() + color.blue() > 1.5 {
+                0.
+            } else {
+                1.
+            };
+            cr.set_source_rgba(halo, halo, halo, 0.85);
+            for (x, y) in [(-2., 0.), (2., 0.), (0., -2.), (0., 2.)] {
+                let _ = cr.mask_surface(&mask, x, y);
+            }
+            cr.set_source_rgba(
+                color.red().into(),
+                color.green().into(),
+                color.blue().into(),
+                color.alpha().into(),
+            );
+        }
         let _ = cr.mask_surface(&mask, 0., 0.);
     });
 }

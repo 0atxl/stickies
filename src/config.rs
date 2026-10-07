@@ -131,6 +131,7 @@ pub struct Config {
     pub paper: Paper,
     pub shape: Shape,
     pub white_paper: bool,
+    // Legacy layouts still load; tab orientation now follows the edge.
     pub tab_layout: TabLayout,
     pub visible_notes: usize,
     pub inactivity_seconds: u64,
@@ -154,7 +155,7 @@ impl Default for Config {
             shape: Shape::Ticket,
             white_paper: false,
             tab_layout: TabLayout::Adjacent,
-            visible_notes: 5,
+            visible_notes: 4,
             inactivity_seconds: 120,
             reduced_motion: false,
             hide_in_fullscreen: true,

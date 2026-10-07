@@ -16,12 +16,15 @@ use std::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ManagerChange {
     Pin,
+    Create,
     Archive,
     Restore,
     Delete,
 }
 
 pub struct Callbacks {
+    pub sort: NoteSort,
+    pub sorted: Box<dyn Fn(NoteSort)>,
     pub session: Box<dyn Fn(NoteId) -> Option<Rc<NoteSession>>>,
     pub changed: Box<dyn Fn(NoteId, ManagerChange)>,
     pub popout: Box<dyn Fn(NoteId)>,
@@ -450,6 +453,7 @@ impl ManagerUi {
                 self.search.set_text("");
                 self.refresh(Some(note.id));
                 self.title.grab_focus();
+                (self.callbacks.changed)(note.id, ManagerChange::Create);
             }
             Err(e) => self.message(&format!("Could not create note: {e}")),
         }
@@ -462,6 +466,7 @@ impl ManagerUi {
             return;
         }
         let result = match change {
+            ManagerChange::Create => return,
             ManagerChange::Pin => {
                 let session = self.session.borrow().clone();
                 if let Some(session) = session {
@@ -806,13 +811,14 @@ pub fn build_window(
         w.style_context()
             .add_provider(&font, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2);
     }
+    let sort = callbacks.sort;
     let ui = Rc::new(ManagerUi {
         window,
         storage,
         callbacks,
         config,
         collection: Cell::new(NoteCollection::All),
-        sort: Cell::new(NoteSort::Recent),
+        sort: Cell::new(sort),
         selected: Cell::new(None),
         busy: Cell::new(false),
         notes: RefCell::new(Vec::new()),
@@ -883,12 +889,15 @@ pub fn build_window(
         (&alphabetical, NoteSort::Title),
     ] {
         let weak = Rc::downgrade(&ui);
-        let menu = sort_button.clone();
+        let menu = sort_button.downgrade();
         button.connect_clicked(move |_| {
             if let Some(ui) = weak.upgrade() {
                 ui.sort.set(sort);
+                (ui.callbacks.sorted)(sort);
                 ui.refresh(None);
-                menu.popdown();
+                if let Some(menu) = menu.upgrade() {
+                    menu.popdown();
+                }
             }
         });
     }

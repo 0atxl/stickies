@@ -28,4 +28,8 @@
 <file>icons/stickies-pin-filled-symbolic.svg</file>
 <file>icons/stickies-checklist-symbolic.svg</file>
 <file>icons/stickies-palette-symbolic.svg</file>
+<file>icons/stickies-search-symbolic.svg</file>
+<file>icons/playful/search.svg</file>
+<file>icons/stickies-grid-symbolic.svg</file>
+<file>icons/playful/grid.svg</file>
 </gresource></gresources>
