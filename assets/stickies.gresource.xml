@@ -1,7 +1,7 @@
 <gresources><gresource prefix="/dev/stickies/Stickies">
   <file>all-notes.css</file>
   <file>icons/stickies-archive-symbolic.svg</file>
-  <file>fonts/Virgil.woff2</file>
+  <file>fonts/Virgil.ttf</file>
   <file>fonts/Virgil-LICENSE.txt</file>
   <file>fonts/Inter.ttf</file>
   <file>fonts/JetBrainsMono.ttf</file>
@@ -32,4 +32,7 @@
 <file>icons/playful/search.svg</file>
 <file>icons/stickies-grid-symbolic.svg</file>
 <file>icons/playful/grid.svg</file>
+<file>icons/edge/new.svg</file>
+<file>icons/edge/search.svg</file>
+<file>icons/edge/notes.svg</file>
 </gresource></gresources>

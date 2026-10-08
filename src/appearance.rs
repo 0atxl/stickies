@@ -123,7 +123,7 @@ pub fn palette_css() -> String {
             };
             format!(
                 ".icon-control.{class} {{ color: rgb({r},{g},{b}); }}
-            .note-tab.{class} {{ border-left-color: rgb({r},{g},{b}); }}
+            .note-tab.{class} {{ border-color: rgb({r},{g},{b}); --edge-accent: rgb({r},{g},{b}); }}
             .edge-pill.{class}, .management .{class} .tag-bar,
             .note-controls .color-swatch.{class} {{ background: rgb({r},{g},{b}); }}
             .note-controls .color-swatch.{class} {{ color: {swatch_ink}; }}
@@ -174,17 +174,11 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .icon-control:hover {{ background: alpha(currentColor, 0.09); }}
         .icon-control:checked {{ background: alpha(currentColor, 0.17); }}
         .icon-control > button {{ background: transparent; border: none; box-shadow: none; color: inherit; }}
-        .strip-control {{ background: transparent; color: {fg}; border: none; border-radius: 8px; padding: 0; min-width: 32px; min-height: 26px; }}
-        .strip-control:hover {{ background: mix({bg}, {fg}, 0.08); }}
-        .note-tab {{ background: {bg}; color: {fg}; border: 1px solid {line}; border-left-width: 1px; border-radius: 8px; padding: 0; min-width: 0; min-height: 0; box-shadow: 0 2px 5px alpha(black, 0.12); }}
-        .note-tab:hover {{ background: mix({bg}, {fg}, 0.08); box-shadow: 0 2px 5px alpha(black, 0.12), inset 0 0 0 1px alpha({fg}, 0.22); }}
+        .note-tab {{ background: {bg}; color: {fg}; padding: 0; min-width: 0; min-height: 0; }}
         {palette_css}
         {tab_colors}
-        .note-tab.edge-active {{ box-shadow: inset 0 0 0 2px alpha(black, .45); }}
-        .strip-control.edge-active {{ background: {bg}; box-shadow: inset 0 0 0 1px {line}; }}
         .edge-window .note-tab, .edge-window .strip-control, .edge-search, .edge-search * {{ transition: none; animation: none; }}
         .tab-title {{ font-family: Inter, sans-serif; font-size: 11px; font-weight: 600; }}
-        .edge-marker {{ padding: 6px; }}
         .edge-pill {{ min-width: 8px; min-height: 8px; border-radius: 50%; margin: 0; }}
         .edge-search {{ font-family: Inter, sans-serif; font-size: 13px; background: {bg}; color: {fg}; border: 1px solid {line}; border-radius: 10px; padding: 8px; }}
         .edge-search searchentry {{ min-height: 30px; background: transparent; color: {fg}; border: 1px solid {line}; border-radius: 8px; box-shadow: none; }}

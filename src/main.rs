@@ -104,7 +104,7 @@ impl Ui {
         self.tabs.set_orientation(orientation);
         self.marker.set_orientation(orientation);
         // Measure the upright titles, but cap their contribution so a long title
-        // cannot widen the whole strip. Vertical tabs retain their reviewed size.
+        // cannot widen the whole strip. Both orientations use a slim 24px depth.
         let tab_width = if horizontal {
             let title_width = notes
                 .iter()
@@ -120,7 +120,7 @@ impl Ui {
                 .max()
                 .unwrap_or(0);
             let (screen_width, _) = self.note_limits();
-            let available = ((screen_width - 150) / 4).max(34);
+            let available = ((screen_width - 110) / 4).max(24);
             let width = if self.revealed.get() && self.horizontal_tab_width.get() > 0 {
                 self.horizontal_tab_width.get()
             } else {
@@ -131,9 +131,9 @@ impl Ui {
             width
         } else {
             self.horizontal_tab_width.set(0);
-            34
+            24
         };
-        let tab_height = if horizontal { 34 } else { 80 };
+        let tab_height = if horizontal { 24 } else { 80 };
         let fixed = gtk::Fixed::new();
         fixed.set_size_request(
             if horizontal {
@@ -172,17 +172,17 @@ impl Ui {
                 label.set_max_width_chars(1);
                 tab.set_child(Some(&label));
             } else {
-                label.set_size_request(72, 20);
+                label.set_size_request(72, 16);
                 let text = gtk::Fixed::new();
-                text.set_size_request(30, 78);
+                text.set_size_request(22, 78);
                 text.put(&label, 0., 0.);
                 let transform = if config.edge == ScreenEdge::Right {
                     gtk::gsk::Transform::new()
-                        .translate(&gtk::graphene::Point::new(25., 3.))
+                        .translate(&gtk::graphene::Point::new(19., 3.))
                         .rotate(90.)
                 } else {
                     gtk::gsk::Transform::new()
-                        .translate(&gtk::graphene::Point::new(5., 75.))
+                        .translate(&gtk::graphene::Point::new(3., 75.))
                         .rotate(-90.)
                 };
                 text.set_child_transform(&label, Some(&transform));
@@ -219,14 +219,16 @@ impl Ui {
         }
         let utilities = gtk::Box::new(orientation, 4);
         utilities.add_css_class("edge-utilities");
+        // GTK has no CSS overflow property. Clip utility feedback to the capsule.
+        utilities.set_overflow(gtk::Overflow::Hidden);
         for (name, label) in [
             ("plus", "New note"),
             ("search", "Search notes"),
             ("grid", "All Notes"),
         ] {
-            let button = ui_assets::icon(name, label);
+            let button = ui_assets::edge_icon(name, label);
             button.add_css_class("strip-control");
-            button.set_size_request(34, if horizontal { 34 } else { 28 });
+            button.set_size_request(24, 24);
             let weak = Rc::downgrade(self);
             button.connect_clicked(move |button| {
                 if let Some(ui) = weak.upgrade() {
@@ -869,8 +871,40 @@ impl Ui {
             .set_visible(self.docked.borrow().is_some() || transient_visible);
     }
 
+    fn apply_edge_classes(&self, config: &Config) {
+        let edge = match config.edge {
+            ScreenEdge::Left => "edge-left",
+            ScreenEdge::Right => "edge-right",
+            ScreenEdge::Top => "edge-top",
+            ScreenEdge::Bottom => "edge-bottom",
+        };
+        let theme = match config.theme {
+            config::Theme::Paper => "edge-paper",
+            config::Theme::Playful => "edge-playful",
+            config::Theme::Minimal if appearance::dark(config) => "edge-minimal-dark",
+            config::Theme::Minimal => "edge-minimal",
+        };
+        for window in [&self.window, &self.strip_window] {
+            for class in [
+                "edge-left",
+                "edge-right",
+                "edge-top",
+                "edge-bottom",
+                "edge-paper",
+                "edge-playful",
+                "edge-minimal",
+                "edge-minimal-dark",
+            ] {
+                window.remove_css_class(class);
+            }
+            window.add_css_class(edge);
+            window.add_css_class(theme);
+        }
+    }
+
     fn place_edge(&self) {
         let config = self.config.borrow();
+        self.apply_edge_classes(&config);
         let (screen_width, screen_height) = self.note_limits();
         let horizontal = matches!(config.edge, ScreenEdge::Top | ScreenEdge::Bottom);
         // Both layer surfaces keep their origin and extent across every state.
@@ -1291,6 +1325,13 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
         &gtk::gdk::Display::default().expect("GTK display"),
         &provider,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+    let edge_provider = gtk::CssProvider::new();
+    edge_provider.load_from_data(include_str!("../assets/edge-strip.css"));
+    gtk::style_context_add_provider_for_display(
+        &gtk::gdk::Display::default().expect("GTK display"),
+        &edge_provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
     );
     let window = gtk::ApplicationWindow::builder()
         .application(application)
@@ -1824,19 +1865,19 @@ mod edge_tests {
                 let tab = ui.tabs.first_child().unwrap().first_child().unwrap();
                 let horizontal = matches!(edge, ScreenEdge::Top | ScreenEdge::Bottom);
                 let bounds = tab.compute_bounds(&ui.strip_root).unwrap();
-                assert_eq!(bounds.height() as i32, if horizontal { 34 } else { 80 });
+                assert_eq!(bounds.height() as i32, if horizontal { 24 } else { 80 });
                 if horizontal {
                     assert!((80..=112).contains(&(bounds.width() as i32)));
                     assert!(tab.first_child().unwrap().is::<gtk::Label>());
                 } else {
-                    assert_eq!(bounds.width() as i32, 34);
+                    assert_eq!(bounds.width() as i32, 24);
                 }
                 let utilities = ui.tabs.last_child().unwrap();
                 let mut control = utilities.first_child();
                 while let Some(button) = control {
                     let bounds = button.compute_bounds(&ui.strip_root).unwrap();
-                    assert_eq!(bounds.width() as i32, 34);
-                    assert_eq!(bounds.height() as i32, if horizontal { 34 } else { 28 });
+                    assert_eq!(bounds.width() as i32, 24);
+                    assert_eq!(bounds.height() as i32, 24);
                     control = button.next_sibling();
                 }
                 for _ in 0..3 {

@@ -10,20 +10,26 @@ unsafe extern "C" {
 pub fn register() -> Result<(), Box<dyn std::error::Error>> {
     gio::resources_register_include!("stickies.gresource")?;
     let cache = glib::user_cache_dir().join("stickies/fonts");
-    std::fs::create_dir_all(&cache)?;
-    for name in ["Virgil.woff2", "Inter.ttf", "JetBrainsMono.ttf"] {
-        let bytes = gio::resources_lookup_data(
-            &format!("/dev/stickies/Stickies/fonts/{name}"),
-            gio::ResourceLookupFlags::NONE,
-        )?;
-        let path = cache.join(name);
-        if std::fs::read(&path).ok().as_deref() != Some(bytes.as_ref()) {
-            std::fs::write(&path, &bytes)?;
-        }
-        let path = CString::new(path.as_os_str().as_encoded_bytes())?;
-        // Fontconfig borrows the path during this call; the bundled file remains cached.
-        if unsafe { FcConfigAppFontAddFile(FcConfigGetCurrent(), path.as_ptr().cast()) } == 0 {
-            return Err(format!("could not register font {name}").into());
+    for name in ["Virgil.ttf", "Inter.ttf", "JetBrainsMono.ttf"] {
+        let register_font = || -> Result<(), Box<dyn std::error::Error>> {
+            std::fs::create_dir_all(&cache)?;
+            let bytes = gio::resources_lookup_data(
+                &format!("/dev/stickies/Stickies/fonts/{name}"),
+                gio::ResourceLookupFlags::NONE,
+            )?;
+            let path = cache.join(name);
+            if std::fs::read(&path).ok().as_deref() != Some(bytes.as_ref()) {
+                std::fs::write(&path, &bytes)?;
+            }
+            let path = CString::new(path.as_os_str().as_encoded_bytes())?;
+            // Fontconfig borrows the path during this call; the bundled file remains cached.
+            if unsafe { FcConfigAppFontAddFile(FcConfigGetCurrent(), path.as_ptr().cast()) } == 0 {
+                return Err(format!("could not register font {name}").into());
+            }
+            Ok(())
+        };
+        if let Err(error) = register_font() {
+            eprintln!("Warning: could not load bundled font {name}: {error}");
         }
     }
     Ok(())
@@ -35,6 +41,28 @@ pub fn icon(name: &str, label: &str) -> gtk::Button {
     button.set_tooltip_text(Some(label));
     button.set_valign(gtk::Align::Center);
     button.add_css_class("icon-control");
+    button
+}
+
+pub fn edge_icon(name: &str, label: &str) -> gtk::Button {
+    let image = gtk::DrawingArea::new();
+    image.set_content_width(16);
+    image.set_content_height(16);
+    image.set_valign(gtk::Align::Center);
+    image.set_halign(gtk::Align::Center);
+    let asset = match name {
+        "plus" => "new",
+        "grid" => "notes",
+        _ => "search",
+    };
+    set_icon(
+        &image,
+        &format!("/dev/stickies/Stickies/icons/edge/{asset}.svg"),
+    );
+    let button = gtk::Button::new();
+    button.set_child(Some(&image));
+    button.set_tooltip_text(Some(label));
+    button.set_valign(gtk::Align::Center);
     button
 }
 
@@ -86,28 +114,6 @@ fn set_icon(image: &gtk::DrawingArea, path: &str) {
             (f64::from(height) - side) / 2.,
         );
         cr.scale(side / 36., side / 36.);
-        if widget
-            .parent()
-            .is_some_and(|parent| parent.has_css_class("strip-control"))
-        {
-            // These icons sit directly on the desktop. A one-pixel contrasting
-            // outline keeps the original strokes readable on either background.
-            let halo = if color.red() + color.green() + color.blue() > 1.5 {
-                0.
-            } else {
-                1.
-            };
-            cr.set_source_rgba(halo, halo, halo, 0.85);
-            for (x, y) in [(-2., 0.), (2., 0.), (0., -2.), (0., 2.)] {
-                let _ = cr.mask_surface(&mask, x, y);
-            }
-            cr.set_source_rgba(
-                color.red().into(),
-                color.green().into(),
-                color.blue().into(),
-                color.alpha().into(),
-            );
-        }
         let _ = cr.mask_surface(&mask, 0., 0.);
     });
 }
