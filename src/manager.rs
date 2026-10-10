@@ -29,6 +29,7 @@ pub struct Callbacks {
     pub changed: Box<dyn Fn(NoteId, ManagerChange)>,
     pub popout: Box<dyn Fn(NoteId)>,
     pub settings: Rc<dyn Fn(Config) -> Result<(), String>>,
+    pub reposition: Rc<dyn Fn() -> Result<(), String>>,
 }
 struct ManagerUi {
     window: adw::ApplicationWindow,
@@ -791,7 +792,19 @@ pub fn build_window(
     appearance_header.append(&appearance_title);
     appearance_drawer.append(&appearance_header);
     let change = callbacks.settings.clone();
-    let panel = crate::settings::build(config.clone(), move |c| change(c));
+    let reposition = callbacks.reposition.clone();
+    let weak = drawer.downgrade();
+    let panel = crate::settings::build(
+        config.clone(),
+        move |c| change(c),
+        move || {
+            reposition()?;
+            if let Some(drawer) = weak.upgrade() {
+                drawer.set_show_sidebar(false);
+            }
+            Ok(())
+        },
+    );
     panel.root.set_vexpand(true);
     appearance_drawer.append(&panel.root);
     drawer.set_sidebar(Some(&appearance_drawer));

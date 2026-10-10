@@ -391,6 +391,7 @@ impl Ui {
         let after = Rc::downgrade(self);
         let edit = Rc::downgrade(self);
         let settings = Rc::downgrade(self);
+        let reposition = Rc::downgrade(self);
         let sorted = Rc::downgrade(self);
         let manager = manager::build_window(
             &self.application,
@@ -414,6 +415,12 @@ impl Ui {
                     if let Some(ui) = edit.upgrade() {
                         ui.open_separate(id);
                     }
+                }),
+                reposition: Rc::new(move || {
+                    reposition
+                        .upgrade()
+                        .ok_or_else(|| "Stickies is closing".to_owned())?
+                        .begin_reposition()
                 }),
                 settings: Rc::new(move |config| {
                     settings
@@ -775,6 +782,329 @@ mod edge_tests {
     }
 
 
+    #[test]
+    #[ignore = "requires Wayland and disposable XDG_DATA_HOME/XDG_CONFIG_HOME directories"]
+    fn settings_position_presets_and_reposition_transaction() {
+        for variable in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+            assert!(
+                std::path::PathBuf::from(std::env::var(variable).expect(variable))
+                    .starts_with(std::env::temp_dir())
+            );
+        }
+        ui_assets::register().unwrap();
+        adw::init().unwrap();
+        Config::default().save(&config::config_path()).unwrap();
+        let app = gtk::Application::builder()
+            .application_id(APPLICATION_ID)
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let storage = Storage::open(&storage::database_path()).unwrap();
+        let id = storage
+            .create_note("Position review", "Keep this note safe", NoteColor::Green)
+            .unwrap()
+            .id;
+        for (title, color) in [
+            ("Weekend plans", NoteColor::Blue),
+            ("Reading", NoteColor::Pink),
+            ("A long title for the fourth tab", NoteColor::Yellow),
+        ] {
+            storage
+                .create_note(title, "Disposable review note", color)
+                .unwrap();
+        }
+        storage.set_note_pinned(id, true).unwrap();
+        let ui = build(&app).unwrap();
+        let settle = || {
+            let end = std::time::Instant::now() + Duration::from_millis(220);
+            let deadline = end + Duration::from_secs(2);
+            while std::time::Instant::now() < end || ui.edge_motion_running() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "edge motion did not settle"
+                );
+                while glib::MainContext::default().pending() {
+                    glib::MainContext::default().iteration(false);
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        ui.show_manager();
+        settle();
+        let manager = ui.manager.borrow().clone().unwrap();
+        let root = manager.window().upcast_ref::<gtk::Widget>();
+        let edges = position_group(root, "Screen edge");
+        let presets = position_group(root, "Position");
+        let timeouts = position_group(root, "Docked note timeout");
+        assert!(timeouts[2].is_active());
+        for (button, seconds) in timeouts.iter().zip([0, 60, 120, 300]) {
+            button.set_active(true);
+            assert_eq!(ui.config.borrow().inactivity_seconds, seconds);
+            assert_eq!(
+                Config::load(&config::config_path())
+                    .unwrap()
+                    .inactivity_seconds,
+                seconds
+            );
+        }
+        timeouts[2].set_active(true);
+        for (theme, appearance, name) in [
+            (config::Theme::Paper, config::Appearance::Light, "paper"),
+            (config::Theme::Playful, config::Appearance::Light, "playful"),
+            (
+                config::Theme::Minimal,
+                config::Appearance::Light,
+                "minimal-light",
+            ),
+            (
+                config::Theme::Minimal,
+                config::Appearance::Dark,
+                "minimal-dark",
+            ),
+        ] {
+            let theme_name = match theme {
+                config::Theme::Paper => "Paper",
+                config::Theme::Playful => "Playful",
+                config::Theme::Minimal => "Minimal",
+            };
+            let mut choice = find_widget(root, &|widget| {
+                widget
+                    .downcast_ref::<gtk::Label>()
+                    .is_some_and(|label| label.text() == theme_name)
+            })
+            .unwrap();
+            while !choice.is::<gtk::ToggleButton>() {
+                choice = choice.parent().unwrap();
+            }
+            choice
+                .downcast::<gtk::ToggleButton>()
+                .unwrap()
+                .set_active(true);
+            if theme == config::Theme::Minimal {
+                button(
+                    root,
+                    if appearance == config::Appearance::Dark {
+                        "Dark"
+                    } else {
+                        "Light"
+                    },
+                )
+                .downcast::<gtk::ToggleButton>()
+                .unwrap()
+                .set_active(true);
+            }
+            for (index, edge) in [
+                ScreenEdge::Left,
+                ScreenEdge::Right,
+                ScreenEdge::Top,
+                ScreenEdge::Bottom,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                edges[index].set_active(true);
+                assert_eq!(ui.config.borrow().edge, edge);
+                let horizontal = matches!(edge, ScreenEdge::Top | ScreenEdge::Bottom);
+                assert_eq!(
+                    presets[0].label().as_deref(),
+                    Some(if horizontal { "Left" } else { "Top" })
+                );
+                for (index, preset) in presets.iter().enumerate() {
+                    preset.set_active(true);
+                    let loaded = Config::load(&config::config_path()).unwrap();
+                    assert_eq!(loaded.edge, edge);
+                    assert_eq!(loaded.marker_offset, index as f64 / 2.);
+                }
+                presets[1].set_active(true);
+                ui.dormant();
+                let hidden_drag = ui.dragged_offset(0.5, 80., 80.);
+                ui.reveal();
+                assert_eq!(ui.dragged_offset(0.5, 80., 80.), hidden_drag);
+                ui.open_docked(id);
+                let note = ui.edge.docked.borrow().clone().unwrap();
+                note.body.buffer().set_text("Saved before repositioning");
+                button(root, "Reposition…").emit_clicked();
+                settle();
+                assert!(ui.edge.reposition_offset().is_some());
+                assert_eq!(
+                    ui.edge.stack.visible_child_name().as_deref(),
+                    Some("reposition")
+                );
+                assert!(ui.edge.docked.borrow().is_none());
+                assert_eq!(
+                    storage.load_note(id).unwrap().body,
+                    "Saved before repositioning"
+                );
+                let before = ui.edge.strip_bounds.get();
+                let (dx, dy) = if horizontal { (80., 0.) } else { (0., 80.) };
+                ui.preview_reposition(0.5, dx, dy);
+                settle();
+                let moved = ui.edge.strip_bounds.get();
+                assert!(
+                    ((if horizontal {
+                        moved.0 - before.0
+                    } else {
+                        moved.1 - before.1
+                    }) - 80)
+                        .abs()
+                        <= 1
+                );
+                assert_eq!(
+                    Config::load(&config::config_path()).unwrap().marker_offset,
+                    0.5
+                );
+                assert_eq!(ui.config.borrow().marker_offset, 0.5);
+                assert!(!ui.edge.pointer.is_visible());
+                assert_eq!(ui.edge.stack.transition_duration(), 0);
+                ui.dormant();
+                assert!(ui.edge.tabs.is_visible());
+                for (x, y, w, h) in [ui.edge.strip_bounds.get(), ui.edge.panel_bounds.get()] {
+                    let (sw, sh) = ui.note_limits();
+                    assert!(x >= 0 && y >= 0 && x + w <= sw && y + h <= sh);
+                }
+                capture(&ui, &format!("{name}-{edge:?}-reposition").to_lowercase());
+                button(ui.edge.stack.upcast_ref(), "Cancel").emit_clicked();
+                assert!(ui.edge.reposition_offset().is_none());
+                assert_eq!(ui.config.borrow().marker_offset, 0.5);
+                ui.begin_reposition().unwrap();
+                ui.preview_reposition(0.5, dx, dy);
+                let expected = ui.edge.reposition_offset().unwrap();
+                button(ui.edge.stack.upcast_ref(), "Done").emit_clicked();
+                assert!(ui.edge.reposition_offset().is_none());
+                assert_eq!(
+                    Config::load(&config::config_path()).unwrap().marker_offset,
+                    expected
+                );
+                assert!(presets.iter().all(|b| !b.is_active()));
+            }
+            button(root, "Settings").emit_clicked();
+            settle();
+            let content =
+                find_widget(root, &|widget| widget.has_css_class("appearance-panel")).unwrap();
+            let mut parent = content.parent().unwrap();
+            while !parent.is::<gtk::ScrolledWindow>() {
+                parent = parent.parent().unwrap();
+            }
+            let scroll = parent.downcast::<gtk::ScrolledWindow>().unwrap();
+            scroll.vadjustment().set_value(scroll.vadjustment().upper());
+            settle();
+            for (width, height, size) in [(720, 540, "default"), (680, 460, "minimum")] {
+                manager.window().set_visible(false);
+                manager.window().set_resizable(false);
+                gtk::prelude::WidgetExt::unrealize(manager.window());
+                manager.window().set_default_size(width, height);
+                manager.window().present();
+                settle();
+                scroll.vadjustment().set_value(scroll.vadjustment().upper());
+                settle();
+                assert_eq!((root.width(), root.height()), (width, height));
+                if let Ok(directory) = std::env::var("STICKIES_EDGE_CAPTURES") {
+                    let snapshot = gtk::Snapshot::new();
+                    gtk::WidgetPaintable::new(Some(root)).snapshot(
+                        &snapshot,
+                        f64::from(root.width()),
+                        f64::from(root.height()),
+                    );
+                    manager
+                        .window()
+                        .renderer()
+                        .unwrap()
+                        .render_texture(snapshot.to_node().unwrap(), None)
+                        .save_to_png(
+                            std::path::Path::new(&directory)
+                                .join(format!("{name}-settings-{size}.png")),
+                        )
+                        .unwrap();
+                }
+            }
+            manager.window().set_visible(false);
+            gtk::prelude::WidgetExt::unrealize(manager.window());
+            manager.window().set_resizable(true);
+            manager.window().set_default_size(720, 540);
+            manager.window().present();
+            settle();
+            button(root, "Settings").emit_clicked();
+        }
+        // A rejected preset must restore the saved selection; a rejected Done
+        // keeps its preview for retry and Cancel must remain write-free.
+        presets[1].set_active(true);
+        let temporary = config::config_path().with_extension("toml.tmp");
+        std::fs::create_dir(&temporary).unwrap();
+        timeouts[0].set_active(true);
+        assert_eq!(ui.config.borrow().inactivity_seconds, 120);
+        assert!(
+            timeouts[2].is_active(),
+            "a rejected timeout must restore its saved choice"
+        );
+        edges[0].set_active(true);
+        assert_eq!(ui.config.borrow().edge, ScreenEdge::Bottom);
+        assert!(edges[3].is_active());
+        presets[0].set_active(true);
+        assert!(presets[1].is_active());
+        ui.begin_reposition().unwrap();
+        ui.preview_reposition(0.5, 80., 0.);
+        assert!(ui.finish_reposition(true).is_err());
+        assert!(ui.edge.reposition_error.is_visible());
+        settle();
+        let (x, y, w, h) = ui.edge.panel_bounds.get();
+        let (sw, sh) = ui.note_limits();
+        assert!(x >= 0 && y >= 0 && x + w <= sw && y + h <= sh);
+        capture(&ui, "reposition-save-error");
+        assert!(ui.edge.reposition_offset().is_some());
+        assert_eq!(
+            Config::load(&config::config_path()).unwrap().marker_offset,
+            0.5
+        );
+        ui.finish_reposition(false).unwrap();
+        std::fs::remove_dir(&temporary).unwrap();
+        ui.begin_reposition().unwrap();
+        ui.preview_reposition(0.5, 80., 0.);
+        std::fs::create_dir(&temporary).unwrap();
+        assert!(ui.finish_reposition(true).is_err());
+        let retry_offset = ui.edge.reposition_offset().unwrap();
+        std::fs::remove_dir(&temporary).unwrap();
+        ui.finish_reposition(true).unwrap();
+        assert_eq!(
+            Config::load(&config::config_path()).unwrap().marker_offset,
+            retry_offset
+        );
+        for target in [ui.edge.window.upcast_ref::<gtk::Widget>(), root] {
+            ui.begin_reposition().unwrap();
+            ui.preview_reposition(retry_offset, -40., 0.);
+            let controllers = target.observe_controllers();
+            for index in 0..controllers.n_items() {
+                if let Some(keys) = controllers
+                    .item(index)
+                    .and_downcast::<gtk::EventControllerKey>()
+                {
+                    keys.emit_by_name::<bool>(
+                        "key-pressed",
+                        &[
+                            &gtk::gdk::Key::Escape,
+                            &0u32,
+                            &gtk::gdk::ModifierType::empty(),
+                        ],
+                    );
+                }
+            }
+            assert!(ui.edge.reposition_offset().is_none());
+            assert_eq!(ui.config.borrow().marker_offset, retry_offset);
+        }
+        ui.begin_reposition().unwrap();
+        ui.preview_reposition(0.5, 100000., 0.);
+        assert_eq!(ui.edge.reposition_offset(), Some(1.));
+        ui.preview_reposition(0.5, -100000., 0.);
+        assert_eq!(ui.edge.reposition_offset(), Some(0.));
+        ui.dnd.set(true);
+        ui.update_visibility();
+        assert!(ui.edge.reposition_offset().is_none());
+        assert!(ui.begin_reposition().is_err());
+        ui.dnd.set(false);
+        ui.update_visibility();
+        manager.window().close();
+        ui.edge.window.close();
+        ui.edge.strip_window.close();
+    }
 
     #[test]
     #[ignore = "requires Wayland and disposable XDG_DATA_HOME/XDG_CONFIG_HOME directories"]

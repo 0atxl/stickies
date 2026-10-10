@@ -1,7 +1,7 @@
 use crate::{
     app::NoteColor,
     appearance,
-    config::{Appearance, Config, Font, Paper, Shape, Theme},
+    config::{Appearance, Config, Font, Paper, ScreenEdge, Shape, Theme},
 };
 use gtk::prelude::*;
 use std::{
@@ -11,14 +11,15 @@ use std::{
 
 pub struct Panel {
     pub root: gtk::ScrolledWindow,
-    current: Rc<RefCell<Config>>,
+    position: Rc<PositionControls>,
     timeouts: Rc<Vec<gtk::ToggleButton>>,
     syncing: Rc<Cell<bool>>,
 }
 impl Panel {
     pub fn refresh(&self) {
+        self.position.sync();
         self.syncing.set(true);
-        let seconds = self.current.borrow().inactivity_seconds;
+        let seconds = self.position.current.borrow().inactivity_seconds;
         for (button, timeout) in self.timeouts.iter().zip([0, 60, 120, 300]) {
             button.set_active(seconds == timeout);
         }
@@ -26,11 +27,131 @@ impl Panel {
     }
 }
 
+struct PositionControls {
+    root: gtk::Box,
+    edges: Vec<gtk::ToggleButton>,
+    presets: Vec<gtk::ToggleButton>,
+    error: gtk::Label,
+    current: Rc<RefCell<Config>>,
+    syncing: Cell<bool>,
+}
+impl PositionControls {
+    fn sync(&self) {
+        self.syncing.set(true);
+        let config = self.current.borrow();
+        for (button, edge) in self.edges.iter().zip([
+            ScreenEdge::Left,
+            ScreenEdge::Right,
+            ScreenEdge::Top,
+            ScreenEdge::Bottom,
+        ]) {
+            button.set_active(config.edge == edge);
+        }
+        let labels = if matches!(config.edge, ScreenEdge::Top | ScreenEdge::Bottom) {
+            ["Left", "Center", "Right"]
+        } else {
+            ["Top", "Center", "Bottom"]
+        };
+        for (index, button) in self.presets.iter().enumerate() {
+            button.set_label(labels[index]);
+            button.set_active((config.marker_offset - index as f64 / 2.).abs() < 0.000001);
+        }
+        self.syncing.set(false);
+    }
+    fn result(&self, result: Result<(), String>) {
+        if let Err(message) = result {
+            self.error.set_text(&message);
+            self.error.set_visible(true);
+        } else {
+            self.error.set_visible(false);
+        }
+        self.sync();
+    }
+    fn new(
+        current: Rc<RefCell<Config>>,
+        change: Rc<dyn Fn(Config) -> Result<(), String>>,
+        reposition: impl Fn() -> Result<(), String> + 'static,
+    ) -> Rc<Self> {
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        let edges = choices(&["Left", "Right", "Top", "Bottom"], 0);
+        let presets = choices(&["Top", "Center", "Bottom"], 1);
+        section(&root, "Screen edge", &edges.0);
+        section(&root, "Position", &presets.0);
+        let hint = gtk::Label::new(Some(
+            "Choose a position or drag the strip to place it precisely.",
+        ));
+        hint.set_wrap(true);
+        hint.set_xalign(0.);
+        hint.add_css_class("metadata");
+        root.append(&hint);
+        let move_button = gtk::Button::with_label("Reposition…");
+        move_button.set_tooltip_text(Some("Drag the strip, then choose Done or Cancel"));
+        root.append(&move_button);
+        let error = gtk::Label::new(None);
+        error.set_wrap(true);
+        error.set_max_width_chars(28);
+        error.add_css_class("save-error");
+        error.set_visible(false);
+        root.append(&error);
+        let controls = Rc::new(Self {
+            root,
+            edges: edges.1,
+            presets: presets.1,
+            error,
+            current,
+            syncing: Cell::new(false),
+        });
+        controls.sync();
+        for (index, button) in controls.edges.iter().enumerate() {
+            let weak = Rc::downgrade(&controls);
+            let change = change.clone();
+            button.connect_toggled(move |button| {
+                if let Some(controls) = weak.upgrade()
+                    && !controls.syncing.get()
+                    && button.is_active()
+                {
+                    let mut config = controls.current.borrow().clone();
+                    config.edge = [
+                        ScreenEdge::Left,
+                        ScreenEdge::Right,
+                        ScreenEdge::Top,
+                        ScreenEdge::Bottom,
+                    ][index];
+                    controls.result(change(config));
+                }
+            });
+        }
+        for (index, button) in controls.presets.iter().enumerate() {
+            let weak = Rc::downgrade(&controls);
+            let change = change.clone();
+            button.connect_toggled(move |button| {
+                if let Some(controls) = weak.upgrade()
+                    && !controls.syncing.get()
+                    && button.is_active()
+                {
+                    let mut config = controls.current.borrow().clone();
+                    config.marker_offset = index as f64 / 2.;
+                    controls.result(change(config));
+                }
+            });
+        }
+        let weak = Rc::downgrade(&controls);
+        move_button.connect_clicked(move |_| {
+            if let Some(controls) = weak.upgrade() {
+                controls.result(reposition());
+            }
+        });
+        controls
+    }
+}
+
 pub fn build(
     current: Rc<RefCell<Config>>,
     on_change: impl Fn(Config) -> Result<(), String> + 'static,
+    on_reposition: impl Fn() -> Result<(), String> + 'static,
 ) -> Panel {
     let on_change: Rc<dyn Fn(Config) -> Result<(), String>> = Rc::new(on_change);
+    let position = PositionControls::new(current.clone(), on_change.clone(), on_reposition);
     let root = gtk::Box::new(gtk::Orientation::Vertical, 20);
     root.add_css_class("appearance-panel");
     let error = gtk::Label::new(None);
@@ -281,6 +402,12 @@ pub fn build(
     row.append(&switch);
     root.append(&row);
     root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    let heading = gtk::Label::new(Some("Edge strip"));
+    heading.set_xalign(0.);
+    heading.add_css_class("setting-label");
+    root.append(&heading);
+    root.append(&position.root);
+    root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     let heading = gtk::Label::new(Some("Behavior"));
     heading.set_xalign(0.);
     heading.add_css_class("setting-label");
@@ -367,7 +494,7 @@ pub fn build(
             .hscrollbar_policy(gtk::PolicyType::Never)
             .child(&root)
             .build(),
-        current,
+        position,
         timeouts,
         syncing,
     }
