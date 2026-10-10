@@ -24,6 +24,8 @@
 .edge-window .edge-utilities { padding: 0; /* Clipped with GtkWidget::set_overflow(Hidden). */ }
 .edge-window .strip-control { background: transparent; border: none; border-radius: 0; padding: 0; min-width: 24px; min-height: 24px; box-shadow: none; }
 .edge-window .edge-marker { padding: 6px; }
+/* Hover/press feedback comes from motion; keep the fill clear. */
+.edge-window button.note-tab:hover, .edge-window button.note-tab:active { background-image: none; }
 
 
 /* ======== paper ======== */
@@ -40,8 +42,6 @@
   box-shadow: -3px 2px 10px rgba(30,25,15,.35); }
 .edge-window.edge-paper.edge-right .edge-utilities, .edge-window.edge-paper.edge-right .edge-marker { background-color: #F6EFDB; }
 .edge-window.edge-paper.edge-right .strip-control + .strip-control { box-shadow: inset 0 1px 0 alpha(#2A2723, .14); }
-.edge-window.edge-paper.edge-right button.note-tab:hover { box-shadow: inset 0 0 0 100px rgba(0,0,0,.08), -3px 2px 10px rgba(30,25,15,.35); }
-.edge-window.edge-paper.edge-right button.note-tab:active { box-shadow: inset 0 0 0 100px rgba(0,0,0,.14), -3px 2px 10px rgba(30,25,15,.35); }
 .edge-window.edge-paper.edge-right button.note-tab.edge-active { box-shadow: inset 2px 0 0 rgba(42,39,35,.9), inset 0 2px 0 rgba(42,39,35,.9), inset 0 -2px 0 rgba(42,39,35,.9), -3px 2px 10px rgba(30,25,15,.35); }
 /* paper / left */
 .edge-window.edge-paper.edge-left .edge-utilities, .edge-window.edge-paper.edge-left .edge-marker {
@@ -52,8 +52,6 @@
   box-shadow: 3px 2px 10px rgba(30,25,15,.35); }
 .edge-window.edge-paper.edge-left .edge-utilities, .edge-window.edge-paper.edge-left .edge-marker { background-color: #F6EFDB; }
 .edge-window.edge-paper.edge-left .strip-control + .strip-control { box-shadow: inset 0 1px 0 alpha(#2A2723, .14); }
-.edge-window.edge-paper.edge-left button.note-tab:hover { box-shadow: inset 0 0 0 100px rgba(0,0,0,.08), 3px 2px 10px rgba(30,25,15,.35); }
-.edge-window.edge-paper.edge-left button.note-tab:active { box-shadow: inset 0 0 0 100px rgba(0,0,0,.14), 3px 2px 10px rgba(30,25,15,.35); }
 .edge-window.edge-paper.edge-left button.note-tab.edge-active { box-shadow: inset -2px 0 0 rgba(42,39,35,.9), inset 0 2px 0 rgba(42,39,35,.9), inset 0 -2px 0 rgba(42,39,35,.9), 3px 2px 10px rgba(30,25,15,.35); }
 /* paper / top */
 .edge-window.edge-paper.edge-top .edge-utilities, .edge-window.edge-paper.edge-top .edge-marker {
@@ -64,8 +62,6 @@
   box-shadow: 2px 3px 10px rgba(30,25,15,.35); }
 .edge-window.edge-paper.edge-top .edge-utilities, .edge-window.edge-paper.edge-top .edge-marker { background-color: #F6EFDB; }
 .edge-window.edge-paper.edge-top .strip-control + .strip-control { box-shadow: inset 1px 0 0 alpha(#2A2723, .14); }
-.edge-window.edge-paper.edge-top button.note-tab:hover { box-shadow: inset 0 0 0 100px rgba(0,0,0,.08), 2px 3px 10px rgba(30,25,15,.35); }
-.edge-window.edge-paper.edge-top button.note-tab:active { box-shadow: inset 0 0 0 100px rgba(0,0,0,.14), 2px 3px 10px rgba(30,25,15,.35); }
 .edge-window.edge-paper.edge-top button.note-tab.edge-active { box-shadow: inset 2px 0 0 rgba(42,39,35,.9), inset -2px 0 0 rgba(42,39,35,.9), inset 0 -2px 0 rgba(42,39,35,.9), 2px 3px 10px rgba(30,25,15,.35); }
 /* paper / bottom */
 .edge-window.edge-paper.edge-bottom .edge-utilities, .edge-window.edge-paper.edge-bottom .edge-marker {
@@ -76,8 +72,6 @@
   box-shadow: 2px -3px 10px rgba(30,25,15,.35); }
 .edge-window.edge-paper.edge-bottom .edge-utilities, .edge-window.edge-paper.edge-bottom .edge-marker { background-color: #F6EFDB; }
 .edge-window.edge-paper.edge-bottom .strip-control + .strip-control { box-shadow: inset 1px 0 0 alpha(#2A2723, .14); }
-.edge-window.edge-paper.edge-bottom button.note-tab:hover { box-shadow: inset 0 0 0 100px rgba(0,0,0,.08), 2px -3px 10px rgba(30,25,15,.35); }
-.edge-window.edge-paper.edge-bottom button.note-tab:active { box-shadow: inset 0 0 0 100px rgba(0,0,0,.14), 2px -3px 10px rgba(30,25,15,.35); }
 .edge-window.edge-paper.edge-bottom button.note-tab.edge-active { box-shadow: inset 2px 0 0 rgba(42,39,35,.9), inset -2px 0 0 rgba(42,39,35,.9), inset 0 2px 0 rgba(42,39,35,.9), 2px -3px 10px rgba(30,25,15,.35); }
 
 /* ======== playful ======== */
@@ -95,8 +89,6 @@
   box-shadow: inset 1px 0 0 var(--edge-ring), inset 0 1px 0 var(--edge-ring), inset 0 -1px 0 var(--edge-ring), -3px 2px 0 rgba(42,39,35,.85); }
 .edge-window.edge-playful.edge-right .edge-utilities, .edge-window.edge-playful.edge-right .edge-marker { background-color: #FFFFFF; }
 .edge-window.edge-playful.edge-right .strip-control + .strip-control { box-shadow: inset 0 1px 0 alpha(#2A2723, .14); }
-.edge-window.edge-playful.edge-right button.note-tab:hover { box-shadow: inset 1px 0 0 var(--edge-ring), inset 0 1px 0 var(--edge-ring), inset 0 -1px 0 var(--edge-ring), inset 0 0 0 100px rgba(0,0,0,.08), -3px 2px 0 rgba(42,39,35,.85); }
-.edge-window.edge-playful.edge-right button.note-tab:active { box-shadow: inset 1px 0 0 var(--edge-ring), inset 0 1px 0 var(--edge-ring), inset 0 -1px 0 var(--edge-ring), inset 0 0 0 100px rgba(0,0,0,.14), -3px 2px 0 rgba(42,39,35,.85); }
 .edge-window.edge-playful.edge-right button.note-tab.edge-active { --edge-ring: #E24C86; border-color: #E24C86; border-right-color: transparent; }
 /* playful / left */
 .edge-window.edge-playful.edge-left .edge-utilities, .edge-window.edge-playful.edge-left .edge-marker {
@@ -107,8 +99,6 @@
   box-shadow: inset -1px 0 0 var(--edge-ring), inset 0 1px 0 var(--edge-ring), inset 0 -1px 0 var(--edge-ring), 3px 2px 0 rgba(42,39,35,.85); }
 .edge-window.edge-playful.edge-left .edge-utilities, .edge-window.edge-playful.edge-left .edge-marker { background-color: #FFFFFF; }
 .edge-window.edge-playful.edge-left .strip-control + .strip-control { box-shadow: inset 0 1px 0 alpha(#2A2723, .14); }
-.edge-window.edge-playful.edge-left button.note-tab:hover { box-shadow: inset -1px 0 0 var(--edge-ring), inset 0 1px 0 var(--edge-ring), inset 0 -1px 0 var(--edge-ring), inset 0 0 0 100px rgba(0,0,0,.08), 3px 2px 0 rgba(42,39,35,.85); }
-.edge-window.edge-playful.edge-left button.note-tab:active { box-shadow: inset -1px 0 0 var(--edge-ring), inset 0 1px 0 var(--edge-ring), inset 0 -1px 0 var(--edge-ring), inset 0 0 0 100px rgba(0,0,0,.14), 3px 2px 0 rgba(42,39,35,.85); }
 .edge-window.edge-playful.edge-left button.note-tab.edge-active { --edge-ring: #E24C86; border-color: #E24C86; border-left-color: transparent; }
 /* playful / top */
 .edge-window.edge-playful.edge-top .edge-utilities, .edge-window.edge-playful.edge-top .edge-marker {
@@ -119,8 +109,6 @@
   box-shadow: inset 1px 0 0 var(--edge-ring), inset -1px 0 0 var(--edge-ring), inset 0 -1px 0 var(--edge-ring), 2px 3px 0 rgba(42,39,35,.85); }
 .edge-window.edge-playful.edge-top .edge-utilities, .edge-window.edge-playful.edge-top .edge-marker { background-color: #FFFFFF; }
 .edge-window.edge-playful.edge-top .strip-control + .strip-control { box-shadow: inset 1px 0 0 alpha(#2A2723, .14); }
-.edge-window.edge-playful.edge-top button.note-tab:hover { box-shadow: inset 1px 0 0 var(--edge-ring), inset -1px 0 0 var(--edge-ring), inset 0 -1px 0 var(--edge-ring), inset 0 0 0 100px rgba(0,0,0,.08), 2px 3px 0 rgba(42,39,35,.85); }
-.edge-window.edge-playful.edge-top button.note-tab:active { box-shadow: inset 1px 0 0 var(--edge-ring), inset -1px 0 0 var(--edge-ring), inset 0 -1px 0 var(--edge-ring), inset 0 0 0 100px rgba(0,0,0,.14), 2px 3px 0 rgba(42,39,35,.85); }
 .edge-window.edge-playful.edge-top button.note-tab.edge-active { --edge-ring: #E24C86; border-color: #E24C86; border-top-color: transparent; }
 /* playful / bottom */
 .edge-window.edge-playful.edge-bottom .edge-utilities, .edge-window.edge-playful.edge-bottom .edge-marker {
@@ -131,8 +119,6 @@
   box-shadow: inset 1px 0 0 var(--edge-ring), inset -1px 0 0 var(--edge-ring), inset 0 1px 0 var(--edge-ring), 2px -3px 0 rgba(42,39,35,.85); }
 .edge-window.edge-playful.edge-bottom .edge-utilities, .edge-window.edge-playful.edge-bottom .edge-marker { background-color: #FFFFFF; }
 .edge-window.edge-playful.edge-bottom .strip-control + .strip-control { box-shadow: inset 1px 0 0 alpha(#2A2723, .14); }
-.edge-window.edge-playful.edge-bottom button.note-tab:hover { box-shadow: inset 1px 0 0 var(--edge-ring), inset -1px 0 0 var(--edge-ring), inset 0 1px 0 var(--edge-ring), inset 0 0 0 100px rgba(0,0,0,.08), 2px -3px 0 rgba(42,39,35,.85); }
-.edge-window.edge-playful.edge-bottom button.note-tab:active { box-shadow: inset 1px 0 0 var(--edge-ring), inset -1px 0 0 var(--edge-ring), inset 0 1px 0 var(--edge-ring), inset 0 0 0 100px rgba(0,0,0,.14), 2px -3px 0 rgba(42,39,35,.85); }
 .edge-window.edge-playful.edge-bottom button.note-tab.edge-active { --edge-ring: #E24C86; border-color: #E24C86; border-bottom-color: transparent; }
 
 /* ======== minimal ======== */
@@ -141,7 +127,6 @@
 .edge-window.edge-minimal .strip-control:active, .edge-window.edge-minimal .strip-control.edge-active { background-color: alpha(#23262B, .20); }
 .edge-window.edge-minimal .edge-pill { box-shadow: 0 0 0 1px rgba(35,38,43,.18); }
 .edge-window.edge-minimal button.note-tab { background-color: #FFFFFF; color: #23262B; }
-.edge-window.edge-minimal button.note-tab:hover { background-image: linear-gradient(alpha(#23262B, .07), alpha(#23262B, .07)); }
 .edge-window.edge-minimal button.note-tab.edge-active { background-image: linear-gradient(alpha(#4C8DFF, .16), alpha(#4C8DFF, .16)); }
 /* minimal / right */
 .edge-window.edge-minimal.edge-right .edge-utilities, .edge-window.edge-minimal.edge-right .edge-marker {
@@ -190,7 +175,6 @@
 .edge-window.edge-minimal-dark .strip-control:active, .edge-window.edge-minimal-dark .strip-control.edge-active { background-color: alpha(#F0F0EE, .20); }
 .edge-window.edge-minimal-dark .edge-pill { box-shadow: 0 0 0 1px rgba(255,255,255,.22); }
 .edge-window.edge-minimal-dark button.note-tab { background-color: #22252C; color: #F0F0EE; }
-.edge-window.edge-minimal-dark button.note-tab:hover { background-image: linear-gradient(alpha(#F0F0EE, .07), alpha(#F0F0EE, .07)); }
 .edge-window.edge-minimal-dark button.note-tab.edge-active { background-image: linear-gradient(alpha(#4C8DFF, .16), alpha(#4C8DFF, .16)); }
 /* minimal-dark / right */
 .edge-window.edge-minimal-dark.edge-right .edge-utilities, .edge-window.edge-minimal-dark.edge-right .edge-marker {
