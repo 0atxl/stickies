@@ -116,6 +116,10 @@ impl Ui {
         }
         match self.storage.create_note(title, "", NoteColor::Yellow) {
             Ok(note) => {
+                let session = self.note_session(note.id);
+                if let Some(session) = session.as_ref() {
+                    session.mark_new_blank();
+                }
                 self.deck
                     .borrow_mut()
                     .dispatch(Action::AddNote(note.clone()));
@@ -226,7 +230,9 @@ impl Ui {
             if !editor.flush() {
                 return false;
             }
-            editor.stop();
+            if !editor.stop() {
+                return false;
+            }
             self.edge.docked.borrow_mut().take();
             self.edge.docked_offset.set(None);
             self.deck.borrow_mut().dispatch(Action::CollapseDeck);
@@ -244,12 +250,13 @@ impl Ui {
             return;
         }
         let is_docked = self.edge.state() == EdgeState::Docked(id);
-        if is_docked && !self.close_docked() {
-            return;
-        }
+        // Attach the destination before releasing an empty new note's old view.
         let Some(editor) = self.new_editor(id, true) else {
             return;
         };
+        if is_docked && !self.close_docked() {
+            return;
+        }
         let window = gtk::ApplicationWindow::builder()
             .application(&self.application)
             .title("Stickies · Note")
@@ -310,7 +317,9 @@ impl Ui {
                         if !editor.flush() {
                             return glib::Propagation::Stop;
                         }
-                        editor.stop();
+                        if !editor.stop() {
+                            return glib::Propagation::Stop;
+                        }
                     }
                     ui.separate.borrow_mut().remove(&id);
                 }
@@ -434,7 +443,7 @@ impl Ui {
         manager.window().connect_close_request(move |_| {
             if let Some(ui) = weak.upgrade() {
                 let manager = ui.manager.borrow().clone();
-                if manager.is_some_and(|m| !m.flush()) {
+                if manager.is_some_and(|m| !m.close_editor()) {
                     return glib::Propagation::Stop;
                 }
                 ui.finish_reposition(false).ok();
@@ -644,7 +653,7 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
         let ui = &shutdown_ui;
         let manager = ui.manager.borrow().clone();
         if let Some(manager) = manager {
-            manager.flush();
+            manager.close_editor();
         }
         if let Some(editor) = ui.edge.docked.borrow().as_ref() {
             editor.stop();
@@ -781,6 +790,202 @@ mod edge_tests {
         .unwrap()
     }
 
+    #[test]
+    #[ignore = "requires Wayland and disposable XDG_DATA_HOME/XDG_CONFIG_HOME directories"]
+    fn new_blank_notes_are_discarded_after_the_last_view_leaves() {
+        for variable in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+            assert!(
+                std::path::PathBuf::from(std::env::var(variable).expect(variable))
+                    .starts_with(std::env::temp_dir())
+            );
+        }
+        ui_assets::register().unwrap();
+        adw::init().unwrap();
+        Config::default().save(&config::config_path()).unwrap();
+        let app = gtk::Application::builder()
+            .application_id(APPLICATION_ID)
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let storage = Storage::open(&storage::database_path()).unwrap();
+        let existing = storage
+            .create_note("Existing note", "Keep", NoteColor::Blue)
+            .unwrap()
+            .id;
+        let existing_blank = storage.create_note("", "", NoteColor::Yellow).unwrap().id;
+        let ui = build(&app).unwrap();
+        let settle = || {
+            let end = std::time::Instant::now() + Duration::from_millis(200);
+            let deadline = end + Duration::from_secs(2);
+            while std::time::Instant::now() < end || ui.edge_motion_running() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "edge motion did not settle"
+                );
+                while glib::MainContext::default().pending() {
+                    glib::MainContext::default().iteration(false);
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        for (title, body, keep) in [
+            ("", "", false),
+            ("  ", " \n", false),
+            ("A title", "", true),
+            ("", "Body only", true),
+        ] {
+            ui.create_note();
+            let editor = ui.edge.docked.borrow().clone().unwrap();
+            let id = editor.id();
+            assert!(storage.load_note(id).is_ok());
+            editor.title.set_text(title);
+            editor.body.buffer().set_text(body);
+            assert!(ui.close_docked());
+            assert_eq!(storage.load_note(id).is_ok(), keep);
+        }
+        ui.open_docked(existing_blank);
+        assert!(ui.close_docked());
+        assert!(storage.load_note(existing_blank).is_ok());
+        // Moving a blank to a separate window must not discard it in transit.
+        ui.create_note();
+        let id = ui.edge.docked.borrow().as_ref().unwrap().id();
+        ui.open_separate(id);
+        settle();
+        assert!(ui.edge.docked.borrow().is_none());
+        assert!(storage.load_note(id).is_ok());
+        ui.close_separate(id);
+        settle();
+        assert!(storage.load_note(id).is_err());
+        // A rejected deletion leaves the blank editor open for retry.
+        ui.create_note();
+        let id = ui.edge.docked.borrow().as_ref().unwrap().id();
+        let connection = rusqlite::Connection::open(storage::database_path()).unwrap();
+        connection.execute_batch("CREATE TRIGGER reject_blank_delete BEFORE UPDATE ON notes WHEN NEW.deleted_at IS NOT NULL BEGIN SELECT RAISE(FAIL, 'delete failure'); END;").unwrap();
+        assert!(!ui.close_docked());
+        assert_eq!(ui.edge.docked.borrow().as_ref().unwrap().id(), id);
+        assert!(storage.load_note(id).is_ok());
+        connection
+            .execute_batch("DROP TRIGGER reject_blank_delete;")
+            .unwrap();
+        assert!(ui.close_docked());
+        assert!(storage.load_note(id).is_err());
+        // Unsaved real text must never be mistaken for a persisted empty draft.
+        ui.create_note();
+        let editor = ui.edge.docked.borrow().clone().unwrap();
+        let id = editor.id();
+        editor.body.buffer().set_text("Keep unsaved text");
+        connection.execute_batch("CREATE TRIGGER reject_new_save BEFORE UPDATE ON notes BEGIN SELECT RAISE(FAIL, 'save failure'); END;").unwrap();
+        assert!(!ui.close_docked());
+        assert_eq!(
+            editor.body.buffer().text(
+                &editor.body.buffer().start_iter(),
+                &editor.body.buffer().end_iter(),
+                true
+            ),
+            "Keep unsaved text"
+        );
+        connection
+            .execute_batch("DROP TRIGGER reject_new_save;")
+            .unwrap();
+        assert!(ui.close_docked());
+        assert_eq!(storage.load_note(id).unwrap().body, "Keep unsaved text");
+        ui.create_note_with_title("Search-created title");
+        let id = ui.edge.docked.borrow().as_ref().unwrap().id();
+        assert!(ui.close_docked());
+        assert_eq!(storage.load_note(id).unwrap().title, "Search-created title");
+        ui.show_manager();
+        settle();
+        let manager = ui.manager.borrow().clone().unwrap();
+        let root = manager.window().upcast_ref::<gtk::Widget>();
+        let list = find_widget(root, &|widget| widget.has_css_class("note-list"))
+            .unwrap()
+            .downcast::<gtk::ListBox>()
+            .unwrap();
+        let title = find_widget(root, &|widget| widget.has_css_class("inline-title"))
+            .unwrap()
+            .downcast::<gtk::Entry>()
+            .unwrap();
+        let pages = title
+            .ancestor(gtk::Stack::static_type())
+            .unwrap()
+            .downcast::<gtk::Stack>()
+            .unwrap();
+        assert!(
+            list.selected_row().is_none(),
+            "opening All Notes must not select a note"
+        );
+        assert_eq!(pages.visible_child_name().as_deref(), Some("empty"));
+        assert!(title.text().is_empty());
+        ui.refresh();
+        assert!(
+            list.selected_row().is_none(),
+            "refresh must not choose the first note"
+        );
+        let existing_title = find_widget(root, &|widget| {
+            widget
+                .downcast_ref::<gtk::Label>()
+                .is_some_and(|label| label.text() == "Existing note")
+        })
+        .unwrap();
+        let row = existing_title
+            .ancestor(gtk::ListBoxRow::static_type())
+            .unwrap()
+            .downcast::<gtk::ListBoxRow>()
+            .unwrap();
+        list.select_row(Some(&row));
+        assert_eq!(pages.visible_child_name().as_deref(), Some("editor"));
+        assert_eq!(title.text(), "Existing note");
+        ui.refresh();
+        assert_eq!(
+            title.text(),
+            "Existing note",
+            "refresh must retain a deliberate selection"
+        );
+        let newest = || {
+            storage
+                .search_notes(NoteCollection::Active, "", NoteSort::Recent)
+                .unwrap()
+                .into_iter()
+                .max_by_key(|n| n.id.value())
+                .unwrap()
+                .id
+        };
+        button(root, "New note").emit_clicked();
+        let shared = newest();
+        ui.open_docked(shared);
+        assert!(ui.close_docked());
+        assert!(storage.load_note(shared).is_ok());
+        // Repeated New note leaves only the current blank; switching removes it.
+        button(root, "New note").emit_clicked();
+        assert!(storage.load_note(shared).is_err());
+        let selected = newest();
+        let label = find_widget(root, &|widget| {
+            widget
+                .downcast_ref::<gtk::Label>()
+                .is_some_and(|label| label.text() == "Existing note")
+        })
+        .unwrap();
+        let mut row = label.parent().unwrap();
+        while !row.is::<gtk::ListBoxRow>() {
+            row = row.parent().unwrap();
+        }
+        let row = row.downcast::<gtk::ListBoxRow>().unwrap();
+        row.parent()
+            .unwrap()
+            .downcast::<gtk::ListBox>()
+            .unwrap()
+            .select_row(Some(&row));
+        settle();
+        assert!(storage.load_note(selected).is_err());
+        assert!(storage.load_note(existing).is_ok());
+        button(root, "New note").emit_clicked();
+        let last = newest();
+        manager.window().close();
+        settle();
+        assert!(storage.load_note(last).is_err());
+        ui.edge.window.close();
+        ui.edge.strip_window.close();
+    }
 
     #[test]
     #[ignore = "requires Wayland and disposable XDG_DATA_HOME/XDG_CONFIG_HOME directories"]

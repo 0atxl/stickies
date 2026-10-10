@@ -20,6 +20,7 @@ pub struct NoteSession {
     style: RefCell<NoteStyle>,
     storage: Rc<Storage>,
     dirty: Cell<bool>,
+    new_blank: Cell<bool>,
     decorating: Cell<bool>,
     render_source: RefCell<Option<glib::SourceId>>,
     views: RefCell<Vec<glib::WeakRef<gtk::TextView>>>,
@@ -28,7 +29,7 @@ pub struct NoteSession {
     pin_error: RefCell<Option<String>>,
     save_source: RefCell<Option<glib::SourceId>>,
     listeners: RefCell<Vec<Weak<dyn Fn()>>>,
-    on_saved: Box<dyn Fn()>,
+    on_saved: Rc<dyn Fn()>,
 }
 
 impl NoteSession {
@@ -49,6 +50,7 @@ impl NoteSession {
             style: RefCell::new(style),
             storage,
             dirty: Cell::new(false),
+            new_blank: Cell::new(false),
             decorating: Cell::new(false),
             render_source: RefCell::new(None),
             views: RefCell::new(Vec::new()),
@@ -57,7 +59,7 @@ impl NoteSession {
             pin_error: RefCell::new(None),
             save_source: RefCell::new(None),
             listeners: RefCell::new(Vec::new()),
-            on_saved: Box::new(on_saved),
+            on_saved: Rc::new(on_saved),
         });
         let weak = Rc::downgrade(&session);
         session.title.connect_text_notify(move |_| {
@@ -97,6 +99,47 @@ impl NoteSession {
         }
         drop(views);
         self.refresh_checklists();
+    }
+
+    pub fn mark_new_blank(&self) {
+        self.new_blank.set(self.is_blank());
+    }
+
+    fn is_blank(&self) -> bool {
+        let (start, end) = self.body.bounds();
+        self.title.text().trim().is_empty() && self.body.text(&start, &end, true).trim().is_empty()
+    }
+
+    // Release only this view. A new blank remains editable in any other window.
+    pub fn release_view(&self, view: &gtk::TextView) -> bool {
+        if !self.flush() {
+            return false;
+        }
+        let other_view = self
+            .views
+            .borrow()
+            .iter()
+            .filter_map(|v| v.upgrade())
+            .any(|other| other != *view && other.buffer() == self.body);
+        if self.new_blank.get() && !other_view {
+            if self.is_blank() && self.storage.is_archived(self.id()).ok() == Some(false) {
+                if let Err(error) = self.storage.delete_note(self.id()) {
+                    self.error.replace(Some(format!(
+                        "Could not remove the empty note. Retry closing it. {error}"
+                    )));
+                    self.notify();
+                    return false;
+                }
+                // Refresh after the closing/switching view has released its selection.
+                let changed = self.on_saved.clone();
+                glib::idle_add_local_once(move || changed());
+            }
+            self.new_blank.set(false);
+        }
+        self.views
+            .borrow_mut()
+            .retain(|v| v.upgrade().is_some_and(|other| other != *view));
+        true
     }
 
     fn refresh_checklists(self: &Rc<Self>) {

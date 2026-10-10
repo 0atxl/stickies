@@ -91,11 +91,15 @@ impl ManagerWindow {
     pub fn window(&self) -> &adw::ApplicationWindow {
         &self.0.window
     }
-    pub fn flush(&self) -> bool {
-        self.0.flush()
+    pub fn close_editor(&self) -> bool {
+        self.0.release_editor()
     }
 }
 impl ManagerUi {
+    fn release_editor(&self) -> bool {
+        let session = self.session.borrow().clone();
+        session.is_none_or(|session| session.release_view(&self.body))
+    }
     fn flush(&self) -> bool {
         let session = self.session.borrow().clone();
         session.is_none_or(|s| s.flush())
@@ -128,7 +132,7 @@ impl ManagerUi {
         let target = preferred
             .or(previous)
             .filter(|id| notes.iter().any(|n| n.id == *id));
-        if target != previous && !self.flush() {
+        if target != previous && !self.release_editor() {
             self.busy.set(false);
             return;
         }
@@ -162,7 +166,7 @@ impl ManagerUi {
         }
         let id = row.and_then(|r| self.notes.borrow().get(r.index() as usize).map(|n| n.id));
         if id != self.selected.get() {
-            if self.flush() {
+            if self.release_editor() {
                 if let Some(id) = id {
                     self.show_note(id);
                 } else {
@@ -451,7 +455,7 @@ impl ManagerUi {
         }
     }
     fn create(self: &Rc<Self>) {
-        if !self.flush() {
+        if !self.release_editor() {
             return;
         }
         match self.storage.create_note("", "", NoteColor::Yellow) {
@@ -462,9 +466,17 @@ impl ManagerUi {
                 self.search.set_text("");
                 self.refresh(Some(note.id));
                 self.title.grab_focus();
+                if let Some(session) = self.session.borrow().as_ref() {
+                    session.mark_new_blank();
+                }
                 (self.callbacks.changed)(note.id, ManagerChange::Create);
             }
-            Err(e) => self.message(&format!("Could not create note: {e}")),
+            Err(e) => {
+                if let Some(session) = self.session.borrow().as_ref() {
+                    session.attach_view(&self.body);
+                }
+                self.message(&format!("Could not create note: {e}"));
+            }
         }
     }
     fn mutate(self: &Rc<Self>, change: ManagerChange) {

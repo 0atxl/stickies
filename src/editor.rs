@@ -506,12 +506,16 @@ impl Editor {
             self.close.emit_clicked();
         }
     }
-    pub fn stop(&self) {
+    pub fn stop(&self) -> bool {
+        if !self.session.release_view(&self.body) {
+            return false;
+        }
         self.toolbar.popdown();
         self.stopped.set(true);
         if let Some(s) = self.timeout.borrow_mut().take() {
             s.remove();
         }
+        true
     }
     pub fn refresh_appearance(self: &Rc<Self>) {
         let style = self.session.style();
@@ -787,10 +791,10 @@ mod tests {
         assert_eq!(docked_closes.get(), 1);
         assert_eq!(separate_closes.get(), 0);
         assert!(timer(&docked).is_none());
-        docked.stop();
+        assert!(docked.stop());
         docked.activity();
         assert!(timer(&docked).is_none());
-        separate.stop();
+        assert!(separate.stop());
         drop(docked);
         drop(separate);
         drop(session);
