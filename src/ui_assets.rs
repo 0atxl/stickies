@@ -39,6 +39,7 @@ pub fn icon(name: &str, label: &str) -> gtk::Button {
     let button = gtk::Button::new();
     button.set_child(Some(&image(name)));
     button.set_tooltip_text(Some(label));
+    button.update_property(&[gtk::accessible::Property::Label(label)]);
     button.set_valign(gtk::Align::Center);
     button.add_css_class("icon-control");
     button
@@ -62,6 +63,7 @@ pub fn edge_icon(name: &str, label: &str) -> gtk::Button {
     let button = gtk::Button::new();
     button.set_child(Some(&image));
     button.set_tooltip_text(Some(label));
+    button.update_property(&[gtk::accessible::Property::Label(label)]);
     button.set_valign(gtk::Align::Center);
     button
 }

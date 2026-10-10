@@ -84,23 +84,7 @@ impl Editor {
             "Pin · Always open, ignore inactivity timeout",
         );
         keep.set_child(Some(&ui_assets::image("pin")));
-        // gtk-rs gates this GTK 4.0 API behind its v4_10 feature.
-        unsafe extern "C" {
-            fn gtk_accessible_update_property(
-                accessible: *mut std::ffi::c_void,
-                first_property: gtk::ffi::GtkAccessibleProperty,
-                ...
-            );
-        }
-        // GTK copies the label during this call and borrows the live button.
-        unsafe {
-            gtk_accessible_update_property(
-                keep.as_ptr().cast(),
-                gtk::ffi::GTK_ACCESSIBLE_PROPERTY_LABEL,
-                c"Always open".as_ptr(),
-                -1i32,
-            );
-        }
+        keep.update_property(&[gtk::accessible::Property::Label("Always open")]);
         let close = ui_assets::icon("close", "Close note · Escape");
         header.append(&title);
         header.append(&close);

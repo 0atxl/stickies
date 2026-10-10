@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 adw = { version = "0.9", package = "libadwaita", features = ["v1_7"] }
-gtk = { package = "gtk4", version = "0.11", features = ["v4_6"] }
+gtk = { package = "gtk4", version = "0.11", features = ["v4_10"] }
 gtk4-layer-shell = "0.8"
 rusqlite = { version = "0.40.2", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
