@@ -313,6 +313,55 @@ pub fn build(
             }
         });
     }
+    root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    let heading = gtk::Label::new(Some("Shortcuts"));
+    heading.set_xalign(0.);
+    heading.add_css_class("setting-label");
+    root.append(&heading);
+    let hint = gtk::Label::new(Some(
+        "Add these examples to your Hyprland config. Choose keys that suit your bindings.",
+    ));
+    hint.set_wrap(true);
+    hint.set_xalign(0.);
+    hint.add_css_class("metadata");
+    root.append(&hint);
+    for (name, binding) in [
+        ("New note", "bind = SUPER, N, exec, stickies --new-note"),
+        (
+            "Search notes",
+            "bind = SUPER, slash, exec, stickies --search",
+        ),
+        (
+            "Toggle edge strip",
+            "bind = SUPER, T, exec, stickies --toggle-strip",
+        ),
+        (
+            "All Notes",
+            "bind = SUPER, A, exec, stickies --show-all-notes",
+        ),
+    ] {
+        let example = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let label = gtk::Label::new(Some(name));
+        label.set_xalign(0.);
+        label.set_hexpand(true);
+        label.add_css_class("setting-label");
+        let copy = gtk::Button::with_label("Copy");
+        copy.set_tooltip_text(Some(&format!("Copy {name} Hyprland bind")));
+        copy.connect_clicked(move |button| button.clipboard().set_text(binding));
+        header.append(&label);
+        header.append(&copy);
+        let command = gtk::Label::new(Some(binding));
+        command.set_selectable(true);
+        command.set_wrap(true);
+        command.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        command.set_max_width_chars(28);
+        command.set_xalign(0.);
+        command.add_css_class("monospace");
+        example.append(&header);
+        example.append(&command);
+        root.append(&example);
+    }
     Panel {
         root: gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)

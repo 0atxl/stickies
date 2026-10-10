@@ -68,6 +68,63 @@ hyprctl layers
 
 Press `Ctrl+C` to stop it.
 
+## Hyprland shortcuts and CLI actions
+
+Stickies accepts one action flag per invocation:
+
+| Flag and exported action | Behavior |
+|---|---|
+| `--new-note` / `new-note` | Create a note at the edge and focus its title. |
+| `--search` / `search` | Open edge Search and focus it. If Search is already open, keep the current query. |
+| `--toggle-strip` / `toggle-strip` | Reveal dormant tabs, or close edge content and collapse to the marker. Closing still requires a successful save. Reposition is cancelled when collapsing. |
+| `--show-all-notes` / `show-all-notes` | Open All Notes or focus its existing window. |
+
+When Stickies is running, these flags use [GApplication's command-line forwarding](https://docs.gtk.org/gio/method.Application.add_main_option.html) over the session D-Bus. The second process sends the request to the primary instance and exits. With no running instance, Stickies starts and performs the requested action. Running without a flag retains the normal startup behavior. `stickies --help` lists the flags; unknown flags or multiple different action flags return an error.
+
+Settings > Shortcuts provides selectable examples and a Copy button for each bind. Add the examples you want to your Hyprland configuration, choosing keys that fit your existing bindings:
+
+```ini
+bind = SUPER, N, exec, stickies --new-note
+bind = SUPER, slash, exec, stickies --search
+bind = SUPER, T, exec, stickies --toggle-strip
+bind = SUPER, A, exec, stickies --show-all-notes
+```
+
+The `stickies` executable must be on Hyprland's PATH. For a workspace build, substitute the absolute path to `target/debug/stickies` or `target/release/stickies`. Hyprland owns the global keybindings; Stickies does not capture global keys or edit compositor configuration.
+
+## Verify the exported D-Bus actions
+
+Start the current Stickies build, then use another terminal on the same session bus. List its actions:
+
+```bash
+gdbus call --session \
+  --dest dev.stickies.Stickies \
+  --object-path /dev/stickies/Stickies \
+  --method org.gtk.Actions.List
+```
+
+The result must contain `new-note`, `search`, `toggle-strip` and `show-all-notes`; their order may vary. Call the actions through GIO's [exported action interface](https://github.com/GNOME/glib/blob/main/gio/gactiongroupexporter.c):
+
+```bash
+gdbus call --session \
+  --dest dev.stickies.Stickies --object-path /dev/stickies/Stickies \
+  --method org.gtk.Actions.Activate "'new-note'" '[]' '{}'
+
+gdbus call --session \
+  --dest dev.stickies.Stickies --object-path /dev/stickies/Stickies \
+  --method org.gtk.Actions.Activate "'search'" '[]' '{}'
+
+gdbus call --session \
+  --dest dev.stickies.Stickies --object-path /dev/stickies/Stickies \
+  --method org.gtk.Actions.Activate "'toggle-strip'" '[]' '{}'
+
+gdbus call --session \
+  --dest dev.stickies.Stickies --object-path /dev/stickies/Stickies \
+  --method org.gtk.Actions.Activate "'show-all-notes'" '[]' '{}'
+```
+
+Each call returns `()`. Observe the corresponding behavior from the table above; invoke `toggle-strip` again to check both directions. The empty parameter array is required because these actions take no arguments. Repeat using the four CLI flags and confirm the same running process handles them without another persistent instance. Close Stickies and launch with each flag separately to check startup with an action. A failed save must retain the docked note when New note, Search or Toggle strip would close it.
+
 ## License
 
 Stickies is licensed under the [Mozilla Public License 2.0](LICENSE).

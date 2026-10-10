@@ -1,6 +1,7 @@
 mod app;
 mod appearance;
 mod autostart;
+mod cli;
 mod config;
 mod edge;
 mod editor;
@@ -57,7 +58,46 @@ struct Ui {
 }
 
 impl Ui {
+    fn register_actions(self: &Rc<Self>) {
+        for (name, _) in cli::ACTIONS {
+            let action = gtk::gio::SimpleAction::new(name, None);
+            let weak = Rc::downgrade(self);
+            action.connect_activate(move |_, _| {
+                if let Some(ui) = weak.upgrade() {
+                    match name {
+                        "new-note" => ui.create_note(),
+                        "search" => {
+                            if ui.edge.state().is_searching() {
+                                ui.transition_edge(EdgeEvent::FocusWindow);
+                                ui.edge.edge_search.grab_focus();
+                            } else if ui.close_docked() {
+                                ui.edge.pointer_origin.set(None);
+                                ui.show_edge_search();
+                            }
+                        }
+                        "toggle-strip" => ui.toggle_strip(),
+                        "show-all-notes" => ui.show_manager(),
+                        _ => unreachable!(),
+                    }
+                }
+            });
+            self.application.add_action(&action);
+        }
+    }
 
+    fn toggle_strip(self: &Rc<Self>) {
+        self.edge.cancel_timers();
+        if self.edge.state() == EdgeState::Dormant {
+            self.reveal();
+            self.transition_edge(EdgeEvent::FocusStrip);
+        } else {
+            self.finish_reposition(false).ok();
+            if self.close_docked() {
+                self.close_edge_search();
+                self.dormant();
+            }
+        }
+    }
 
     fn refresh(self: &Rc<Self>) {
         if let Some(manager) = self.manager.borrow().as_ref() {
@@ -473,21 +513,54 @@ impl Ui {
 }
 
 fn main() -> glib::ExitCode {
-    if let Err(error) = ui_assets::register() {
-        eprintln!("Could not load UI assets: {error}");
-        return glib::ExitCode::FAILURE;
-    }
-    if let Err(error) = adw::init() {
-        eprintln!("Could not initialize the desktop UI: {error}");
-        return glib::ExitCode::FAILURE;
-    }
     let application = gtk::Application::builder()
         .application_id(APPLICATION_ID)
+        .flags(gtk::gio::ApplicationFlags::HANDLES_COMMAND_LINE)
         .build();
+    cli::add_options(application.upcast_ref());
+    application.connect_handle_local_options(|_, options| {
+        if let Err(error) = cli::requested_action(options) {
+            eprintln!("{error}");
+            std::ops::ControlFlow::Break(glib::ExitCode::FAILURE)
+        } else {
+            std::ops::ControlFlow::Continue(())
+        }
+    });
     application.connect_activate(|application| {
         if application.windows().is_empty() {
+            if let Err(error) = ui_assets::register() {
+                eprintln!("Could not load UI assets: {error}");
+                application.quit();
+                return;
+            }
+            if let Err(error) = adw::init() {
+                eprintln!("Could not initialize the desktop UI: {error}");
+                application.quit();
+                return;
+            }
             build(application);
         }
+    });
+    application.connect_command_line(|application, command_line| {
+        let action = match cli::requested_action(&command_line.options_dict()) {
+            Ok(action) => action,
+            Err(error) => {
+                eprintln!("{error}");
+                return glib::ExitCode::FAILURE;
+            }
+        };
+        // GApplication delivers this signal to the primary process over D-Bus.
+        application.activate();
+        if let Some(name) = action {
+            if application.lookup_action(name).is_none() {
+                eprintln!("Stickies could not initialize the requested action.");
+                return glib::ExitCode::FAILURE;
+            }
+            application.activate_action(name, None);
+        } else if application.windows().is_empty() {
+            return glib::ExitCode::FAILURE;
+        }
+        glib::ExitCode::SUCCESS
     });
     application.run()
 }
@@ -557,6 +630,7 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
             .set_gtk_enable_animations(ui.system_animations && !ui.config.borrow().reduced_motion);
     }
     ui.connect_edge();
+    ui.register_actions();
     // Keep the coordinator alive for the application lifetime, without widget cycles.
     let shutdown_ui = ui.clone();
     application.connect_shutdown(move |_| {
