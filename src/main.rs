@@ -113,13 +113,9 @@ impl Ui {
     fn new_editor(self: &Rc<Self>, id: NoteId, detached: bool) -> Option<Rc<editor::Editor>> {
         let session = self.note_session(id)?;
         let timeout = Rc::downgrade(self);
-        let editor = editor::Editor::new(session, self.config.clone(), move || {
+        let editor = editor::Editor::new(session, self.config.clone(), !detached, move || {
             if let Some(ui) = timeout.upgrade() {
-                if detached {
-                    ui.close_separate(id);
-                } else {
-                    ui.close_docked();
-                }
+                ui.close_docked();
             }
         });
         let weak = Rc::downgrade(self);
@@ -288,7 +284,7 @@ impl Ui {
             keys.connect_key_pressed(move |_, key, _, _| {
                 if key == gtk::gdk::Key::Escape {
                     if let Some(editor) = weak.upgrade() {
-                        editor.close.emit_clicked();
+                        editor.escape();
                     }
                     glib::Propagation::Stop
                 } else {
@@ -428,6 +424,7 @@ impl Ui {
             .save(&config::config_path())
             .map_err(|e| e.to_string())?;
         let login_changed = self.config.borrow().launch_at_login != config.launch_at_login;
+        let timeout_changed = self.config.borrow().inactivity_seconds != config.inactivity_seconds;
         if self.config.borrow().edge != config.edge
             || self.config.borrow().marker_offset != config.marker_offset
         {
@@ -445,6 +442,9 @@ impl Ui {
         self.refresh_tabs();
         if let Some(editor) = self.edge.docked.borrow().as_ref() {
             editor.refresh_appearance();
+            if timeout_changed {
+                editor.activity();
+            }
         }
         for note in self.separate.borrow().values() {
             note.editor.refresh_appearance();
@@ -702,6 +702,152 @@ mod edge_tests {
 
 
 
+    #[test]
+    #[ignore = "requires Wayland and disposable XDG_DATA_HOME/XDG_CONFIG_HOME directories"]
+    fn escape_dismisses_individual_popovers_before_closing_and_retains_failed_edits() {
+        for variable in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+            assert!(
+                std::path::PathBuf::from(std::env::var(variable).expect(variable))
+                    .starts_with(std::env::temp_dir())
+            );
+        }
+        ui_assets::register().unwrap();
+        adw::init().unwrap();
+        Config::default().save(&config::config_path()).unwrap();
+        let app = gtk::Application::builder()
+            .application_id(APPLICATION_ID)
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let storage = Storage::open(&storage::database_path()).unwrap();
+        let id = storage
+            .create_note("Escape", "Keep", NoteColor::Blue)
+            .unwrap()
+            .id;
+        let ui = build(&app).unwrap();
+        let settle = || {
+            let end = std::time::Instant::now() + Duration::from_millis(180);
+            while std::time::Instant::now() < end {
+                while glib::MainContext::default().pending() {
+                    glib::MainContext::default().iteration(false);
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        let escape = |target: &gtk::Widget| {
+            let controllers = target.observe_controllers();
+            let handled = (0..controllers.n_items()).any(|index| {
+                controllers
+                    .item(index)
+                    .and_downcast::<gtk::EventControllerKey>()
+                    .is_some_and(|keys| {
+                        keys.emit_by_name::<bool>(
+                            "key-pressed",
+                            &[
+                                &gtk::gdk::Key::Escape,
+                                &0u32,
+                                &gtk::gdk::ModifierType::empty(),
+                            ],
+                        )
+                    })
+            });
+            assert!(handled);
+        };
+        let popover = |editor: &editor::Editor, name: &str| {
+            find_widget(editor.root.upcast_ref(), &|widget| {
+                widget.is::<gtk::MenuButton>() && widget.tooltip_text().as_deref() == Some(name)
+            })
+            .unwrap()
+            .downcast::<gtk::MenuButton>()
+            .unwrap()
+            .popover()
+            .unwrap()
+        };
+        for detached in [false, true] {
+            let open = || {
+                let (editor, window) = if detached {
+                    ui.open_separate(id);
+                    let separate = ui.separate.borrow();
+                    let note = separate.get(&id).unwrap();
+                    (
+                        note.editor.clone(),
+                        note.window.clone().upcast::<gtk::Widget>(),
+                    )
+                } else {
+                    ui.open_docked(id);
+                    (
+                        ui.edge.docked.borrow().clone().unwrap(),
+                        ui.edge.window.clone().upcast(),
+                    )
+                };
+                editor.keep.set_active(true);
+                settle();
+                (editor, window)
+            };
+            let is_open = || {
+                if detached {
+                    ui.separate.borrow().contains_key(&id)
+                } else {
+                    ui.edge.docked.borrow().is_some()
+                }
+            };
+            for on_popover in [false, true] {
+                for nested in [false, true] {
+                    let (editor, window) = open();
+                    let tools = popover(&editor, "Open note tools");
+                    let more = popover(&editor, "More note tools");
+                    tools.popup();
+                    settle();
+                    if nested {
+                        more.popup();
+                        settle();
+                    }
+                    let target = if on_popover {
+                        if nested {
+                            more.upcast_ref()
+                        } else {
+                            tools.upcast_ref()
+                        }
+                    } else {
+                        &window
+                    };
+                    escape(target);
+                    settle();
+                    assert!(is_open(), "first Escape must preserve the note");
+                    assert!(!tools.is_visible());
+                    assert!(!more.is_visible());
+                    escape(&window);
+                    assert!(!is_open(), "second Escape must close an Always open note");
+                }
+            }
+            let (editor, window) = open();
+            escape(&window);
+            assert!(!is_open(), "Escape without a popover must close the note");
+            drop(editor);
+            let (editor, window) = open();
+            let connection = rusqlite::Connection::open(storage::database_path()).unwrap();
+            connection.execute_batch("CREATE TRIGGER reject_escape_save BEFORE UPDATE ON notes BEGIN SELECT RAISE(FAIL, 'save failure'); END;").unwrap();
+            let unsaved_title = format!("Unsaved title {detached}");
+            editor.title.set_text(&unsaved_title);
+            let tools = popover(&editor, "Open note tools");
+            tools.popup();
+            settle();
+            escape(&window);
+            settle();
+            assert!(!tools.is_visible());
+            escape(&window);
+            assert!(is_open(), "failed saves must retain the editor");
+            assert_eq!(editor.title.text(), unsaved_title);
+            connection
+                .execute_batch("DROP TRIGGER reject_escape_save;")
+                .unwrap();
+            escape(&window);
+            assert!(!is_open());
+            assert_eq!(storage.load_note(id).unwrap().title, unsaved_title);
+        }
+        ui.edge.window.close();
+        ui.edge.strip_window.close();
+    }
 
     #[test]
     #[ignore = "requires Wayland and disposable XDG_DATA_HOME/XDG_CONFIG_HOME directories"]

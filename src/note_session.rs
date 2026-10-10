@@ -400,8 +400,8 @@ mod tests {
         let count = saves.clone();
         let session = NoteSession::new(note, storage.clone(), move || count.set(count.get() + 1));
         let config = Rc::new(RefCell::new(crate::config::Config::default()));
-        let first = crate::editor::Editor::new(session.clone(), config.clone(), || {});
-        let second = crate::editor::Editor::new(session.clone(), config, || {});
+        let first = crate::editor::Editor::new(session.clone(), config.clone(), true, || {});
+        let second = crate::editor::Editor::new(session.clone(), config, false, || {});
         assert_eq!(first.body.buffer(), second.body.buffer());
         assert_eq!(first.title.buffer(), second.title.buffer());
         first.title.set_text("Shared title");

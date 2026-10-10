@@ -175,7 +175,14 @@ impl Config {
             }
             Err(error) => return Err(error.into()),
         };
-        let config: Self = toml::from_str(&contents)?;
+        let mut config: Self = toml::from_str(&contents)?;
+        // Older files allowed custom timeouts from 30 to 1800 seconds.
+        // Use the default when a legacy value has no matching Behavior choice.
+        if (30..=1800).contains(&config.inactivity_seconds)
+            && !matches!(config.inactivity_seconds, 60 | 120 | 300)
+        {
+            config.inactivity_seconds = Self::default().inactivity_seconds;
+        }
         config.validate()?;
         Ok(config)
     }
@@ -201,9 +208,9 @@ impl Config {
         if !matches!(self.visible_notes, 4 | 5) {
             return Err(ConfigError::InvalidValue("visible_notes must be 4 or 5"));
         }
-        if !(30..=1800).contains(&self.inactivity_seconds) {
+        if !matches!(self.inactivity_seconds, 0 | 60 | 120 | 300) {
             return Err(ConfigError::InvalidValue(
-                "inactivity_seconds must be between 30 and 1800",
+                "inactivity_seconds must be 0, 60, 120 or 300",
             ));
         }
         Ok(())
@@ -319,9 +326,10 @@ mod tests {
             shape: Shape::Ticket,
             visible_notes: 4,
             tab_layout: TabLayout::Overlapping,
-            inactivity_seconds: 90,
+            inactivity_seconds: 60,
             ..Config::default()
         };
+        config.validate().unwrap();
         let text = toml::to_string(&config).unwrap();
         assert_eq!(toml::from_str::<Config>(&text).unwrap(), config);
         for invalid in [
@@ -330,7 +338,7 @@ mod tests {
                 ..config.clone()
             },
             Config {
-                inactivity_seconds: 0,
+                inactivity_seconds: 30,
                 ..config.clone()
             },
         ] {
@@ -356,6 +364,41 @@ mod tests {
         assert!(path.is_file());
 
         fs::remove_dir_all(directory).expect("test directory should be removable");
+    }
+
+    #[test]
+    fn docked_note_timeout_choices_persist_in_the_existing_config() {
+        let directory = test_directory("timeout-choices");
+        let path = directory.join("config.toml");
+        for seconds in [0, 60, 120, 300] {
+            let config = Config {
+                inactivity_seconds: seconds,
+                ..Config::default()
+            };
+            config.save(&path).unwrap();
+            assert_eq!(Config::load(&path).unwrap(), config);
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn legacy_custom_timeouts_use_two_minutes_without_rewriting_the_file() {
+        let directory = test_directory("legacy-timeout");
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+        for seconds in [30, 90, 1800] {
+            let contents = format!("edge = 'left'\ninactivity_seconds = {seconds}\n");
+            fs::write(&path, &contents).unwrap();
+            let config = Config::load(&path).unwrap();
+            assert_eq!(config.inactivity_seconds, 120);
+            assert_eq!(config.edge, ScreenEdge::Left);
+            assert_eq!(fs::read_to_string(&path).unwrap(), contents);
+        }
+        for seconds in [1, 29, 1801, u64::MAX] {
+            fs::write(&path, format!("inactivity_seconds = {seconds}\n")).unwrap();
+            assert!(Config::load(&path).is_err());
+        }
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -392,6 +435,7 @@ mod tests {
         assert_eq!(config.marker_offset, 0.5);
         assert!(config.edge_hover_enabled);
         assert!(!config.launch_at_login);
+        assert_eq!(config.inactivity_seconds, 120);
 
         fs::remove_dir_all(directory).expect("test directory should be removable");
     }

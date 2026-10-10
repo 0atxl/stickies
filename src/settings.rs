@@ -9,10 +9,28 @@ use std::{
     rc::Rc,
 };
 
+pub struct Panel {
+    pub root: gtk::ScrolledWindow,
+    current: Rc<RefCell<Config>>,
+    timeouts: Rc<Vec<gtk::ToggleButton>>,
+    syncing: Rc<Cell<bool>>,
+}
+impl Panel {
+    pub fn refresh(&self) {
+        self.syncing.set(true);
+        let seconds = self.current.borrow().inactivity_seconds;
+        for (button, timeout) in self.timeouts.iter().zip([0, 60, 120, 300]) {
+            button.set_active(seconds == timeout);
+        }
+        self.syncing.set(false);
+    }
+}
+
 pub fn build(
     current: Rc<RefCell<Config>>,
     on_change: impl Fn(Config) -> Result<(), String> + 'static,
-) -> gtk::ScrolledWindow {
+) -> Panel {
+    let on_change: Rc<dyn Fn(Config) -> Result<(), String>> = Rc::new(on_change);
     let root = gtk::Box::new(gtk::Orientation::Vertical, 20);
     root.add_css_class("appearance-panel");
     let error = gtk::Label::new(None);
@@ -44,6 +62,10 @@ pub fn build(
     // Build controls once; changing a theme must not rebuild the focused drawer.
     let config = current.borrow().clone();
     let syncing = Rc::new(Cell::new(false));
+    let heading = gtk::Label::new(Some("Appearance"));
+    heading.set_xalign(0.);
+    heading.add_css_class("setting-label");
+    root.append(&heading);
     let themes = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     section(&root, "Theme", &themes);
     let mut theme_buttons = Vec::new();
@@ -248,18 +270,58 @@ pub fn build(
     let switch = gtk::Switch::new();
     switch.set_valign(gtk::Align::Center);
     switch.set_active(config.reduced_motion);
+    let motion_current = current.clone();
+    let motion_update = update.clone();
     switch.connect_active_notify(move |s| {
-        let mut c = current.borrow().clone();
+        let mut c = motion_current.borrow().clone();
         c.reduced_motion = s.is_active();
-        update(c);
+        motion_update(c);
     });
     row.append(&label);
     row.append(&switch);
     root.append(&row);
-    gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .child(&root)
-        .build()
+    root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    let heading = gtk::Label::new(Some("Behavior"));
+    heading.set_xalign(0.);
+    heading.add_css_class("setting-label");
+    root.append(&heading);
+    let selected = [0, 60, 120, 300]
+        .iter()
+        .position(|seconds| *seconds == config.inactivity_seconds)
+        .unwrap_or(2);
+    let timeouts = choices(&["Off", "1 min", "2 min", "5 min"], selected);
+    section(&root, "Docked note timeout", &timeouts.0);
+    let timeouts = Rc::new(timeouts.1);
+    for (index, button) in timeouts.iter().enumerate() {
+        let current = current.clone();
+        let update = update.clone();
+        let syncing = syncing.clone();
+        let buttons = Rc::downgrade(&timeouts);
+        button.connect_toggled(move |button| {
+            if button.is_active() && !syncing.get() {
+                let mut config = current.borrow().clone();
+                config.inactivity_seconds = [0, 60, 120, 300][index];
+                update(config);
+                syncing.set(true);
+                let seconds = current.borrow().inactivity_seconds;
+                if let Some(buttons) = buttons.upgrade() {
+                    for (button, timeout) in buttons.iter().zip([0, 60, 120, 300]) {
+                        button.set_active(seconds == timeout);
+                    }
+                }
+                syncing.set(false);
+            }
+        });
+    }
+    Panel {
+        root: gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .child(&root)
+            .build(),
+        current,
+        timeouts,
+        syncing,
+    }
 }
 
 fn font_index(c: &Config) -> usize {

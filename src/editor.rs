@@ -27,6 +27,8 @@ pub struct Editor {
     pub keep: gtk::ToggleButton,
     pub resize: gtk::Button,
     toolbar: gtk::Popover,
+    more_popover: gtk::Popover,
+    docked: bool,
     docked_size: Cell<(i32, i32)>,
     resize_edge: Rc<Cell<gtk::gdk::SurfaceEdge>>,
     syncing_style: Cell<bool>,
@@ -51,6 +53,7 @@ impl Editor {
     pub fn new(
         session: Rc<NoteSession>,
         config: Rc<RefCell<Config>>,
+        docked: bool,
         on_timeout: impl Fn() + 'static,
     ) -> Rc<Self> {
         let root = gtk::Overlay::new();
@@ -261,6 +264,8 @@ impl Editor {
             last_error: RefCell::new(None),
             error_toast: RefCell::new(None),
             toolbar,
+            more_popover,
+            docked,
             pattern_choice: paper_choice.clone(),
             controls,
             timeout: RefCell::new(None),
@@ -268,17 +273,17 @@ impl Editor {
             stopped: Cell::new(false),
         });
         // Popovers handle Escape before the containing window receives it.
-        for panel in [&editor.toolbar, &more_popover] {
+        for panel in [&editor.toolbar, &editor.more_popover] {
             let keys = gtk::EventControllerKey::new();
             keys.set_propagation_phase(gtk::PropagationPhase::Capture);
             let weak = Rc::downgrade(&editor);
             keys.connect_key_pressed(move |_, key, _, _| {
                 if let Some(editor) = weak.upgrade() {
-                    editor.activity();
                     if key == gtk::gdk::Key::Escape {
-                        editor.close.emit_clicked();
+                        editor.escape();
                         return glib::Propagation::Stop;
                     }
+                    editor.activity();
                 }
                 glib::Propagation::Proceed
             });
@@ -405,6 +410,27 @@ impl Editor {
             });
         }
         editor.root.add_controller(scrolling);
+        for target in [
+            editor.root.upcast_ref::<gtk::Widget>(),
+            editor.toolbar.upcast_ref(),
+            editor.more_popover.upcast_ref(),
+        ] {
+            let motion = gtk::EventControllerMotion::new();
+            motion.set_propagation_phase(gtk::PropagationPhase::Capture);
+            let weak = Rc::downgrade(&editor);
+            motion.connect_enter(move |_, _, _| {
+                if let Some(editor) = weak.upgrade() {
+                    editor.activity();
+                }
+            });
+            let weak = Rc::downgrade(&editor);
+            motion.connect_motion(move |_, _, _| {
+                if let Some(editor) = weak.upgrade() {
+                    editor.activity();
+                }
+            });
+            target.add_controller(motion);
+        }
         editor.refresh_appearance();
         editor.activity();
         editor
@@ -471,6 +497,15 @@ impl Editor {
     pub fn flush(&self) -> bool {
         self.session.flush()
     }
+    pub fn escape(self: &Rc<Self>) {
+        self.activity();
+        if self.toolbar.is_visible() || self.more_popover.is_visible() {
+            self.more_popover.popdown();
+            self.toolbar.popdown();
+        } else {
+            self.close.emit_clicked();
+        }
+    }
     pub fn stop(&self) {
         self.toolbar.popdown();
         self.stopped.set(true);
@@ -530,12 +565,13 @@ impl Editor {
         if let Some(source) = self.timeout.borrow_mut().take() {
             source.remove();
         }
-        if self.keep.is_active() || self.stopped.get() {
+        let seconds = self.config.borrow().inactivity_seconds;
+        if !self.docked || seconds == 0 || self.keep.is_active() || self.stopped.get() {
             return;
         }
         let weak = Rc::downgrade(self);
         self.timeout.replace(Some(glib::timeout_add_local_once(
-            Duration::from_secs(self.config.borrow().inactivity_seconds),
+            Duration::from_secs(seconds),
             move || {
                 if let Some(e) = weak.upgrade() {
                     e.timeout.borrow_mut().take();
@@ -651,5 +687,114 @@ mod tests {
         assert_eq!(next_list_line("12. Task"), Some(("13. ".into(), "Task")));
         assert_eq!(next_list_line("- "), Some(("- ".into(), "")));
         assert_eq!(next_list_line("Ordinary text"), None);
+    }
+
+    #[test]
+    #[ignore = "requires a GTK display; uses a disposable database"]
+    fn only_docked_notes_time_out_and_pointer_activity_restarts_the_timer() {
+        use super::*;
+
+        crate::ui_assets::register().unwrap();
+        adw::init().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "stickies-editor-timeout-{}-{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let storage = Rc::new(crate::storage::Storage::open(&path).unwrap());
+        let note = storage
+            .create_note("Read me", "Body", NoteColor::Blue)
+            .unwrap();
+        let session = NoteSession::new(note, storage.clone(), || {});
+        let config = Rc::new(RefCell::new(Config::default()));
+        let docked_closes = Rc::new(Cell::new(0));
+        let count = docked_closes.clone();
+        let docked = Editor::new(session.clone(), config.clone(), true, move || {
+            count.set(count.get() + 1);
+        });
+        let separate_closes = Rc::new(Cell::new(0));
+        let count = separate_closes.clone();
+        let separate = Editor::new(session.clone(), config.clone(), false, move || {
+            count.set(count.get() + 1);
+        });
+        let timer = |editor: &Editor| {
+            editor
+                .timeout
+                .borrow()
+                .as_ref()
+                .and_then(|id| glib::MainContext::default().find_source_by_id(id))
+        };
+        assert!(timer(&docked).is_some());
+        assert!(timer(&separate).is_none());
+        for target in [
+            docked.root.upcast_ref::<gtk::Widget>(),
+            docked.toolbar.upcast_ref(),
+            docked.more_popover.upcast_ref(),
+        ] {
+            let controllers = target.observe_controllers();
+            let motion = (0..controllers.n_items())
+                .find_map(|index| {
+                    controllers
+                        .item(index)
+                        .and_downcast::<gtk::EventControllerMotion>()
+                })
+                .unwrap();
+            for signal in ["enter", "motion"] {
+                let previous = timer(&docked).unwrap();
+                motion.emit_by_name::<()>(signal, &[&0f64, &0f64]);
+                assert!(
+                    previous.is_destroyed(),
+                    "{signal} must cancel the old timer"
+                );
+                assert!(timer(&docked).is_some());
+                assert!(timer(&separate).is_none());
+            }
+        }
+        let previous = timer(&docked).unwrap();
+        docked.keep.set_active(true);
+        assert!(previous.is_destroyed());
+        docked.activity();
+        assert!(timer(&docked).is_none());
+        docked.keep.set_active(false);
+        assert!(timer(&docked).is_some());
+        for seconds in [0, 60, 120, 300] {
+            config.borrow_mut().inactivity_seconds = seconds;
+            docked.activity();
+            separate.activity();
+            assert!(timer(&separate).is_none());
+            if seconds == 0 {
+                assert!(timer(&docked).is_none());
+            } else {
+                let remaining = timer(&docked).unwrap().ready_time() - glib::monotonic_time();
+                let expected = seconds as i64 * 1_000_000;
+                assert!((expected - 1_000_000..=expected).contains(&remaining));
+            }
+        }
+        // Shorten only the in-memory test config to exercise the actual callback.
+        config.borrow_mut().inactivity_seconds = 1;
+        docked.activity();
+        separate.activity();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while docked_closes.get() == 0 && std::time::Instant::now() < deadline {
+            while glib::MainContext::default().pending() {
+                glib::MainContext::default().iteration(false);
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(docked_closes.get(), 1);
+        assert_eq!(separate_closes.get(), 0);
+        assert!(timer(&docked).is_none());
+        docked.stop();
+        docked.activity();
+        assert!(timer(&docked).is_none());
+        separate.stop();
+        drop(docked);
+        drop(separate);
+        drop(session);
+        drop(storage);
+        std::fs::remove_file(path).unwrap();
     }
 }

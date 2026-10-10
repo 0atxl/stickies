@@ -1169,8 +1169,9 @@ impl Ui {
                             if ui.edge.state().is_repositioning() {
                                 ui.finish_reposition(false).ok();
                             } else if ui.edge.state().docked_id().is_some() {
-                                if ui.close_docked() {
-                                    ui.transition_edge(EdgeEvent::FocusStrip);
+                                let editor = ui.edge.docked.borrow().clone();
+                                if let Some(editor) = editor {
+                                    editor.escape();
                                 }
                             } else if ui.edge.state().is_searching() {
                                 ui.close_edge_search();

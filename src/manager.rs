@@ -32,6 +32,7 @@ pub struct Callbacks {
 }
 struct ManagerUi {
     window: adw::ApplicationWindow,
+    settings_panel: crate::settings::Panel,
     storage: Rc<Storage>,
     callbacks: Callbacks,
     config: Rc<RefCell<Config>>,
@@ -83,6 +84,7 @@ impl ManagerWindow {
         self.0.refresh(None);
     }
     pub fn refresh_appearance(&self) {
+        self.0.settings_panel.refresh();
         self.0.sync_editor();
     }
     pub fn window(&self) -> &adw::ApplicationWindow {
@@ -124,8 +126,7 @@ impl ManagerUi {
             };
         let target = preferred
             .or(previous)
-            .filter(|id| notes.iter().any(|n| n.id == *id))
-            .or_else(|| notes.first().map(|n| n.id));
+            .filter(|id| notes.iter().any(|n| n.id == *id));
         if target != previous && !self.flush() {
             self.busy.set(false);
             return;
@@ -240,23 +241,30 @@ impl ManagerUi {
         self.title.set_buffer(&gtk::EntryBuffer::new(None::<&str>));
         self.body
             .set_buffer(Some(&gtk::TextBuffer::new(None::<&gtk::TextTagTable>)));
+        let has_notes = !self.notes.borrow().is_empty();
         let searching = !self.search.text().is_empty();
         let archived = self.collection.get() == NoteCollection::Archived;
-        self.empty_title.set_text(if searching {
+        self.empty_title.set_text(if has_notes {
+            "Choose a note"
+        } else if searching {
             "No matching notes"
         } else if archived {
             "Archive is empty"
         } else {
             "A little space for your thoughts"
         });
-        self.empty_text.set_text(if searching {
+        self.empty_text.set_text(if has_notes {
+            "Select a note from the list to view or edit it."
+        } else if searching {
             "Try another word or clear your search."
         } else if archived {
             "Notes you archive will appear here."
         } else {
             "Capture an idea, a list, or something to remember."
         });
-        self.empty_action.set_label(if searching {
+        self.empty_action.set_label(if has_notes {
+            "Create a note"
+        } else if searching {
             "Clear search"
         } else if archived {
             "Back to notes"
@@ -580,7 +588,7 @@ pub fn build_window(
     .into_iter()
     .map(|(label, collection)| (gtk::Button::with_label(label), collection))
     .collect();
-    let settings = ui_assets::icon("settings", "Appearance");
+    let settings = ui_assets::icon("settings", "Settings");
     let close = ui_assets::icon("close", "Close All Notes");
     header.append(&heading);
     header.append(&search_clamp);
@@ -777,15 +785,15 @@ pub fn build_window(
     let appearance_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     appearance_header.add_css_class("appearance-header");
     appearance_header.set_height_request(44);
-    let appearance_title = gtk::Label::new(Some("Appearance"));
+    let appearance_title = gtk::Label::new(Some("Settings"));
     appearance_title.set_xalign(0.);
     appearance_title.set_hexpand(true);
     appearance_header.append(&appearance_title);
     appearance_drawer.append(&appearance_header);
     let change = callbacks.settings.clone();
     let panel = crate::settings::build(config.clone(), move |c| change(c));
-    panel.set_vexpand(true);
-    appearance_drawer.append(&panel);
+    panel.root.set_vexpand(true);
+    appearance_drawer.append(&panel.root);
     drawer.set_sidebar(Some(&appearance_drawer));
     drawer.connect_show_sidebar_notify(|drawer| {
         if drawer.shows_sidebar() && drawer.is_collapsed() {
@@ -814,6 +822,7 @@ pub fn build_window(
     let sort = callbacks.sort;
     let ui = Rc::new(ManagerUi {
         window,
+        settings_panel: panel,
         storage,
         callbacks,
         config,
@@ -902,7 +911,11 @@ pub fn build_window(
         });
     }
     let weak = drawer.downgrade();
+    let settings_ui = Rc::downgrade(&ui);
     settings.connect_clicked(move |_| {
+        if let Some(ui) = settings_ui.upgrade() {
+            ui.settings_panel.refresh();
+        }
         if let Some(d) = weak.upgrade() {
             d.set_show_sidebar(!d.shows_sidebar());
         }
@@ -1048,7 +1061,9 @@ pub fn build_window(
     let weak = Rc::downgrade(&ui);
     ui.empty_action.connect_clicked(move |_| {
         if let Some(ui) = weak.upgrade() {
-            if !ui.search.text().is_empty() {
+            if !ui.notes.borrow().is_empty() {
+                ui.create();
+            } else if !ui.search.text().is_empty() {
                 ui.search.set_text("");
                 ui.refresh(None);
             } else if ui.collection.get() == NoteCollection::Archived {
