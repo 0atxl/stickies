@@ -443,7 +443,7 @@ pub fn paper_background(
     area
 }
 
-fn sheet_path(
+pub(super) fn sheet_path(
     cr: &gtk::cairo::Context,
     w: f64,
     h: f64,

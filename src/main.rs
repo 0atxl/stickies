@@ -236,8 +236,8 @@ impl Ui {
             self.edge.docked.borrow_mut().take();
             self.edge.docked_offset.set(None);
             self.deck.borrow_mut().dispatch(Action::CollapseDeck);
-            self.edge.pointer_origin.set(None);
             self.transition_edge(EdgeEvent::CloseDocked);
+            self.edge.pointer_origin.set(None);
             self.refresh_tabs();
             self.reveal();
             self.update_visibility();
@@ -1644,6 +1644,27 @@ mod edge_tests {
                 }
             }
         }
+        // Hiding the last panel must submit a transparent buffer, not leave the
+        // compositor displaying the previous Search frame.
+        ui.close_edge_search();
+        settle();
+        let snapshot = gtk::Snapshot::new();
+        gtk::WidgetPaintable::new(Some(&ui.edge.root)).snapshot(
+            &snapshot,
+            f64::from(ui.edge.root.width()),
+            f64::from(ui.edge.root.height()),
+        );
+        let node = snapshot.to_node().expect("clear the previous panel buffer");
+        let texture = ui
+            .edge
+            .window
+            .renderer()
+            .unwrap()
+            .render_texture(&node, None);
+        let stride = texture.width() as usize * 4;
+        let mut pixels = vec![0; stride * texture.height() as usize];
+        texture.download(&mut pixels, stride);
+        assert!(pixels.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 0));
         // Replacement and closure must retain the dirty editor on save failure.
         ui.open_docked(ids[0]);
         let editor = ui.edge.docked.borrow().clone().unwrap();

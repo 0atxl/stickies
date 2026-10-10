@@ -1886,24 +1886,26 @@ impl Ui {
             },
         );
         let docked = self.edge.docked.borrow();
-        if let Some(editor) = docked.as_ref()
+        // Use the same tab sizes and spacing as refresh_tabs. Newly rebuilt tabs
+        // may not have allocated positions yet. Overflow keeps its Search origin.
+        if let Some(id) = self.edge.state().docked_id()
             && let Some(fixed) = self.edge.tabs.first_child().and_downcast::<gtk::Fixed>()
         {
             let mut child = fixed.first_child();
+            let mut index = 0;
             while let Some(tab) = child {
-                if tab.widget_name() == format!("note-{:?}", editor.id()) {
-                    let (x, y) = fixed.child_position(&tab);
-                    let (w, h) = measure(&tab);
-                    self.edge.pointer_origin.set(Some(
-                        offset
-                            + if horizontal {
-                                x as i32 + w / 2
-                            } else {
-                                y as i32 + h / 2
-                            },
-                    ));
+                if tab.widget_name() == format!("note-{id:?}") {
+                    let length = if horizontal {
+                        tab.width_request()
+                    } else {
+                        tab.height_request()
+                    };
+                    self.edge
+                        .pointer_origin
+                        .set(Some(offset + index * (length + 4) + length / 2));
                     break;
                 }
+                index += 1;
                 child = tab.next_sibling();
             }
         } else if self.edge.state().is_searching()
@@ -2113,7 +2115,40 @@ impl Ui {
         let y = bounds.y() as f64;
         let w = bounds.width() as f64;
         let h = bounds.height() as f64;
-        let inset = if session.is_some() { 12. } else { 1. };
+        // Overlap the base far enough to cover even the inward Playful waves.
+        // Only the portion outside the actual sheet outline gets an arrow stroke.
+        let inset = if session.is_some() { 20. } else { 1. };
+        let note_path = session.as_ref().and_then(|session| {
+            let shape = if config.theme == config::Theme::Minimal {
+                config::Shape::Square
+            } else {
+                config.shape
+            };
+            let bottom_radius =
+                if config.theme == config::Theme::Paper && shape != config::Shape::Square {
+                    0.
+                } else {
+                    18.
+                };
+            let padding = if config.theme == config::Theme::Playful {
+                20.
+            } else {
+                16.
+            };
+            let _ = cr.save();
+            cr.translate(x + 8., y + 8.);
+            appearance::sheet_path(
+                cr,
+                (w - padding).max(1.),
+                (h - padding).max(1.),
+                shape,
+                (18., bottom_radius),
+                config.theme == config::Theme::Playful,
+                session.id().value(),
+            );
+            let _ = cr.restore();
+            cr.copy_path().ok()
+        });
         let (tip, a, b) = match edge {
             ScreenEdge::Left => (
                 (x - 4., center),
@@ -2151,11 +2186,23 @@ impl Ui {
         } else {
             (248. / 255., 247. / 255., 243. / 255.)
         };
+        cr.new_path();
         cr.move_to(a.0, a.1);
         cr.line_to(tip.0, tip.1);
         cr.line_to(b.0, b.1);
         cr.set_source_rgb(r, g, bg);
         let _ = cr.fill_preserve();
+        let arrow_path = cr.copy_path().ok();
+        let _ = cr.save();
+        if let (Some(note_path), Some(arrow_path)) = (note_path, arrow_path) {
+            cr.new_path();
+            cr.rectangle(x - 32., y - 32., w + 64., h + 64.);
+            cr.append_path(&note_path);
+            cr.set_fill_rule(gtk::cairo::FillRule::EvenOdd);
+            cr.clip();
+            cr.append_path(&arrow_path);
+        }
+        cr.set_line_join(gtk::cairo::LineJoin::Round);
         if session.is_some() && config.theme == config::Theme::Playful {
             cr.set_source_rgb(0.10, 0.12, 0.11);
             cr.set_line_width(3.2);
@@ -2176,6 +2223,7 @@ impl Ui {
             cr.set_line_width(0.7);
         }
         let _ = cr.stroke();
+        let _ = cr.restore();
     }
 }
 
