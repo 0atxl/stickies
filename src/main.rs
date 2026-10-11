@@ -58,6 +58,27 @@ struct Ui {
 }
 
 impl Ui {
+    fn flush_sessions_on_shutdown(&self) {
+        // Saving refreshes the UI, so release the registry borrow before flushing.
+        let sessions: Vec<_> = self
+            .sessions
+            .borrow()
+            .values()
+            .filter_map(Weak::upgrade)
+            .collect();
+        for session in sessions {
+            if !session.flush() {
+                eprintln!(
+                    "Stickies could not save note {} on shutdown: {}",
+                    session.id().value(),
+                    session
+                        .error()
+                        .unwrap_or_else(|| "Unknown save error".into())
+                );
+            }
+        }
+    }
+
     fn register_actions(self: &Rc<Self>) {
         for (name, _) in cli::ACTIONS {
             let action = gtk::gio::SimpleAction::new(name, None);
@@ -532,6 +553,7 @@ fn main() -> glib::ExitCode {
     let application = gtk::Application::builder()
         .application_id(APPLICATION_ID)
         .flags(gtk::gio::ApplicationFlags::HANDLES_COMMAND_LINE)
+        .register_session(true)
         .build();
     cli::add_options(application.upcast_ref());
     application.connect_handle_local_options(|_, options| {
@@ -647,10 +669,28 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
     }
     ui.connect_edge();
     ui.register_actions();
+    let shutdown_signals = RefCell::new(
+        [libc::SIGTERM, libc::SIGHUP, libc::SIGINT]
+            .into_iter()
+            .map(|signal| {
+                let weak = Rc::downgrade(&ui);
+                glib_unix::unix_signal_add_local(signal, move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.application.quit();
+                    }
+                    glib::ControlFlow::Continue
+                })
+            })
+            .collect::<Vec<_>>(),
+    );
     // Keep the coordinator alive for the application lifetime, without widget cycles.
     let shutdown_ui = ui.clone();
     application.connect_shutdown(move |_| {
         let ui = &shutdown_ui;
+        ui.flush_sessions_on_shutdown();
+        for source in shutdown_signals.borrow_mut().drain(..) {
+            source.remove();
+        }
         let manager = ui.manager.borrow().clone();
         if let Some(manager) = manager {
             manager.close_editor();
@@ -788,6 +828,68 @@ mod edge_tests {
         .unwrap()
         .downcast()
         .unwrap()
+    }
+
+    #[test]
+    #[ignore = "requires Wayland and disposable XDG_DATA_HOME/XDG_CONFIG_HOME directories"]
+    fn shutdown_flushes_every_session_after_a_failed_save() {
+        for variable in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+            assert!(
+                std::path::PathBuf::from(std::env::var(variable).expect(variable))
+                    .starts_with(std::env::temp_dir())
+            );
+        }
+        ui_assets::register().unwrap();
+        adw::init().unwrap();
+        let app = gtk::Application::builder()
+            .application_id(APPLICATION_ID)
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let ui = build(&app).unwrap();
+        let sessions: Vec<_> = (0..3)
+            .map(|_| {
+                let note = ui
+                    .storage
+                    .create_note("Before", "Before", NoteColor::Yellow)
+                    .unwrap();
+                let session = ui.note_session(note.id).unwrap();
+                session.title.set_text("Pending title");
+                session.body.set_text("Pending body");
+                session
+            })
+            .collect();
+        // Reject the first registry entry to prove later sessions still flush.
+        let failed = *ui.sessions.borrow().keys().next().unwrap();
+        let connection = rusqlite::Connection::open(storage::database_path()).unwrap();
+        connection
+            .execute_batch(&format!(
+                "CREATE TRIGGER reject_shutdown BEFORE UPDATE ON notes
+                 WHEN OLD.id = {} BEGIN SELECT RAISE(FAIL, 'shutdown write rejected'); END;",
+                failed.value()
+            ))
+            .unwrap();
+
+        ui.flush_sessions_on_shutdown();
+        for session in &sessions {
+            let saved = ui.storage.load_note(session.id()).unwrap();
+            if session.id() == failed {
+                assert!(session.is_dirty());
+                assert_eq!(saved.title, "Before");
+                assert_eq!(saved.body, "Before");
+            } else {
+                assert!(!session.is_dirty());
+                assert_eq!(saved.title, "Pending title");
+                assert_eq!(saved.body, "Pending body");
+            }
+        }
+        connection
+            .execute_batch("DROP TRIGGER reject_shutdown")
+            .unwrap();
+        ui.flush_sessions_on_shutdown();
+        assert!(sessions.iter().all(|session| !session.is_dirty()));
+        ui.edge.window.close();
+        ui.edge.strip_window.close();
     }
 
     #[test]

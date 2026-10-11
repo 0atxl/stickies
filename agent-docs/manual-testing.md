@@ -27,6 +27,12 @@ wait "$stickies_test_pid"
 
 Restart from the same terminal to reuse only this test data. Keep failed-case data until investigated; delete only this disposable directory when no longer needed. Never clear the normal database for a test.
 
+## Shutdown durability
+
+Build with `cargo build --release --locked`. In an isolated Wayland display and private session bus, run `STICKIES_TEST_SANDBOX=1 python3 tests/probe_shutdown.py`. The probe uses disposable data, types a new title and body, verifies autosave has not run, sends SIGTERM within 200 ms of typing, and verifies a clean exit and both saved fields. Repeat with `--signal SIGHUP` and `--signal SIGINT`. It prints and preserves the test directory and stderr for inspection. Never run the input probe on the normal desktop.
+
+Deliver a session-end notification in the isolated session and verify the same pending text is saved. Reject a shutdown write in disposable data and verify stderr names the failing note and error, other active sessions still save, and the application exits.
+
 ## Notes and editing
 
 1. Empty start shows New note and All Notes with no seeded content. Restarting an empty database keeps it empty.
