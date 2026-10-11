@@ -91,6 +91,7 @@ glib::wrapper! {
 
 const WIDTH: i32 = 420;
 const HEIGHT: i32 = 500;
+const TAB_GAP: i32 = 6;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum EdgeState {
@@ -635,10 +636,22 @@ impl Ui {
     ) {
         let distance = (24. * (1. - progress)) as f32;
         let (x, y) = match edge {
-            ScreenEdge::Left => (-distance, index as f32 * (tab.height_request() + 4) as f32),
-            ScreenEdge::Right => (distance, index as f32 * (tab.height_request() + 4) as f32),
-            ScreenEdge::Top => (index as f32 * (tab.width_request() + 4) as f32, -distance),
-            ScreenEdge::Bottom => (index as f32 * (tab.width_request() + 4) as f32, distance),
+            ScreenEdge::Left => (
+                -distance,
+                index as f32 * (tab.height_request() + TAB_GAP) as f32,
+            ),
+            ScreenEdge::Right => (
+                distance,
+                index as f32 * (tab.height_request() + TAB_GAP) as f32,
+            ),
+            ScreenEdge::Top => (
+                index as f32 * (tab.width_request() + TAB_GAP) as f32,
+                -distance,
+            ),
+            ScreenEdge::Bottom => (
+                index as f32 * (tab.width_request() + TAB_GAP) as f32,
+                distance,
+            ),
         };
         let (width, height) = (tab.width_request() as f32, tab.height_request() as f32);
         let (cx, cy) = match edge {
@@ -1327,7 +1340,8 @@ impl Ui {
                 .max()
                 .unwrap_or(0);
             let (screen_width, _) = self.note_limits();
-            let available = ((screen_width - 110) / 4).max(24);
+            let reserved = 3 * TAB_GAP + self.edge.tabs.spacing() + 3 * 24 + 2 * motion::HOVER_PAD;
+            let available = ((screen_width - reserved) / 4).max(24);
             let width =
                 if self.edge.state().is_revealed() && self.edge.horizontal_tab_width.get() > 0 {
                     self.edge.horizontal_tab_width.get()
@@ -1346,14 +1360,14 @@ impl Ui {
         fixed.set_overflow(gtk::Overflow::Visible);
         fixed.set_size_request(
             if horizontal {
-                (notes.len() as i32 * (tab_width + 4) - 4).max(0)
+                (notes.len() as i32 * (tab_width + TAB_GAP) - TAB_GAP).max(0)
             } else {
                 tab_width
             },
             if horizontal {
                 tab_height
             } else {
-                (notes.len() as i32 * (tab_height + 4) - 4).max(0)
+                (notes.len() as i32 * (tab_height + TAB_GAP) - TAB_GAP).max(0)
             },
         );
         for (index, note) in notes.iter().enumerate() {
@@ -1399,9 +1413,9 @@ impl Ui {
             }
             tab.set_size_request(tab_width, tab_height);
             let (x, y) = if horizontal {
-                (index as f64 * f64::from(tab_width + 4), 0.)
+                (index as f64 * f64::from(tab_width + TAB_GAP), 0.)
             } else {
-                (0., index as f64 * f64::from(tab_height + 4))
+                (0., index as f64 * f64::from(tab_height + TAB_GAP))
             };
             fixed.put(&tab, x, y);
             self.edge
@@ -1439,7 +1453,7 @@ impl Ui {
         if !notes.is_empty() {
             self.edge.tabs.append(&fixed);
         }
-        let utilities = gtk::Box::new(orientation, 4);
+        let utilities = gtk::Box::new(orientation, 0);
         utilities.add_css_class("edge-utilities");
         // GTK has no CSS overflow property. Clip utility feedback to the capsule.
         utilities.set_overflow(gtk::Overflow::Hidden);
@@ -1962,7 +1976,7 @@ impl Ui {
                     };
                     self.edge
                         .pointer_origin
-                        .set(Some(offset + index * (length + 4) + length / 2));
+                        .set(Some(offset + index * (length + TAB_GAP) + length / 2));
                     break;
                 }
                 index += 1;

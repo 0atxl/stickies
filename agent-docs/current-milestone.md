@@ -4,6 +4,7 @@
 
 ## Open items
 
+- The October 11 edge-strip polish uses 6 px tab gaps, quieter tab/capsule shadows, a single selected-tab accent and contiguous utility cells with centered dividers. Title size and hover behavior are unchanged. The normal offline build passed with existing GTK deprecation warnings. Visual approval and the reported softness remain unresolved. No tests were run at the user's request.
 - Complete final manual review of recent edge chrome/motion, positioning, Search/arrow behavior, blank-note cleanup and All Notes opening without a preview. Use [manual-testing.md](manual-testing.md); older reference drafts must be checked against SPEC.
 - Confirm docked timeout choices, pointer activity, Always open, persistent pop-outs, popover-first Escape and the running-instance actions in the final desktop UI.
 - Settle the remaining Settings scope: true strip enablement, launch-at-login control, default new-note color and About. Obtain the checklist redesign specification before a separate implementation pass.
