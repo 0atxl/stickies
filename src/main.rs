@@ -46,7 +46,6 @@ struct Ui {
     edge_sort: Cell<NoteSort>,
     config: Rc<RefCell<Config>>,
     config_valid: bool,
-    system_animations: bool,
     dnd: Cell<bool>,
     dnd_monitor: RefCell<Option<gtk::gio::FileMonitor>>,
     provider: gtk::CssProvider,
@@ -502,6 +501,7 @@ impl Ui {
             .map_err(|e| e.to_string())?;
         let login_changed = self.config.borrow().launch_at_login != config.launch_at_login;
         let timeout_changed = self.config.borrow().inactivity_seconds != config.inactivity_seconds;
+        let motion_changed = self.config.borrow().reduced_motion != config.reduced_motion;
         if self.config.borrow().edge != config.edge
             || self.config.borrow().marker_offset != config.marker_offset
         {
@@ -510,8 +510,8 @@ impl Ui {
         }
         self.finish_edge_motion();
         self.config.replace(config.clone());
-        if let Some(settings) = gtk::Settings::default() {
-            settings.set_gtk_enable_animations(self.system_animations && !config.reduced_motion);
+        if motion_changed {
+            apply_motion_preference(config.reduced_motion);
         }
         appearance::apply(&self.provider, &config);
         self.place_edge();
@@ -546,6 +546,16 @@ impl Ui {
             .build();
         dialog.connect_response(|dialog, _| dialog.close());
         dialog.present();
+    }
+}
+
+fn apply_motion_preference(reduced_motion: bool) {
+    if let Some(settings) = gtk::Settings::default() {
+        if reduced_motion {
+            settings.set_gtk_enable_animations(false);
+        } else {
+            settings.reset_property("gtk-enable-animations");
+        }
     }
 }
 
@@ -648,7 +658,6 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
     let window = edge.window.clone();
     let strip_window = edge.strip_window.clone();
     let ui = Rc::new(Ui {
-        system_animations: gtk::Settings::default().is_some_and(|s| s.is_gtk_enable_animations()),
         sessions: RefCell::new(HashMap::new()),
         application: application.clone(),
         edge,
@@ -663,10 +672,7 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
         separate: RefCell::new(HashMap::new()),
         manager: RefCell::new(None),
     });
-    if let Some(settings) = gtk::Settings::default() {
-        settings
-            .set_gtk_enable_animations(ui.system_animations && !ui.config.borrow().reduced_motion);
-    }
+    apply_motion_preference(ui.config.borrow().reduced_motion);
     ui.connect_edge();
     ui.register_actions();
     let shutdown_signals = RefCell::new(
@@ -828,6 +834,80 @@ mod edge_tests {
         .unwrap()
         .downcast()
         .unwrap()
+    }
+
+    #[test]
+    #[ignore = "requires Wayland and disposable XDG_DATA_HOME/XDG_CONFIG_HOME directories"]
+    fn motion_preference_releases_the_override_and_ignores_unrelated_or_rejected_updates() {
+        for variable in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+            assert!(
+                std::path::PathBuf::from(std::env::var(variable).unwrap())
+                    .starts_with(std::env::temp_dir())
+            );
+        }
+        assert!(
+            std::env::var("DBUS_SESSION_BUS_ADDRESS")
+                .unwrap()
+                .contains("/tmp/"),
+            "requires a private session bus"
+        );
+        let desktop = gtk::gio::Settings::new("org.gnome.desktop.interface");
+        desktop.set_boolean("enable-animations", false).unwrap();
+        gtk::gio::Settings::sync();
+        ui_assets::register().unwrap();
+        adw::init().unwrap();
+        Config {
+            launch_at_login: false,
+            ..Config::default()
+        }
+        .save(&config::config_path())
+        .unwrap();
+        let app = gtk::Application::builder()
+            .application_id("dev.stickies.MotionPreferenceRegression")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let ui = build(&app).unwrap();
+        let settings = gtk::Settings::default().unwrap();
+        assert!(!settings.is_gtk_enable_animations());
+        let settle = || {
+            let end = std::time::Instant::now() + Duration::from_millis(250);
+            while std::time::Instant::now() < end {
+                while glib::MainContext::default().pending() {
+                    glib::MainContext::default().iteration(false);
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        desktop.set_boolean("enable-animations", true).unwrap();
+        gtk::gio::Settings::sync();
+        settle();
+        assert!(settings.is_gtk_enable_animations());
+        let mut config = ui.config.borrow().clone();
+        config.theme = config::Theme::Playful;
+        ui.change_settings(config.clone()).unwrap();
+        assert!(settings.is_gtk_enable_animations());
+
+        let obstruction = config::config_path().with_extension("toml.tmp");
+        std::fs::create_dir(&obstruction).unwrap();
+        config.reduced_motion = true;
+        assert!(ui.change_settings(config.clone()).is_err());
+        assert!(!ui.config.borrow().reduced_motion);
+        assert!(settings.is_gtk_enable_animations());
+        std::fs::remove_dir(&obstruction).unwrap();
+        ui.change_settings(config.clone()).unwrap();
+        assert!(!settings.is_gtk_enable_animations());
+        desktop.set_boolean("enable-animations", false).unwrap();
+        gtk::gio::Settings::sync();
+        settle();
+        config.reduced_motion = false;
+        ui.change_settings(config).unwrap();
+        assert!(
+            !settings.is_gtk_enable_animations(),
+            "releasing the app override must restore the inherited disabled preference"
+        );
+        ui.edge.window.close();
+        ui.edge.strip_window.close();
     }
 
     #[test]
@@ -1465,14 +1545,14 @@ mod edge_tests {
             assert!(handled);
         };
         let popover = |editor: &editor::Editor, name: &str| {
-            find_widget(editor.root.upcast_ref(), &|widget| {
+            let button = find_widget(editor.root.upcast_ref(), &|widget| {
                 widget.is::<gtk::MenuButton>() && widget.tooltip_text().as_deref() == Some(name)
             })
             .unwrap()
             .downcast::<gtk::MenuButton>()
-            .unwrap()
-            .popover()
-            .unwrap()
+            .unwrap();
+            let panel = button.popover().unwrap();
+            (button, panel)
         };
         for detached in [false, true] {
             let open = || {
@@ -1505,14 +1585,43 @@ mod edge_tests {
             for on_popover in [false, true] {
                 for nested in [false, true] {
                     let (editor, window) = open();
-                    let tools = popover(&editor, "Open note tools");
-                    let more = popover(&editor, "More note tools");
-                    tools.popup();
+                    let (tools_button, tools) = popover(&editor, "Open note tools");
+                    let (more_button, more) = popover(&editor, "More note tools");
+                    tools_button.popup();
                     settle();
                     if nested {
-                        more.popup();
+                        more_button.popup();
                         settle();
                     }
+                    assert!(
+                        tools.is_visible(),
+                        "tools closed before Escape: detached={detached}, on_popover={on_popover}, nested={nested}"
+                    );
+                    assert!(tools.is_mapped());
+                    let popup = tools
+                        .surface()
+                        .unwrap()
+                        .downcast::<gtk::gdk::Popup>()
+                        .unwrap();
+                    assert!(popup.is_mapped());
+                    let native = editor.root.native().unwrap();
+                    let native_widget = native.clone().dynamic_cast::<gtk::Widget>().unwrap();
+                    let body = editor.body.compute_bounds(&native_widget).unwrap();
+                    let (dx, dy) = native.surface_transform();
+                    // Compare the painted contents, excluding the native shadow.
+                    let contents = tools.first_child().unwrap().compute_bounds(&tools).unwrap();
+                    let (px, py) = tools.surface_transform();
+                    let x = f64::from(popup.position_x()) + f64::from(contents.x()) + px - dx;
+                    let y = f64::from(popup.position_y()) + f64::from(contents.y()) + py - dy;
+                    assert!(
+                        x + f64::from(contents.width()) <= f64::from(body.x())
+                            || x >= f64::from(body.x() + body.width())
+                            || y + f64::from(contents.height()) <= f64::from(body.y())
+                            || y >= f64::from(body.y() + body.height()),
+                        "tools overlap writing area: detached={detached}, popup=({x},{y},{},{}), body={body:?}",
+                        contents.width(),
+                        contents.height()
+                    );
                     let target = if on_popover {
                         if nested {
                             more.upcast_ref()
@@ -1524,7 +1633,10 @@ mod edge_tests {
                     };
                     escape(target);
                     settle();
-                    assert!(is_open(), "first Escape must preserve the note");
+                    assert!(
+                        is_open(),
+                        "first Escape must preserve the note: detached={detached}, on_popover={on_popover}, nested={nested}"
+                    );
                     assert!(!tools.is_visible());
                     assert!(!more.is_visible());
                     escape(&window);
@@ -1540,8 +1652,8 @@ mod edge_tests {
             connection.execute_batch("CREATE TRIGGER reject_escape_save BEFORE UPDATE ON notes BEGIN SELECT RAISE(FAIL, 'save failure'); END;").unwrap();
             let unsaved_title = format!("Unsaved title {detached}");
             editor.title.set_text(&unsaved_title);
-            let tools = popover(&editor, "Open note tools");
-            tools.popup();
+            let (tools_button, tools) = popover(&editor, "Open note tools");
+            tools_button.popup();
             settle();
             escape(&window);
             settle();

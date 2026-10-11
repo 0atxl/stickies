@@ -1,5 +1,13 @@
 use gtk::{gio, glib, prelude::*};
-use std::ffi::{CString, c_void};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    ffi::{CString, c_void},
+};
+
+thread_local! {
+    static ICON_MASKS: RefCell<HashMap<String, gtk::cairo::ImageSurface>> = RefCell::new(HashMap::new());
+}
 
 #[link(name = "fontconfig")]
 unsafe extern "C" {
@@ -84,24 +92,32 @@ pub fn image(name: &str) -> gtk::DrawingArea {
 
 // Preserve the supplied SVG strokes, using their alpha as a mask for the CSS color.
 fn set_icon(image: &gtk::DrawingArea, path: &str) {
-    let pixbuf =
-        gtk::gdk_pixbuf::Pixbuf::from_resource_at_scale(path, 36, 36, true).expect("bundled icon");
-    let bytes = pixbuf.read_pixel_bytes();
-    let stride = gtk::cairo::Format::A8.stride_for_width(36).unwrap() as usize;
-    let mut alpha = vec![0u8; stride * 36];
-    for y in 0..36usize {
-        for x in 0..36usize {
-            alpha[y * stride + x] = bytes[y * pixbuf.rowstride() as usize + x * 4 + 3];
+    let mask = ICON_MASKS.with(|masks| {
+        let cached = masks.borrow().get(path).cloned();
+        if let Some(mask) = cached {
+            return mask;
         }
-    }
-    let mask = gtk::cairo::ImageSurface::create_for_data(
-        alpha,
-        gtk::cairo::Format::A8,
-        36,
-        36,
-        stride as i32,
-    )
-    .unwrap();
+        let pixbuf = gtk::gdk_pixbuf::Pixbuf::from_resource_at_scale(path, 36, 36, true)
+            .expect("bundled icon");
+        let bytes = pixbuf.read_pixel_bytes();
+        let stride = gtk::cairo::Format::A8.stride_for_width(36).unwrap() as usize;
+        let mut alpha = vec![0u8; stride * 36];
+        for y in 0..36usize {
+            for x in 0..36usize {
+                alpha[y * stride + x] = bytes[y * pixbuf.rowstride() as usize + x * 4 + 3];
+            }
+        }
+        let mask = gtk::cairo::ImageSurface::create_for_data(
+            alpha,
+            gtk::cairo::Format::A8,
+            36,
+            36,
+            stride as i32,
+        )
+        .unwrap();
+        masks.borrow_mut().insert(path.to_owned(), mask.clone());
+        mask
+    });
     image.set_draw_func(move |widget, cr, width, height| {
         let color = widget.style_context().color();
         cr.set_source_rgba(

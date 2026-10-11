@@ -14,9 +14,11 @@ pub struct Panel {
     position: Rc<PositionControls>,
     timeouts: Rc<Vec<gtk::ToggleButton>>,
     syncing: Rc<Cell<bool>>,
+    appearance: Rc<AppearanceControls>,
 }
 impl Panel {
     pub fn refresh(&self) {
+        self.appearance.sync();
         self.position.sync();
         self.syncing.set(true);
         let seconds = self.position.current.borrow().inactivity_seconds;
@@ -24,6 +26,46 @@ impl Panel {
             button.set_active(seconds == timeout);
         }
         self.syncing.set(false);
+    }
+}
+
+struct AppearanceControls {
+    current: Rc<RefCell<Config>>,
+    syncing: Rc<Cell<bool>>,
+    themes: Vec<(gtk::ToggleButton, Theme)>,
+    mode: gtk::Box,
+    modes: Vec<gtk::ToggleButton>,
+    fonts: Vec<gtk::ToggleButton>,
+    patterns: Vec<(gtk::ToggleButton, Paper)>,
+    motion: gtk::Switch,
+    samples: Vec<(Rc<RefCell<Config>>, gtk::DrawingArea)>,
+}
+impl AppearanceControls {
+    fn sync(&self) {
+        let config = self.current.borrow().clone();
+        let was_syncing = self.syncing.replace(true);
+        for (button, theme) in &self.themes {
+            button.set_active(config.theme == *theme);
+        }
+        self.mode.set_visible(config.theme == Theme::Minimal);
+        for (index, button) in self.modes.iter().enumerate() {
+            button.set_active(config.appearance as usize == index);
+        }
+        for (index, button) in self.fonts.iter().enumerate() {
+            button.set_active(font_index(&config) == index);
+        }
+        for (button, pattern) in &self.patterns {
+            button.set_active(config.paper == *pattern);
+        }
+        self.motion.set_active(config.reduced_motion);
+        for (sample, drawing) in &self.samples {
+            let mut sample = sample.borrow_mut();
+            sample.appearance = config.appearance;
+            sample.paper = config.paper;
+            sample.white_paper = config.white_paper;
+            drawing.queue_draw();
+        }
+        self.syncing.set(was_syncing);
     }
 }
 
@@ -159,27 +201,7 @@ pub fn build(
     error.add_css_class("save-error");
     error.set_visible(false);
     root.append(&error);
-    let samples = Rc::new(RefCell::new(
-        Vec::<(Rc<RefCell<Config>>, gtk::DrawingArea)>::new(),
-    ));
-    let previews = samples.clone();
-    let update: Rc<dyn Fn(Config)> = Rc::new(move |config| match on_change(config.clone()) {
-        Ok(()) => {
-            error.set_visible(false);
-            for (sample, drawing) in previews.borrow().iter() {
-                let mut sample = sample.borrow_mut();
-                sample.appearance = config.appearance;
-                sample.paper = config.paper;
-                sample.white_paper = config.white_paper;
-                drawing.queue_draw();
-            }
-        }
-        Err(message) => {
-            error.set_text(&message);
-            error.set_visible(true);
-        }
-    });
-    // The error label is retained by its container as well as the update callback.
+    let mut samples = Vec::new();
     // Build controls once; changing a theme must not rebuild the focused drawer.
     let config = current.borrow().clone();
     let syncing = Rc::new(Cell::new(false));
@@ -219,7 +241,7 @@ pub fn build(
             Rc::new(Cell::new(NoteColor::Green)),
             Rc::new(Cell::new(1)),
         );
-        samples.borrow_mut().push((sample, paper.clone()));
+        samples.push((sample, paper.clone()));
         paper.set_size_request(50, 48);
         overlay.set_child(Some(&paper));
         let badge = gtk::Label::new(Some("✓"));
@@ -246,17 +268,6 @@ pub fn build(
     section(&mode, "Mode", &modes.0);
     mode.set_visible(config.theme == Theme::Minimal);
     root.append(&mode);
-    for (i, button) in modes.1.into_iter().enumerate() {
-        let current = current.clone();
-        let update = update.clone();
-        button.connect_toggled(move |b| {
-            if b.is_active() {
-                let mut c = current.borrow().clone();
-                c.appearance = [Appearance::System, Appearance::Light, Appearance::Dark][i];
-                update(c);
-            }
-        });
-    }
     let font_section = gtk::Box::new(gtk::Orientation::Vertical, 8);
     let font_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     let font_label = gtk::Label::new(Some("Font"));
@@ -272,38 +283,11 @@ pub fn build(
     let fonts = choices(&["Handwritten", "Clean", "Mono"], font_index(&config));
     font_section.append(&fonts.0);
     root.append(&font_section);
-    let font_buttons = Rc::new(fonts.1);
-    for (i, button) in font_buttons.iter().enumerate() {
-        let current = current.clone();
-        let update = update.clone();
-        let syncing = syncing.clone();
-        button.connect_toggled(move |b| {
-            if b.is_active() && !syncing.get() {
-                let mut c = current.borrow().clone();
-                c.font = [Font::Handwritten, Font::Grotesk, Font::Mono][i];
-                update(c);
-            }
-        });
-    }
-    {
-        let current = current.clone();
-        let update = update.clone();
-        let syncing = syncing.clone();
-        let buttons = font_buttons.clone();
-        reset.connect_clicked(move |_| {
-            let mut c = current.borrow().clone();
-            c.font = Font::Theme;
-            let i = font_index(&c);
-            update(c);
-            syncing.set(true);
-            buttons[i].set_active(true);
-            syncing.set(false);
-        });
-    }
     let patterns = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let pattern_section = gtk::Box::new(gtk::Orientation::Vertical, 8);
     section(&pattern_section, "Canvas pattern", &patterns);
     root.append(&pattern_section);
+    let mut pattern_buttons = Vec::new();
     let mut group: Option<gtk::ToggleButton> = None;
     for (pattern, name) in [
         (Paper::Plain, "Plain"),
@@ -351,38 +335,11 @@ pub fn build(
         b.set_hexpand(true);
         b.set_group(group.as_ref());
         b.set_active(config.paper == pattern);
-        let current = current.clone();
-        let update = update.clone();
-        b.connect_toggled(move |b| {
-            if b.is_active() {
-                let mut c = current.borrow().clone();
-                c.paper = pattern;
-                update(c);
-            }
-        });
         patterns.append(&b);
         if group.is_none() {
-            group = Some(b);
+            group = Some(b.clone());
         }
-    }
-    for (button, theme) in theme_buttons {
-        let current = current.clone();
-        let update = update.clone();
-        let mode = mode.clone();
-        let syncing = syncing.clone();
-        let fonts = font_buttons.clone();
-        button.connect_toggled(move |b| {
-            if b.is_active() {
-                let mut c = current.borrow().clone();
-                c.theme = theme;
-                mode.set_visible(theme == Theme::Minimal);
-                let i = font_index(&c);
-                update(c);
-                syncing.set(true);
-                fonts[i].set_active(true);
-                syncing.set(false);
-            }
-        });
+        pattern_buttons.push((b, pattern));
     }
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     let label = gtk::Label::new(Some("Reduce motion"));
@@ -391,16 +348,119 @@ pub fn build(
     let switch = gtk::Switch::new();
     switch.set_valign(gtk::Align::Center);
     switch.set_active(config.reduced_motion);
-    let motion_current = current.clone();
-    let motion_update = update.clone();
-    switch.connect_active_notify(move |s| {
-        let mut c = motion_current.borrow().clone();
-        c.reduced_motion = s.is_active();
-        motion_update(c);
-    });
     row.append(&label);
     row.append(&switch);
     root.append(&row);
+    let appearance = Rc::new(AppearanceControls {
+        current: current.clone(),
+        syncing: syncing.clone(),
+        themes: theme_buttons,
+        mode,
+        modes: modes.1,
+        fonts: fonts.1,
+        patterns: pattern_buttons,
+        motion: switch,
+        samples,
+    });
+    let weak = Rc::downgrade(&appearance);
+    let update: Rc<dyn Fn(Config)> = Rc::new(move |config| {
+        match on_change(config) {
+            Ok(()) => error.set_visible(false),
+            Err(message) => {
+                error.set_text(&message);
+                error.set_visible(true);
+            }
+        }
+        if let Some(controls) = weak.upgrade() {
+            controls.sync();
+        }
+    });
+    for (button, theme) in &appearance.themes {
+        let theme = *theme;
+        let weak = Rc::downgrade(&appearance);
+        let update = update.clone();
+        button.connect_toggled(move |button| {
+            if let Some(controls) = weak.upgrade()
+                && button.is_active()
+                && !controls.syncing.get()
+            {
+                let mut config = controls.current.borrow().clone();
+                config.theme = theme;
+                update(config);
+            }
+        });
+    }
+    for (index, button) in appearance.modes.iter().enumerate() {
+        let weak = Rc::downgrade(&appearance);
+        let update = update.clone();
+        button.connect_toggled(move |button| {
+            if let Some(controls) = weak.upgrade()
+                && button.is_active()
+                && !controls.syncing.get()
+            {
+                let mut config = controls.current.borrow().clone();
+                config.appearance =
+                    [Appearance::System, Appearance::Light, Appearance::Dark][index];
+                update(config);
+            }
+        });
+    }
+    for (index, button) in appearance.fonts.iter().enumerate() {
+        let weak = Rc::downgrade(&appearance);
+        let update = update.clone();
+        button.connect_toggled(move |button| {
+            if let Some(controls) = weak.upgrade()
+                && button.is_active()
+                && !controls.syncing.get()
+            {
+                let mut config = controls.current.borrow().clone();
+                config.font = [Font::Handwritten, Font::Grotesk, Font::Mono][index];
+                update(config);
+            }
+        });
+    }
+    for (button, pattern) in &appearance.patterns {
+        let pattern = *pattern;
+        let weak = Rc::downgrade(&appearance);
+        let update = update.clone();
+        button.connect_toggled(move |button| {
+            if let Some(controls) = weak.upgrade()
+                && button.is_active()
+                && !controls.syncing.get()
+            {
+                let mut config = controls.current.borrow().clone();
+                config.paper = pattern;
+                update(config);
+            }
+        });
+    }
+    {
+        let weak = Rc::downgrade(&appearance);
+        let update = update.clone();
+        reset.connect_clicked(move |_| {
+            if let Some(controls) = weak.upgrade()
+                && !controls.syncing.get()
+            {
+                let mut config = controls.current.borrow().clone();
+                config.font = Font::Theme;
+                update(config);
+            }
+        });
+    }
+    {
+        let weak = Rc::downgrade(&appearance);
+        let update = update.clone();
+        appearance.motion.connect_active_notify(move |switch| {
+            if let Some(controls) = weak.upgrade()
+                && !controls.syncing.get()
+                && controls.current.borrow().reduced_motion != switch.is_active()
+            {
+                let mut config = controls.current.borrow().clone();
+                config.reduced_motion = switch.is_active();
+                update(config);
+            }
+        });
+    }
     root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     let heading = gtk::Label::new(Some("Edge strip"));
     heading.set_xalign(0.);
@@ -497,6 +557,7 @@ pub fn build(
         position,
         timeouts,
         syncing,
+        appearance,
     }
 }
 
@@ -536,4 +597,73 @@ fn choices(labels: &[&str], selected: usize) -> (gtk::Box, Vec<gtk::ToggleButton
         buttons.push(b);
     }
     (row, buttons)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn appearance_rejections_restore_controls_without_submitting_another_update() {
+        adw::init().unwrap();
+        let current = Rc::new(RefCell::new(Config {
+            theme: Theme::Paper,
+            font: Font::Theme,
+            appearance: Appearance::Light,
+            paper: Paper::Dots,
+            ..Config::default()
+        }));
+        let attempts = Rc::new(Cell::new(0));
+        let reject = Rc::new(Cell::new(true));
+        let panel = build(
+            current.clone(),
+            {
+                let current = current.clone();
+                let attempts = attempts.clone();
+                let reject = reject.clone();
+                move |config| {
+                    attempts.set(attempts.get() + 1);
+                    if reject.get() {
+                        Err("Rejected for regression coverage".into())
+                    } else {
+                        current.replace(config);
+                        Ok(())
+                    }
+                }
+            },
+            || Ok(()),
+        );
+        let controls = &panel.appearance;
+        controls.themes[0].0.set_active(true);
+        assert_eq!(attempts.get(), 1);
+        assert!(controls.themes[1].0.is_active());
+        assert!(!controls.mode.is_visible());
+        assert!(controls.fonts[0].is_active());
+
+        controls.fonts[2].set_active(true);
+        assert_eq!(attempts.get(), 2);
+        controls.patterns[2].0.set_active(true);
+        assert_eq!(attempts.get(), 3);
+        controls.motion.set_active(true);
+        assert_eq!(attempts.get(), 4);
+        assert!(controls.fonts[0].is_active());
+        assert!(controls.patterns[1].0.is_active());
+        assert!(!controls.motion.is_active());
+
+        current.borrow_mut().theme = Theme::Minimal;
+        panel.refresh();
+        controls.modes[2].set_active(true);
+        assert_eq!(attempts.get(), 5);
+        assert!(controls.mode.is_visible());
+        assert!(controls.modes[1].is_active());
+        assert!(controls.fonts[1].is_active());
+
+        reject.set(false);
+        controls.themes[2].0.set_active(true);
+        assert_eq!(attempts.get(), 6);
+        assert_eq!(current.borrow().theme, Theme::Playful);
+        assert!(controls.themes[2].0.is_active());
+        assert!(!controls.mode.is_visible());
+    }
 }

@@ -2,6 +2,12 @@
 
 Run against the release build on the reference compositor. Record failures and pending checks, not a history of every run. Final UI approval belongs to the user.
 
+## October 10 UI verification
+
+After the user authorized tests, 34 non-display tests and all 12 ignored native GTK tests passed. Formatting, strict Clippy with existing deprecations allowed, release compilation and the three shutdown signal probes also passed. Native assertions cover theme/edge geometry, default/minimum sizes, focus, interrupted/reduced motion, Search scrolling, rejected Appearance changes, list prefixes, shared editing and layered Escape. Release screenshots confirm the corrected toolbox and Search behavior. See [the results and evidence](../plans/README.md#verification-status).
+
+Large-content All Notes performance remains unresolved: 1,284 notes with roughly 20 KB bodies took 54.2 seconds to map and used 379.4 MiB PSS on the isolated 125% output. Final visual approval and the broader desktop/installation checks below remain pending. Historical "not tested" statements later in this file describe their earlier runs.
+
 ## Isolated setup
 
 Close any running Stickies instance first. The application is single-instance, so a second invocation can connect to an existing process despite different XDG paths.

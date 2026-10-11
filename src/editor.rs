@@ -27,6 +27,7 @@ pub struct Editor {
     pub keep: gtk::ToggleButton,
     pub resize: gtk::Button,
     toolbar: gtk::Popover,
+    tools_button: gtk::MenuButton,
     more_popover: gtk::Popover,
     docked: bool,
     docked_size: Cell<(i32, i32)>,
@@ -180,6 +181,7 @@ impl Editor {
         toast.set_child(Some(&sheet));
         root.set_child(Some(&toast));
         let grip = gtk::MenuButton::new();
+        grip.set_direction(gtk::ArrowType::Left);
         grip.add_css_class("icon-control");
         grip.add_css_class("rail-grip");
         grip.set_tooltip_text(Some("Open note tools"));
@@ -264,6 +266,7 @@ impl Editor {
             last_error: RefCell::new(None),
             error_toast: RefCell::new(None),
             toolbar,
+            tools_button: grip,
             more_popover,
             docked,
             pattern_choice: paper_choice.clone(),
@@ -431,6 +434,18 @@ impl Editor {
             });
             target.add_controller(motion);
         }
+        let weak = Rc::downgrade(&editor);
+        editor.tools_button.set_create_popup_func(move |_| {
+            if let Some(editor) = weak.upgrade() {
+                editor.position_tools();
+            }
+        });
+        let weak = Rc::downgrade(&editor);
+        editor.background.connect_resize(move |_, _, _| {
+            if let Some(editor) = weak.upgrade() {
+                editor.position_tools();
+            }
+        });
         editor.refresh_appearance();
         editor.activity();
         editor
@@ -451,11 +466,11 @@ impl Editor {
         self.root.set_size_request(size.0, size.1);
     }
     pub fn set_resize_edge(&self, edge: gtk::gdk::SurfaceEdge) {
-        self.toolbar
-            .set_position(if edge == gtk::gdk::SurfaceEdge::SouthEast {
-                gtk::PositionType::Right
+        self.tools_button
+            .set_direction(if edge == gtk::gdk::SurfaceEdge::SouthEast {
+                gtk::ArrowType::Right
             } else {
-                gtk::PositionType::Left
+                gtk::ArrowType::Left
             });
         self.resize_edge.set(edge);
         let left = edge == gtk::gdk::SurfaceEdge::SouthWest;
@@ -493,6 +508,26 @@ impl Editor {
             "se-resize"
         }));
         self.resize.queue_draw();
+        self.position_tools();
+    }
+    fn position_tools(&self) {
+        // Anchor to the sheet, so GTK's side flip also stays outside the text.
+        let Some(bounds) = self.background.compute_bounds(&self.tools_button) else {
+            return;
+        };
+        if bounds.width() <= 0. || bounds.height() <= 0. {
+            return;
+        }
+        let rect = gtk::gdk::Rectangle::new(
+            bounds.x().floor() as i32,
+            bounds.y().floor() as i32,
+            (bounds.x() + bounds.width()).ceil() as i32 - bounds.x().floor() as i32,
+            (bounds.y() + bounds.height()).ceil() as i32 - bounds.y().floor() as i32,
+        );
+        let (has_rect, previous) = self.toolbar.pointing_to();
+        if !has_rect || previous != rect {
+            self.toolbar.set_pointing_to(Some(&rect));
+        }
     }
     pub fn flush(&self) -> bool {
         self.session.flush()
@@ -633,6 +668,10 @@ pub fn toggle_line(body: &gtk::TextView, prefix: &str) {
         text.replacen("- [ ] ", "- [x] ", 1)
     } else if prefix == "- [ ] " && text.starts_with("- [x] ") {
         text.replacen("- [x] ", "- [ ] ", 1)
+    } else if prefix == "1. " {
+        text.split_once(". ")
+            .filter(|(number, _)| number.parse::<u32>().is_ok())
+            .map_or_else(|| format!("{prefix}{text}"), |(_, rest)| rest.to_owned())
     } else if let Some(rest) = text.strip_prefix(prefix) {
         rest.to_owned()
     } else {
@@ -682,6 +721,38 @@ fn next_list_line(text: &str) -> Option<(String, &str)> {
 #[cfg(test)]
 mod tests {
     use super::next_list_line;
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn numbered_toggle_removes_continued_prefixes_and_undo_restores_them() {
+        use super::*;
+        adw::init().unwrap();
+        let body = gtk::TextView::new();
+        let buffer = body.buffer();
+        buffer.set_enable_undo(true);
+        for (text, expected) in [
+            ("Call supplier", "1. Call supplier"),
+            ("1. Call supplier", "Call supplier"),
+            ("2. Call supplier", "Call supplier"),
+            ("12. 東京 🛒", "東京 🛒"),
+            ("4294967295. Last", "Last"),
+            ("2. ", ""),
+            ("Version 2.1", "1. Version 2.1"),
+            ("-2. Negative", "1. -2. Negative"),
+        ] {
+            buffer.set_text(text);
+            toggle_line(&body, "1. ");
+            assert_eq!(
+                buffer.text(&buffer.start_iter(), &buffer.end_iter(), true),
+                expected
+            );
+            buffer.undo();
+            assert_eq!(
+                buffer.text(&buffer.start_iter(), &buffer.end_iter(), true),
+                text
+            );
+        }
+    }
+
     #[test]
     fn continues_lists_without_completing_the_next_checkbox() {
         assert_eq!(

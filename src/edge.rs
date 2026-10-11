@@ -260,6 +260,7 @@ pub(super) struct Strip {
     pub(super) tabs: gtk::Box,
     pub(super) edge_search: gtk::SearchEntry,
     pub(super) search_results: gtk::ListBox,
+    search_scroll: gtk::ScrolledWindow,
     pub(super) search_ids: RefCell<Vec<NoteId>>,
     pub(super) search_create: gtk::Button,
     pub(super) pointer: gtk::DrawingArea,
@@ -414,6 +415,7 @@ impl Strip {
             tabs,
             edge_search,
             search_results,
+            search_scroll: scroll,
             search_ids: RefCell::new(Vec::new()),
             search_create,
             pointer,
@@ -564,6 +566,23 @@ impl Ui {
             if !enabled {
                 self.finish_panel_motion();
             }
+        } else if previous == EdgeState::Tabs
+            && state == EdgeState::Search
+            && enabled
+            && self
+                .edge
+                .outgoing_panel
+                .borrow()
+                .as_ref()
+                .is_some_and(|outgoing| {
+                    self.edge.stack.child_by_name("search").as_ref() == Some(outgoing)
+                })
+        {
+            // Reopening the same child reverses its fade from the painted value.
+            self.edge.panel_motion.cancel();
+            self.edge.outgoing_panel.borrow_mut().take();
+            self.edge.outgoing_session.borrow_mut().take();
+            self.edge.outgoing_origin.set(None);
         } else {
             self.finish_panel_motion();
             if matches!(state, EdgeState::Docked(_) | EdgeState::Search) && enabled {
@@ -1196,6 +1215,7 @@ impl Ui {
                             ui.edge
                                 .search_results
                                 .select_row(ui.edge.search_results.row_at_index(next).as_ref());
+                            ui.keep_search_selection_visible();
                             return glib::Propagation::Stop;
                         }
                         glib::Propagation::Proceed
@@ -1581,6 +1601,46 @@ impl Ui {
             } else {
                 "No matches. Create a note from this search"
             });
+        // Rebuilt rows need their first allocation before scrolling to them.
+        let weak = Rc::downgrade(self);
+        self.edge.search_results.add_tick_callback(move |_, _| {
+            if let Some(ui) = weak.upgrade()
+                && !ui.keep_search_selection_visible()
+            {
+                return glib::ControlFlow::Continue;
+            }
+            // Tick callbacks run before layout; the scroller may reset its
+            // adjustment during that layout. Apply the final position afterward.
+            let weak = weak.clone();
+            glib::idle_add_local_once(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.keep_search_selection_visible();
+                }
+            });
+            glib::ControlFlow::Break
+        });
+    }
+    fn keep_search_selection_visible(&self) -> bool {
+        if !self.edge.state().is_searching() {
+            return true;
+        }
+        let Some(row) = self.edge.search_results.selected_row() else {
+            return true;
+        };
+        let Some(bounds) = row.compute_bounds(&self.edge.search_results) else {
+            return false;
+        };
+        if bounds.height() <= 0. {
+            return false;
+        }
+        let adjustment = self.edge.search_scroll.vadjustment();
+        let top = f64::from(bounds.y());
+        let bottom = f64::from(bounds.y() + bounds.height());
+        if adjustment.page_size() <= 0. || adjustment.upper() < bottom {
+            return false;
+        }
+        adjustment.clamp_page(top, bottom);
+        true
     }
     pub(super) fn activate_edge_search(self: &Rc<Self>) {
         self.refresh_edge_search();
@@ -2423,6 +2483,20 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(1));
             }
         };
+        let intermediate = |phase, value: &dyn Fn() -> f64| {
+            let deadline = std::time::Instant::now() + Duration::from_millis(500);
+            loop {
+                let progress = value();
+                if progress > 0. && progress < 1. {
+                    return progress;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{phase}: animation never painted an intermediate frame: {progress}"
+                );
+                settle(1);
+            }
+        };
         settle(250);
         assert!(ui.motion_enabled());
         // The dormant marker must keep the same placement on its first reveal.
@@ -2433,8 +2507,7 @@ mod tests {
         // Sample the first reveal, including GTK's first tab allocations.
         let extent = (ui.edge.root.width(), ui.edge.root.height());
         let expanded = ui.edge.strip_bounds.get();
-        settle(70);
-        let progress = ui.edge.tab_motion.borrow()[0].value();
+        let progress = intermediate("reveal", &|| ui.edge.tab_motion.borrow()[0].value());
         let fixed = ui.edge.tabs.first_child().unwrap();
         assert_eq!(
             (fixed.width(), fixed.height()),
@@ -2473,8 +2546,7 @@ mod tests {
         ui.schedule_reveal();
         ui.dormant();
         assert_eq!(ui.edge.strip_bounds.get(), expanded);
-        settle(35);
-        let before = ui.edge.tab_motion.borrow()[3].value();
+        let before = intermediate("collapse", &|| ui.edge.tab_motion.borrow()[3].value());
         assert!(
             before > 0. && before < 1.,
             "collapse must have intermediate frames: {before}"
@@ -2511,8 +2583,7 @@ mod tests {
         settle(500);
         assert_eq!(ui.edge.state(), EdgeState::Tabs);
         ui.show_edge_search();
-        settle(70);
-        let before = ui.edge.panel_motion.value();
+        let before = intermediate("search open", &|| ui.edge.panel_motion.value());
         assert!(before > 0. && before < 1., "panel must fade: {before}");
         ui.edge.edge_search.set_text("Four");
         ui.refresh_edge_search();
@@ -2526,6 +2597,58 @@ mod tests {
         ui.close_edge_search();
         settle(150);
         assert!(!ui.edge.stack.is_visible());
+        for index in 0..20 {
+            storage
+                .create_note(&format!("Result {index:02}"), "Body", NoteColor::Blue)
+                .unwrap();
+        }
+        ui.show_edge_search();
+        settle(160);
+        let search_focus = gtk::prelude::RootExt::focus(&ui.edge.window).unwrap();
+        assert!(
+            search_focus == ui.edge.edge_search.clone().upcast::<gtk::Widget>()
+                || search_focus.is_ancestor(&ui.edge.edge_search)
+        );
+        ui.edge
+            .search_results
+            .select_row(ui.edge.search_results.row_at_index(15).as_ref());
+        assert!(ui.keep_search_selection_visible());
+        let check_selection = |phase| {
+            let row = ui.edge.search_results.selected_row().unwrap();
+            let bounds = row.compute_bounds(&ui.edge.search_results).unwrap();
+            let adjustment = ui.edge.search_scroll.vadjustment();
+            assert!(f64::from(bounds.y()) >= adjustment.value() - 1.);
+            assert!(
+                f64::from(bounds.y() + bounds.height())
+                    <= adjustment.value() + adjustment.page_size() + 1.,
+                "{phase}: row={bounds:?}, value={}, page={}, upper={}",
+                adjustment.value(),
+                adjustment.page_size(),
+                adjustment.upper()
+            );
+            assert_eq!(
+                gtk::prelude::RootExt::focus(&ui.edge.window),
+                Some(search_focus.clone())
+            );
+        };
+        check_selection("selection");
+        ui.refresh_edge_search();
+        settle(100);
+        check_selection("refresh");
+        for _ in 0..3 {
+            ui.close_edge_search();
+            let before = intermediate("search close", &|| ui.edge.panel_motion.value());
+            assert!(before > 0. && before < 1.);
+            ui.show_edge_search();
+            assert_eq!(ui.edge.panel_motion.value(), before);
+            // GTK stores widget opacity at 8-bit precision.
+            assert!((ui.edge.stack.opacity() - before).abs() <= 1. / 255.);
+            assert!((ui.edge.pointer.opacity() - before).abs() <= 1. / 255.);
+            settle(160);
+            assert_eq!(ui.edge.panel_motion.value(), 1.);
+        }
+        ui.close_edge_search();
+        settle(160);
         // The outgoing pointer must retain its geometry even when the panel is
         // clamped against a screen end and its origin differs from its center.
         let pointer_pixels = || {

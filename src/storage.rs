@@ -5,7 +5,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, functions::FunctionFlags, params};
 
 use crate::app::{Note, NoteColor, NoteId};
 
@@ -85,6 +85,15 @@ impl Storage {
         }
 
         let connection = Connection::open(path)?;
+        connection.create_scalar_function(
+            "stickies_casefold",
+            1,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            |context| {
+                let text = context.get::<String>(0)?;
+                Ok(gtk::glib::casefold(text).to_string())
+            },
+        )?;
         let mut storage = Self { connection };
         storage.migrate()?;
         Ok(storage)
@@ -240,11 +249,12 @@ impl Storage {
              FROM notes
              WHERE {collection_clause}
                AND deleted_at IS NULL
-               AND (instr(lower(title), lower(?1)) > 0
-                    OR instr(lower(body), lower(?1)) > 0)
+               AND (instr(stickies_casefold(title), ?1) > 0
+                    OR instr(stickies_casefold(body), ?1) > 0)
              ORDER BY {order_clause}"
         );
         let mut statement = self.connection.prepare(&sql)?;
+        let query = gtk::glib::casefold(query).to_string();
         let rows = statement.query_map([query], note_from_row)?;
 
         rows.map(|row| {
@@ -405,11 +415,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn search_casefolds_unicode_titles_and_bodies_without_changing_literal_matching() {
+        let storage = Storage::open(Path::new(":memory:")).unwrap();
+        let note = storage
+            .create_note(
+                "Ólafur Đặng Straße Σίσυφος café",
+                "東京 ПРИВЕТ 100% _ literal's",
+                NoteColor::Blue,
+            )
+            .unwrap();
+        for query in [
+            "ólafur",
+            "đặng",
+            "STRASSE",
+            "σίσυφοσ",
+            "привет",
+            "東京",
+            "%",
+            "_",
+            "LITERAL'S",
+            "",
+        ] {
+            assert_eq!(
+                storage
+                    .search_notes(NoteCollection::Active, query, NoteSort::Recent)
+                    .unwrap(),
+                vec![note.clone()],
+                "query {query:?}"
+            );
+        }
+        assert!(
+            storage
+                .search_notes(NoteCollection::Active, "cafe", NoteSort::Recent)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn edge_slots_follow_main_sort_and_search_reaches_overflow() {
-        let mut storage = Storage {
-            connection: Connection::open_in_memory().unwrap(),
-        };
-        storage.migrate().unwrap();
+        let storage = Storage::open(Path::new(":memory:")).unwrap();
         let notes: Vec<_> = ["Z", "B", "A", "D", "C", "E", "Archived", "Deleted"]
             .into_iter()
             .map(|title| storage.create_note(title, "Text", NoteColor::Blue).unwrap())
@@ -445,10 +490,7 @@ mod tests {
 
     #[test]
     fn undo_delete_restores_the_previous_collection_and_pin() {
-        let mut storage = Storage {
-            connection: Connection::open_in_memory().unwrap(),
-        };
-        storage.migrate().unwrap();
+        let storage = Storage::open(Path::new(":memory:")).unwrap();
         for archived in [false, true] {
             let note = storage
                 .create_note("Keep", "Content", NoteColor::Green)
@@ -793,9 +835,7 @@ mod tests {
 
     #[test]
     fn search_separates_active_archived_and_deleted_notes_and_restore_moves_one_back() {
-        let connection = Connection::open_in_memory().expect("database should open");
-        let mut storage = Storage { connection };
-        storage.migrate().expect("migration should run");
+        let storage = Storage::open(Path::new(":memory:")).expect("database should open");
 
         let active = storage
             .create_note("Groceries", "Buy ginger", NoteColor::Green)
