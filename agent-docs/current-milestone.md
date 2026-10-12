@@ -4,13 +4,15 @@
 
 ## October 12 footer controls pass
 
-Prompt 2 of [the redo plan](stickies-redo-plan.md) replaces both old tool presentations with the specified reserved footer, separate Color/Text popovers, flat More menus and selection-only B/I/U/S bubble. Individual More reuses list/pattern/pop-out handlers and the shared Archive/Delete save guards. All Notes More has only Copy text, Archive/Restore and Delete. Archived controls are disabled except Copy and Restore. The note minimum remains 300 × 280; the visible resize glyph is removed while its corner-drag input remains.
+Prompt 2 of [the redo plan](stickies-redo-plan.md) replaces both old tool presentations with the specified reserved footer, separate Color/Text popovers, flat More menus and selection-only B/I/U/S bubble. Individual More reuses list/pattern/pop-out handlers and the shared Archive/Delete save guards. All Notes More has only Copy text, Archive/Restore and Delete. Archived controls are disabled except Copy and Restore. The note minimum remains 300 × 280; its corner-drag input remains unchanged.
 
 Owner clarification restores Ctrl+B/I/U and the Ctrl+Y redo alias. Settings Reposition now has a visible label. Formatting encoding and stored per-note overrides are unchanged.
 
 Owner-approved individual deletion feedback uses the existing strip surface, beside its current position and clamped to the screen. Only the latest "Note deleted" / Undo toast remains, for six seconds. Its bounded input region leaves the rest of that surface click-through. It uses docked visibility policy and the existing 120 ms motion helper, with no fade under reduced motion. Archive has no toast; All Notes keeps its existing toast. No additional layer surface or config key is added.
 
 Verification passed: 35 non-display tests, all 17 native GTK tests in an isolated Sway 125% Wayland output, and all three release shutdown probes. Formatting, strict Clippy with existing GTK deprecations allowed, the locked offline release build and diff checks passed. The release build reports 24 GTK deprecation warnings. Both editors have five-state captures in every theme, with additional minimum-size, edge Undo and labeled Reposition captures in `/tmp/stickies-controls-check/review.md`. No requested control was omitted; the 300 × 280 minimum retained usable body space in every theme. User review is required before further UI work. Earlier controls records below describe superseded stages.
+
+The subsequent owner-approved polish places the selection bubble below when it cannot fit above without covering the title. It restores the subtle corner grip only on note hover, inside the unchanged drag area. Resting footer opacity is raised from 55% to 65% in both editors; hover and focus stay at full opacity. Formatting and the locked offline compile passed. Tests and native app sessions were not authorized for these follow-ups and were not run; the preceding captures and test results describe the footer pass before this polish.
 
 ## October 12 removal-only controls pass
 

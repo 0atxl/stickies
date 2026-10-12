@@ -825,6 +825,7 @@ pub fn build_window(
     let selection = crate::text_editing::SelectionTools::new(
         &body,
         &sheet,
+        &title,
         move || {
             getter
                 .borrow()

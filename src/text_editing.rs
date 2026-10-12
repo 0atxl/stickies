@@ -160,6 +160,7 @@ impl SelectionTools {
     pub fn new(
         view: &gtk::TextView,
         host: &gtk::Overlay,
+        title: &gtk::Entry,
         session: impl Fn() -> Option<Rc<NoteSession>> + 'static,
         footer: &[gtk::Popover],
     ) -> Self {
@@ -194,15 +195,17 @@ impl SelectionTools {
         popover.set_child(Some(&row));
         let weak_view = view.downgrade();
         let weak_host = host.downgrade();
+        let weak_title = title.downgrade();
         let weak_popup = popover.downgrade();
         let panels: Vec<_> = footer.iter().map(|p| p.downgrade()).collect();
         let dismissed = Rc::new(std::cell::Cell::new(false));
         let suppressed = dismissed.clone();
         let update: Rc<dyn Fn()> = Rc::new(move || {
-            let (Some(view), Some(popup), Some(host)) = (
+            let (Some(view), Some(popup), Some(host), Some(title)) = (
                 weak_view.upgrade(),
                 weak_popup.upgrade(),
                 weak_host.upgrade(),
+                weak_title.upgrade(),
             ) else {
                 return;
             };
@@ -220,7 +223,7 @@ impl SelectionTools {
                 popup.popdown();
                 return;
             }
-            let (start, _) = selection.unwrap();
+            let (start, mut end) = selection.unwrap();
             let rect = view.iter_location(&start);
             let visible = view.visible_rect();
             let (x, y) = view.buffer_to_window_coords(
@@ -235,12 +238,47 @@ impl SelectionTools {
             else {
                 return;
             };
-            let (x, y) = (point.x().round() as i32, point.y().round() as i32);
+            let Some(title_bounds) = title.compute_bounds(&host) else {
+                return;
+            };
+            let popup_height = popup
+                .first_child()
+                .map_or(0, |contents| {
+                    contents.measure(gtk::Orientation::Vertical, -1).1
+                })
+                .max(popup.height());
+            let below =
+                point.y() - (popup_height as f32) < title_bounds.y() + title_bounds.height() + 8.;
+            let mut anchor = point;
+            let mut height = rect.height();
+            if below {
+                // The selection end is exclusive; anchor below its last selected line.
+                end.backward_char();
+                let last = view.iter_location(&end);
+                let (_, y) = view.buffer_to_window_coords(
+                    gtk::TextWindowType::Widget,
+                    rect.x(),
+                    last.y()
+                        .clamp(visible.y(), visible.y() + visible.height().max(1) - 1),
+                );
+                if let Some(point) =
+                    view.compute_point(&host, &gtk::graphene::Point::new(x as f32, y as f32))
+                {
+                    anchor = point;
+                    height = last.height();
+                }
+            }
+            popup.set_position(if below {
+                gtk::PositionType::Bottom
+            } else {
+                gtk::PositionType::Top
+            });
+            let (x, y) = (anchor.x().round() as i32, anchor.y().round() as i32);
             popup.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
                 x,
                 y,
                 rect.width().max(1),
-                rect.height().max(1),
+                height.max(1),
             )));
             if !popup.is_visible() {
                 popup.popup();

@@ -122,7 +122,7 @@ impl Editor {
         content.append(&controls.root);
         sheet.add_overlay(&content);
         sheet.set_measure_overlay(&content, true);
-        // Transparent native resize input, without an extra writing-area control.
+        // Keep the native resize input unchanged; its grip is decorative.
         let resize = gtk::Box::new(gtk::Orientation::Vertical, 0);
         resize.set_size_request(16, 16);
         resize.set_margin_end(2);
@@ -130,11 +130,43 @@ impl Editor {
         resize.set_halign(gtk::Align::End);
         resize.set_valign(gtk::Align::End);
         resize.set_cursor_from_name(Some("se-resize"));
+        let mark = gtk::DrawingArea::new();
+        mark.set_size_request(16, 16);
+        mark.set_can_target(false);
+        mark.add_css_class("note-resize-grip");
+        mark.set_draw_func(|area, cr, w, h| {
+            let color = area.color();
+            cr.set_source_rgba(
+                color.red().into(),
+                color.green().into(),
+                color.blue().into(),
+                1.,
+            );
+            if let Some(corner) = area.parent() {
+                if corner.halign() == gtk::Align::Start {
+                    cr.translate(f64::from(w), 0.);
+                    cr.scale(-1., 1.);
+                }
+                if corner.valign() == gtk::Align::Start {
+                    cr.translate(0., f64::from(h));
+                    cr.scale(1., -1.);
+                }
+            }
+            cr.set_line_width(1.4);
+            cr.set_line_cap(gtk::cairo::LineCap::Round);
+            for inset in [3., 8.] {
+                cr.move_to(inset, 13.);
+                cr.line_to(13., inset);
+            }
+            let _ = cr.stroke();
+        });
+        resize.append(&mark);
         sheet.add_overlay(&resize);
         let weak_session = Rc::downgrade(&session);
         let selection = crate::text_editing::SelectionTools::new(
             &body,
             &root,
+            &title,
             move || weak_session.upgrade(),
             &controls.popovers(),
         );
@@ -404,6 +436,9 @@ impl Editor {
             "se-resize"
         }));
         self.resize.queue_draw();
+        if let Some(mark) = self.resize.first_child() {
+            mark.queue_draw();
+        }
     }
     pub fn flush(&self) -> bool {
         self.session.flush()

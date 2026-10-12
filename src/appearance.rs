@@ -171,6 +171,8 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .individual .icon-control {{ border-radius: 8px; }}
         .individual .editor-title {{ font-size: 23px; }}
         .individual.minimal .editor-title {{ font-size: 20px; font-weight: 600; }}
+        .individual .note-resize-grip {{ color: var(--note-ink); opacity: 0; }}
+        .individual:hover .note-resize-grip {{ opacity: .3; }}
         .individual .editor-body, .individual .editor-body text {{ font-size: 21px; }}
         .note-controls .text-controls {{ border: 1px solid var(--rail-line); border-radius: 8px; }}
         .note-controls .text-controls button {{ min-width: 0; min-height: 24px; padding: 3px 6px; border: 0; border-radius: 0; background: transparent; box-shadow: none; font-family: Inter, sans-serif; font-size: 12px; font-weight: 400; }}
@@ -216,7 +218,7 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .individual.minimal-dark .inline-check check,
         .management.minimal-dark .inline-check check {{ min-width: 14px; min-height: 14px; padding: 0; margin: 0; -gtk-icon-size: 14px; border: 1px solid currentColor; border-radius: 3px; }}
         .note-footer {{ font-family: Inter, sans-serif; font-size: 13px; border-top: 1px solid alpha(currentColor, .08); padding-top: 4px; }}
-        .note-footer button {{ min-width: 24px; min-height: 24px; padding: 4px; border: none; border-radius: 7px; background: transparent; box-shadow: none; color: inherit; opacity: .55; }}
+        .note-footer button {{ min-width: 24px; min-height: 24px; padding: 4px; border: none; border-radius: 7px; background: transparent; box-shadow: none; color: inherit; opacity: .65; }}
         .note-footer menubutton {{ padding: 0; }}
         .note-footer:hover button, .note-footer button:focus-visible, .note-footer menubutton:focus-within > button {{ opacity: 1; }}
         .note-footer button:hover, .note-footer button:checked {{ background: alpha(currentColor, .09); }}
