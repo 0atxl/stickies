@@ -123,8 +123,8 @@ impl PositionControls {
         section(&root, "Screen edge", &edges.0);
         section(&root, "Position", &presets.0);
 
-        let move_button = gtk::Button::from_icon_name("transform-move-symbolic");
-        move_button.set_tooltip_text(Some("Move strip"));
+        let move_button = gtk::Button::with_label("Reposition");
+        move_button.set_tooltip_text(Some("Reposition"));
         root.append(&move_button);
         let error = gtk::Label::new(None);
         error.set_wrap(true);

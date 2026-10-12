@@ -25,11 +25,15 @@ New databases start empty. Use `+` at the edge to create your first note. Existi
 
 Font choices are Virgil, Inter, JetBrains Mono and Kalam. Existing theme fonts remain the defaults.
 
-All Notes tools reserve space beside the sheet, or below it in narrow windows. The edge always uses stacked tabs and a bar marker. Title tooltips are removed; the planned hover preview is not implemented yet.
+Individual notes have a reserved footer with Color, Text, Checklist, Always open and More. All Notes adds ordering Pin and Pop out, using the order Color, Text, Checklist, Pin, Pop out, More. Color opens only the 16-color grid. Text opens S/M/L and Regular/Bold. The old header tools launcher and inline tools panel are removed.
 
-Ctrl+Z and Ctrl+Shift+Z undo and redo while editing the body. Existing bold, italic, underline and strikethrough ranges remain stored separately from the plain text and survive reopening. Their UI and shortcuts are temporarily unavailable pending the selection bubble. Search inside a note is removed. Copy text remains plain text.
+Individual More contains Bullet list, Numbered list, the inline Default/Plain/Dots/Grid/Ruled pattern choices, Copy text, Archive and Delete. Docked notes also offer Open away from edge. All Notes More contains Copy text, Archive/Restore and Delete only. Archived preview controls are disabled except Copy and Restore. Checklist toggles checklist mode on the current line; the embedded checkbox changes completion.
 
-The individual nested More menu is temporarily removed. Bullet list, Numbered list, Pattern override, Copy text and docked Open away from edge are unavailable there until the flat menus arrive. Their underlying editing and pop-out handlers and stored per-note styles remain. All Notes tools and actions are unchanged apart from removal of the editing/search bar.
+Selecting editable body text opens a floating Bold/Italic/Underline/Strikethrough bubble. Ctrl+B, Ctrl+I and Ctrl+U use the same formatting handler. Ctrl+Z undoes; Ctrl+Shift+Z and Ctrl+Y redo. Formatting remains separate from the plain body and survives reopening. Copy text is plain text. Search inside a note remains removed.
+
+Archive and Delete first save the shared note. A failed save retains its editor. Archive closes individual views without a toast. Delete closes them and shows one replaceable six-second "Note deleted" / Undo toast beside the current strip position, on the existing strip surface. The toast uses the docked-note Overlay/DND policy, accepts input only within its own bounds and fades over 120 ms unless motion is reduced. Undo restores the previous collection and pin state. All Notes keeps its existing deletion toast.
+
+The edge always uses stacked tabs and a bar marker. Title tooltips are removed; hover peek cards are not implemented yet.
 
 ## Remaining work
 

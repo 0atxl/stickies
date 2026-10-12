@@ -182,7 +182,6 @@ impl NoteSession {
         );
         self.schedule_save();
     }
-    #[cfg(test)]
     pub fn toggle_mark(self: &Rc<Self>, mark: crate::text_editing::Mark) {
         let Some((start, end)) = self.body.selection_bounds() else {
             return;
@@ -729,8 +728,13 @@ mod tests {
         swatch(first.root.upcast_ref(), "Large text")
             .unwrap()
             .emit_clicked();
-        swatch(first.root.upcast_ref(), "Bold text")
+        first
+            .controls
+            .weights
+            .iter()
+            .find(|(_, weight)| *weight == crate::config::NoteTextWeight::Bold)
             .unwrap()
+            .0
             .emit_clicked();
         let text_style = session.style();
         assert_eq!(text_style.text_size, crate::config::NoteTextSize::Large);
@@ -742,8 +746,13 @@ mod tests {
                 .is_active()
         );
         assert!(
-            swatch(second.root.upcast_ref(), "Bold text")
+            second
+                .controls
+                .weights
+                .iter()
+                .find(|(_, weight)| { *weight == crate::config::NoteTextWeight::Bold })
                 .unwrap()
+                .0
                 .is_active()
         );
         assert!(
@@ -752,8 +761,13 @@ mod tests {
                 .is_active()
         );
         assert!(
-            !swatch(second.root.upcast_ref(), "Regular text")
+            !second
+                .controls
+                .weights
+                .iter()
+                .find(|(_, weight)| { *weight == crate::config::NoteTextWeight::Regular })
                 .unwrap()
+                .0
                 .is_active()
         );
 

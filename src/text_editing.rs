@@ -120,8 +120,7 @@ pub fn bind_history(view: &gtk::TextView, session: impl Fn() -> Option<Rc<NoteSe
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     let weak_view = view.downgrade();
     keys.connect_key_pressed(move |_, key, _, modifiers| {
-        if key.to_lower() != gtk::gdk::Key::z
-            || !modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK)
+        if !modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK)
             || !weak_view.upgrade().is_some_and(|view| view.is_editable())
         {
             return gtk::glib::Propagation::Proceed;
@@ -129,10 +128,213 @@ pub fn bind_history(view: &gtk::TextView, session: impl Fn() -> Option<Rc<NoteSe
         let Some(session) = session() else {
             return gtk::glib::Propagation::Proceed;
         };
-        session.undo(modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK));
+        match key.to_lower() {
+            gtk::gdk::Key::z => {
+                session.undo(modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK))
+            }
+            gtk::gdk::Key::y => session.undo(true),
+            gtk::gdk::Key::b => session.toggle_mark(Mark::Bold),
+            gtk::gdk::Key::i => session.toggle_mark(Mark::Italic),
+            gtk::gdk::Key::u => session.toggle_mark(Mark::Underline),
+            _ => return gtk::glib::Propagation::Proceed,
+        }
         gtk::glib::Propagation::Stop
     });
     view.add_controller(keys);
+}
+
+pub fn copy_text(body: &gtk::TextView) {
+    let buffer = body.buffer();
+    let (start, end) = buffer.bounds();
+    body.clipboard().set_text(&buffer.text(&start, &end, true));
+}
+
+/// A nonmodal popover follows the body's selection and releases old buffer signals.
+pub struct SelectionTools {
+    pub popover: gtk::Popover,
+    update: Rc<dyn Fn()>,
+    dismissed: Rc<std::cell::Cell<bool>>,
+    host: gtk::glib::WeakRef<gtk::Overlay>,
+}
+impl SelectionTools {
+    pub fn new(
+        view: &gtk::TextView,
+        host: &gtk::Overlay,
+        session: impl Fn() -> Option<Rc<NoteSession>> + 'static,
+        footer: &[gtk::Popover],
+    ) -> Self {
+        let session: Rc<dyn Fn() -> Option<Rc<NoteSession>>> = Rc::new(session);
+        let popover = gtk::Popover::new();
+        popover.add_css_class("selection-tools");
+        popover.set_autohide(false);
+        popover.set_has_arrow(false);
+        popover.set_position(gtk::PositionType::Top);
+        popover.set_halign(gtk::Align::Start);
+        popover.set_valign(gtk::Align::Start);
+        host.add_overlay(&popover);
+        host.set_measure_overlay(&popover, false);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        for (mark, label, tooltip) in [
+            (Mark::Bold, "B", "Bold"),
+            (Mark::Italic, "I", "Italic"),
+            (Mark::Underline, "U", "Underline"),
+            (Mark::Strike, "S", "Strikethrough"),
+        ] {
+            let button = gtk::Button::with_label(label);
+            button.set_tooltip_text(Some(tooltip));
+            button.set_focus_on_click(false);
+            let session = session.clone();
+            button.connect_clicked(move |_| {
+                if let Some(session) = session() {
+                    session.toggle_mark(mark);
+                }
+            });
+            row.append(&button);
+        }
+        popover.set_child(Some(&row));
+        let weak_view = view.downgrade();
+        let weak_host = host.downgrade();
+        let weak_popup = popover.downgrade();
+        let panels: Vec<_> = footer.iter().map(|p| p.downgrade()).collect();
+        let dismissed = Rc::new(std::cell::Cell::new(false));
+        let suppressed = dismissed.clone();
+        let update: Rc<dyn Fn()> = Rc::new(move || {
+            let (Some(view), Some(popup), Some(host)) = (
+                weak_view.upgrade(),
+                weak_popup.upgrade(),
+                weak_host.upgrade(),
+            ) else {
+                return;
+            };
+            let selection = view.buffer().selection_bounds();
+            if suppressed.get()
+                || (!view.has_focus()
+                    && !popup.state_flags().contains(gtk::StateFlags::FOCUS_WITHIN))
+                || !view.is_mapped()
+                || !view.is_editable()
+                || selection.is_none()
+                || panels
+                    .iter()
+                    .any(|p| p.upgrade().is_some_and(|p| p.is_visible()))
+            {
+                popup.popdown();
+                return;
+            }
+            let (start, _) = selection.unwrap();
+            let rect = view.iter_location(&start);
+            let visible = view.visible_rect();
+            let (x, y) = view.buffer_to_window_coords(
+                gtk::TextWindowType::Widget,
+                rect.x()
+                    .clamp(visible.x(), visible.x() + visible.width().max(1) - 1),
+                rect.y()
+                    .clamp(visible.y(), visible.y() + visible.height().max(1) - 1),
+            );
+            let Some(point) =
+                view.compute_point(&host, &gtk::graphene::Point::new(x as f32, y as f32))
+            else {
+                return;
+            };
+            let (x, y) = (point.x().round() as i32, point.y().round() as i32);
+            popup.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
+                x,
+                y,
+                rect.width().max(1),
+                rect.height().max(1),
+            )));
+            if !popup.is_visible() {
+                popup.popup();
+            }
+        });
+        let handler = Rc::new(std::cell::RefCell::new(
+            None::<(gtk::TextBuffer, gtk::glib::SignalHandlerId)>,
+        ));
+        let bind = {
+            let handler = handler.clone();
+            let update = update.clone();
+            let dismissed = dismissed.clone();
+            move |view: &gtk::TextView| {
+                if let Some((buffer, id)) = handler.borrow_mut().take() {
+                    buffer.disconnect(id);
+                }
+                let buffer = view.buffer();
+                let refresh = update.clone();
+                let dismissed = dismissed.clone();
+                let id = buffer.connect_mark_set(move |_, _, _| {
+                    dismissed.set(false);
+                    refresh();
+                });
+                handler.replace(Some((buffer, id)));
+                update();
+            }
+        };
+        bind(view);
+        view.connect_buffer_notify(move |view| bind(view));
+        let refresh = update.clone();
+        view.connect_map(move |_| refresh());
+        let weak = popover.downgrade();
+        view.connect_unmap(move |_| {
+            if let Some(p) = weak.upgrade() {
+                p.popdown();
+            }
+        });
+        let refresh = update.clone();
+        view.connect_editable_notify(move |_| refresh());
+        let refresh = update.clone();
+        view.connect_has_focus_notify(move |_| refresh());
+
+        for adjustment in [view.hadjustment(), view.vadjustment()]
+            .into_iter()
+            .flatten()
+        {
+            let refresh = update.clone();
+            adjustment.connect_value_changed(move |_| refresh());
+        }
+        for panel in footer {
+            let refresh = update.clone();
+            panel.connect_visible_notify(move |_| refresh());
+        }
+        Self {
+            popover,
+            update,
+            dismissed,
+            host: host.downgrade(),
+        }
+    }
+    pub fn refresh(&self) {
+        (self.update)();
+    }
+    pub fn dismiss(&self) -> bool {
+        let visible = self.popover.is_visible();
+        self.dismissed.set(true);
+        self.popover.popdown();
+        visible
+    }
+}
+impl Drop for SelectionTools {
+    fn drop(&mut self) {
+        self.popover.set_visible(false);
+        if let Some(host) = self.host.upgrade()
+            && self.popover.parent().is_some()
+        {
+            host.remove_overlay(&self.popover);
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn capture_native(name: &str) {
+    if let Ok(path) = std::env::var("STICKIES_NATIVE_CAPTURES") {
+        let path = std::path::Path::new(&path);
+        std::fs::create_dir_all(path).unwrap();
+        assert!(
+            std::process::Command::new("grim")
+                .arg(path.join(format!("{name}.png")))
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
 }
 
 #[cfg(test)]
@@ -176,16 +378,7 @@ mod tests {
             mark: Mark::Underline,
         }];
         assert_eq!(spans(&session.body), expected);
-        for removed in [
-            gtk::gdk::Key::b,
-            gtk::gdk::Key::i,
-            gtk::gdk::Key::u,
-            gtk::gdk::Key::f,
-            gtk::gdk::Key::y,
-        ] {
-            assert!(!key(removed, gtk::gdk::ModifierType::CONTROL_MASK));
-            assert_eq!(spans(&session.body), expected);
-        }
+        assert!(!key(gtk::gdk::Key::f, gtk::gdk::ModifierType::CONTROL_MASK));
 
         session.body.insert(&mut iter(&session.body, 8), "é");
         assert_eq!(spans(&session.body)[0].end, 11);
@@ -220,6 +413,19 @@ mod tests {
         db.execute_batch("DROP TRIGGER reject;").unwrap();
         assert!(session.flush());
         assert!(storage.load_formatting(id).unwrap().is_empty());
+        session.body.set_text("Keyboard formatting");
+        session
+            .body
+            .select_range(&iter(&session.body, 0), &iter(&session.body, 8));
+        for key_name in [gtk::gdk::Key::b, gtk::gdk::Key::i, gtk::gdk::Key::u] {
+            assert!(key(key_name, gtk::gdk::ModifierType::CONTROL_MASK));
+        }
+        assert_eq!(spans(&session.body).len(), 3);
+        assert!(key(gtk::gdk::Key::z, gtk::gdk::ModifierType::CONTROL_MASK));
+        assert_eq!(spans(&session.body).len(), 2);
+        assert!(key(gtk::gdk::Key::y, gtk::gdk::ModifierType::CONTROL_MASK));
+        assert_eq!(spans(&session.body).len(), 3);
+        assert!(session.flush());
         drop(db);
         drop(reopened);
         drop(view);

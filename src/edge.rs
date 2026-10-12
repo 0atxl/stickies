@@ -291,6 +291,13 @@ pub(super) struct Strip {
     pub(super) pointer_origin: Cell<Option<i32>>,
     pub(super) docked: RefCell<Option<Rc<editor::Editor>>>,
     pub(super) docked_offset: Cell<Option<(ScreenEdge, i32)>>,
+    delete_toast: gtk::Box,
+    undo_delete: gtk::Button,
+    toast_note: Cell<Option<NoteId>>,
+    toast_bounds: Cell<(i32, i32, i32, i32)>,
+    toast_timeout: RefCell<Option<glib::SourceId>>,
+    toast_motion: motion::Motion,
+    toast_generation: Cell<u64>,
     pub(super) cancel_reposition: gtk::Button,
     pub(super) done_reposition: gtk::Button,
     state: Cell<EdgeState>,
@@ -414,6 +421,16 @@ impl Strip {
         marker.set_can_target(false);
         strip_root.add_overlay(&marker);
         strip_root.add_overlay(&tabs);
+        let delete_toast = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        delete_toast.add_css_class("edge-delete-toast");
+        delete_toast.set_halign(gtk::Align::Start);
+        delete_toast.set_valign(gtk::Align::Start);
+        delete_toast.append(&gtk::Label::new(Some("Note deleted")));
+        let undo_delete = gtk::Button::with_label("Undo");
+        delete_toast.append(&undo_delete);
+        delete_toast.set_visible(false);
+        delete_toast.set_opacity(0.);
+        strip_root.add_overlay(&delete_toast);
         let pointer = gtk::DrawingArea::new();
         pointer.set_can_target(false);
         pointer.set_hexpand(true);
@@ -445,6 +462,13 @@ impl Strip {
             pointer_origin: Cell::new(None),
             docked: RefCell::new(None),
             docked_offset: Cell::new(None),
+            delete_toast,
+            undo_delete,
+            toast_note: Cell::new(None),
+            toast_bounds: Cell::new((0, 0, 0, 0)),
+            toast_timeout: RefCell::new(None),
+            toast_motion: motion::Motion::new(0.),
+            toast_generation: Cell::new(0),
             cancel_reposition,
             done_reposition,
             state: Cell::new(EdgeState::Dormant),
@@ -503,7 +527,12 @@ impl Strip {
         self.tabs.set_sensitive(effects.panel != Some("reposition"));
         self.strip_root
             .set_cursor_from_name((effects.panel == Some("reposition")).then_some("grab"));
-        self.strip_window.set_layer(effects.strip_layer);
+        self.strip_window
+            .set_layer(if self.toast_note.get().is_some() {
+                Layer::Overlay
+            } else {
+                effects.strip_layer
+            });
         self.window.set_layer(effects.window_layer);
         self.strip_window.set_keyboard_mode(effects.strip_keyboard);
         self.window.set_keyboard_mode(effects.window_keyboard);
@@ -1017,6 +1046,21 @@ impl Ui {
         });
     }
     pub(super) fn connect_edge(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        self.edge.undo_delete.connect_clicked(move |_| {
+            if let Some(ui) = weak.upgrade()
+                && let Some(id) = ui.edge.toast_note.get()
+            {
+                match ui.storage.undo_delete(id) {
+                    Ok(()) => {
+                        ui.finish_change(id, crate::manager::ManagerChange::Restore);
+                        ui.hide_delete_toast();
+                    }
+                    Err(error) => ui.error(&format!("Could not undo deletion: {error}")),
+                }
+            }
+        });
+
         if let Some(settings) = gtk::Settings::default() {
             let weak = Rc::downgrade(self);
             settings.connect_gtk_enable_animations_notify(move |settings| {
@@ -1120,6 +1164,7 @@ impl Ui {
                 motion.connect_enter(move |_, _, _| {
                     if let Some(ui) = weak.upgrade()
                         && ui.config.borrow().edge_hover_enabled
+                        && ui.edge.toast_note.get().is_none()
                     {
                         ui.schedule_reveal();
                     }
@@ -1294,7 +1339,16 @@ impl Ui {
                 .strip_window
                 .set_keyboard_mode(effects.strip_keyboard),
             EdgeEvent::Visibility => {
-                self.edge.strip_window.set_visible(effects.strip_visible);
+                self.edge
+                    .strip_window
+                    .set_visible(effects.strip_visible || self.edge.toast_note.get().is_some());
+                self.edge
+                    .strip_window
+                    .set_layer(if self.edge.toast_note.get().is_some() {
+                        Layer::Overlay
+                    } else {
+                        effects.strip_layer
+                    });
                 self.edge.window.set_visible(effects.window_visible);
             }
             _ => self.edge.apply(effects),
@@ -2169,6 +2223,20 @@ impl Ui {
                 search.remove_css_class("edge-active");
             }
         }
+        if self.edge.toast_note.get().is_some() {
+            let (width, height) = measure(self.edge.delete_toast.upcast_ref());
+            let (sx, sy, sw, sh) = self.edge.strip_bounds.get();
+            let (x, y) = match config.edge {
+                ScreenEdge::Left => (sx + sw + 8, sy + (sh - height) / 2),
+                ScreenEdge::Right => (sx - width - 8, sy + (sh - height) / 2),
+                ScreenEdge::Top => (sx + (sw - width) / 2, sy + sh + 8),
+                ScreenEdge::Bottom => (sx + (sw - width) / 2, sy - height - 8),
+            };
+            let x = x.clamp(0, (screen_width - width).max(0));
+            let y = y.clamp(0, (screen_height - height).max(0));
+            position(self.edge.delete_toast.upcast_ref(), x, y);
+            self.edge.toast_bounds.set((x, y, width, height));
+        }
         self.edge.apply(effects);
         drop(docked);
         drop(config);
@@ -2178,6 +2246,77 @@ impl Ui {
         if let Some(state) = self.edge.pending_motion.take() {
             self.animate_transition(state);
         }
+    }
+    pub(super) fn show_delete_toast(self: &Rc<Self>, id: NoteId) {
+        if let Some(timer) = self.edge.toast_timeout.borrow_mut().take() {
+            timer.remove();
+        }
+        let generation = self.edge.toast_generation.get().wrapping_add(1);
+        self.edge.toast_generation.set(generation);
+        self.edge.toast_note.set(Some(id));
+        self.edge.delete_toast.set_visible(true);
+        self.edge
+            .apply(self.edge.effects(&self.config.borrow(), self.dnd.get()));
+        self.transition_edge(EdgeEvent::Visibility);
+        self.place_edge();
+        let weak = Rc::downgrade(self);
+        self.edge.toast_motion.animate(
+            &self.edge.strip_window,
+            1.,
+            (motion::PANEL_MS, 0),
+            self.motion_enabled(),
+            move |value| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.edge.delete_toast.set_opacity(value);
+                }
+            },
+            || {},
+        );
+        let weak = Rc::downgrade(self);
+        self.edge
+            .toast_timeout
+            .replace(Some(glib::timeout_add_local_once(
+                Duration::from_secs(6),
+                move || {
+                    if let Some(ui) = weak.upgrade()
+                        && ui.edge.toast_generation.get() == generation
+                    {
+                        ui.edge.toast_timeout.borrow_mut().take();
+                        ui.hide_delete_toast();
+                    }
+                },
+            )));
+    }
+    fn hide_delete_toast(self: &Rc<Self>) {
+        if let Some(timer) = self.edge.toast_timeout.borrow_mut().take() {
+            timer.remove();
+        }
+        let generation = self.edge.toast_generation.get();
+        let weak = Rc::downgrade(self);
+        let done = weak.clone();
+        self.edge.toast_motion.animate(
+            &self.edge.strip_window,
+            0.,
+            (motion::PANEL_MS, 0),
+            self.motion_enabled(),
+            move |value| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.edge.delete_toast.set_opacity(value);
+                }
+            },
+            move || {
+                if let Some(ui) = done.upgrade()
+                    && ui.edge.toast_generation.get() == generation
+                {
+                    ui.edge.toast_note.set(None);
+                    ui.edge.delete_toast.set_visible(false);
+                    ui.edge
+                        .apply(ui.edge.effects(&ui.config.borrow(), ui.dnd.get()));
+                    ui.transition_edge(EdgeEvent::Visibility);
+                    ui.place_edge();
+                }
+            },
+        );
     }
     pub(super) fn note_limits(&self) -> (i32, i32) {
         gtk::gdk::Display::default()
@@ -2201,6 +2340,10 @@ impl Ui {
         gesture.current_event()?.position()
     }
     fn strip_input_bounds(&self) -> (i32, i32, i32, i32) {
+        if self.edge.toast_note.get().is_some() {
+            return self.edge.toast_bounds.get();
+        }
+
         let (x, y, width, height) = self.edge.strip_bounds.get();
         let expanded = (self.edge.state().is_revealed()
             || self.edge.strip_phase.get() == StripPhase::Collapsing)
@@ -3233,6 +3376,206 @@ mod feedback_tests {
                 assert!(ui.close_docked());
             }
         }
+        ui.edge.window.close();
+        ui.edge.strip_window.close();
+    }
+    #[test]
+    #[ignore = "requires Wayland and disposable XDG directories"]
+    fn individual_collection_guards_and_edge_undo_lifetime() {
+        for key in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+            assert!(std::path::Path::new(&std::env::var(key).unwrap()).starts_with("/tmp"));
+        }
+        ui_assets::register().unwrap();
+        adw::init().unwrap();
+        Config {
+            reduced_motion: true,
+            ..Config::default()
+        }
+        .save(&config::config_path())
+        .unwrap();
+        let app = gtk::Application::builder()
+            .application_id("dev.stickies.EdgeUndoCheck")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let storage = crate::storage::Storage::open(&crate::storage::database_path()).unwrap();
+        let id = storage
+            .create_note("Keep me", "Original", NoteColor::Green)
+            .unwrap()
+            .id;
+        storage.set_note_pinned(id, true).unwrap();
+        let ui = crate::build(&app).unwrap();
+        let settle = |ms| {
+            let end = std::time::Instant::now() + Duration::from_millis(ms);
+            while std::time::Instant::now() < end {
+                while glib::MainContext::default().iteration(false) {}
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        ui.open_docked(id);
+        settle(200);
+        let editor = ui.edge.docked.borrow().clone().unwrap();
+        let db = rusqlite::Connection::open(crate::storage::database_path()).unwrap();
+        db.execute_batch("CREATE TRIGGER reject_note_save BEFORE UPDATE ON notes BEGIN SELECT RAISE(FAIL, 'save rejected'); END;").unwrap();
+        editor.body.buffer().set_text("Saved before archive");
+        editor.controls.archive.emit_clicked();
+        assert_eq!(ui.edge.state(), EdgeState::Docked(id));
+        assert!(!storage.is_archived(id).unwrap());
+        assert!(ui.edge.toast_note.get().is_none());
+        db.execute_batch("DROP TRIGGER reject_note_save;").unwrap();
+        editor.controls.archive.emit_clicked();
+        settle(200);
+        assert!(ui.edge.docked.borrow().is_none());
+        assert!(storage.is_archived(id).unwrap());
+        assert_eq!(
+            storage
+                .search_notes(
+                    crate::storage::NoteCollection::Archived,
+                    "",
+                    crate::storage::NoteSort::Recent
+                )
+                .unwrap()
+                .iter()
+                .find(|n| n.id == id)
+                .unwrap()
+                .body,
+            "Saved before archive"
+        );
+        assert!(ui.edge.toast_note.get().is_none());
+        storage.restore_note(id).unwrap();
+        ui.refresh();
+        ui.open_separate(id);
+        settle(200);
+        let separate = ui.separate.borrow().get(&id).unwrap().editor.clone();
+        separate.controls.delete.emit_clicked();
+        settle(200);
+        assert!(!ui.separate.borrow().contains_key(&id));
+        assert!(ui.manager.borrow().is_none());
+        assert_eq!(ui.edge.toast_note.get(), Some(id));
+        assert_eq!(ui.edge.delete_toast.opacity(), 1.);
+        assert!(!ui.edge.toast_motion.is_running());
+        assert_eq!(ui.edge.strip_window.layer(), Layer::Overlay);
+        ui.dnd.set(true);
+        ui.update_visibility();
+        assert!(ui.edge.strip_window.is_visible());
+        ui.edge.undo_delete.emit_clicked();
+        settle(100);
+        assert!(storage.load_note(id).unwrap().pinned);
+        assert!(!storage.is_archived(id).unwrap());
+        assert!(ui.edge.toast_note.get().is_none());
+        // The same storage path also preserves an archived note's previous collection.
+        storage.archive_note(id).unwrap();
+        crate::manager::change_collection(&storage, id, crate::manager::ManagerChange::Delete)
+            .unwrap();
+        ui.show_delete_toast(id);
+        ui.edge.undo_delete.emit_clicked();
+        assert!(storage.is_archived(id).unwrap());
+        assert!(
+            storage
+                .search_notes(
+                    crate::storage::NoteCollection::Archived,
+                    "",
+                    crate::storage::NoteSort::Recent
+                )
+                .unwrap()
+                .iter()
+                .find(|n| n.id == id)
+                .unwrap()
+                .pinned
+        );
+        let first = storage
+            .create_note("First", "Body", NoteColor::Blue)
+            .unwrap()
+            .id;
+        let second = storage
+            .create_note("Second", "Body", NoteColor::Pink)
+            .unwrap()
+            .id;
+        crate::manager::change_collection(&storage, first, crate::manager::ManagerChange::Delete)
+            .unwrap();
+        ui.show_delete_toast(first);
+        let old = glib::MainContext::default()
+            .find_source_by_id(ui.edge.toast_timeout.borrow().as_ref().unwrap())
+            .unwrap();
+        crate::manager::change_collection(&storage, second, crate::manager::ManagerChange::Delete)
+            .unwrap();
+        ui.show_delete_toast(second);
+        assert!(old.is_destroyed());
+        assert_eq!(ui.edge.toast_note.get(), Some(second));
+        assert_eq!(
+            app.windows().len(),
+            2,
+            "the toast must reuse the existing strip surface"
+        );
+        for edge in [
+            ScreenEdge::Left,
+            ScreenEdge::Right,
+            ScreenEdge::Top,
+            ScreenEdge::Bottom,
+        ] {
+            for offset in [0., 1.] {
+                ui.config.borrow_mut().edge = edge;
+                ui.config.borrow_mut().marker_offset = offset;
+                ui.edge.strip_offset.set(None);
+                ui.place_edge();
+                settle(50);
+                let (x, y, w, h) = ui.edge.toast_bounds.get();
+                let (sw, sh) = ui.note_limits();
+                assert!(w > 0 && h > 0 && x >= 0 && y >= 0 && x + w <= sw && y + h <= sh);
+                assert_eq!(
+                    ui.strip_input_bounds(),
+                    ui.edge.toast_bounds.get(),
+                    "only the toast accepts strip-surface input"
+                );
+            }
+        }
+        for (theme, appearance, name) in [
+            (config::Theme::Paper, config::Appearance::Light, "paper"),
+            (config::Theme::Playful, config::Appearance::Light, "playful"),
+            (
+                config::Theme::Minimal,
+                config::Appearance::Light,
+                "minimal-light",
+            ),
+            (
+                config::Theme::Minimal,
+                config::Appearance::Dark,
+                "minimal-dark",
+            ),
+        ] {
+            ui.config.borrow_mut().theme = theme;
+            ui.config.borrow_mut().appearance = appearance;
+            ui.place_edge();
+            settle(100);
+            crate::text_editing::capture_native(&format!("{name}-edge-undo"));
+        }
+        ui.show_delete_toast(second);
+        settle(5800);
+        assert_eq!(
+            ui.edge.toast_note.get(),
+            Some(second),
+            "toast must last six seconds"
+        );
+        settle(450);
+        assert!(ui.edge.toast_note.get().is_none());
+        assert!(!ui.edge.delete_toast.is_visible());
+        assert!(ui.edge.toast_timeout.borrow().is_none());
+        ui.dnd.set(false);
+        ui.update_visibility();
+        // An animated toast uses the existing 120ms helper; reduced motion above skipped it.
+        ui.config.borrow_mut().reduced_motion = false;
+        gtk::Settings::default()
+            .unwrap()
+            .set_gtk_enable_animations(true);
+        settle(100);
+        ui.show_delete_toast(second);
+        settle(45);
+        assert!(ui.edge.toast_motion.value() > 0. && ui.edge.toast_motion.value() < 1.);
+        settle(200);
+        assert_eq!(ui.edge.toast_motion.value(), 1.);
+        ui.hide_delete_toast();
+        settle(250);
+        assert!(ui.edge.toast_note.get().is_none());
         ui.edge.window.close();
         ui.edge.strip_window.close();
     }

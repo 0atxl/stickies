@@ -127,7 +127,6 @@
 
 .management.minimal .inline-title { font-size: 20px; font-weight: 600; }
 
-.management .main-note-tools { padding: 6px; }
 .management .note-controls { --note-ink: var(--ink); --rail-line: var(--hairline); --rail-selected: var(--selected); }
 .management .note-controls .text-controls { border: 1px solid var(--hairline); border-radius: 8px; }
 .management .note-controls .text-controls button { min-width: 0; padding: 3px 6px; border-radius: 0; }
@@ -140,7 +139,6 @@
 .management .note-controls .color-swatch { min-width: 22px; min-height: 22px; padding: 0; border-radius: 50%; border: 1px solid alpha(var(--ink), .18); }
 .management .note-controls .color-swatch:checked { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-.management .note-controls .type-label { font-size: 20px; }
 .management .note-controls .text-controls button:checked { box-shadow: inset 0 0 0 1px alpha(var(--focus), .35); }
 .management popover > contents { border-radius: 16px; }
 .management .search-field, .management searchentry { border-radius: 18px; }
@@ -168,14 +166,10 @@
 .management:not(.minimal):not(.playful) .editor-region { padding: 10px 18px 8px; }
 .management:not(.minimal):not(.playful) .inline-content { padding: 24px 24px 22px 32px; }
 .management:not(.minimal):not(.playful) .metadata { font-size: 10px; }
-.management:not(.minimal):not(.playful) .note-actions .icon-control { margin: 0 5px; }
-.management:not(.minimal):not(.playful) .main-note-tools { padding: 10px; }
 .management:not(.minimal):not(.playful) .note-controls .text-controls button { min-height: 26px; }
 
-.management:not(.minimal):not(.playful) .note-actions drawingarea { min-width: 22px; min-height: 22px; }
 
 .management .row-date { font-size: 10px; color: var(--muted); font-weight: 400; }
-.management:not(.minimal):not(.playful) .main-note-tools { background: #fffdf8; }
 
 .management:not(.minimal):not(.playful) .note-list { padding-top: 8px; }
 .management:not(.minimal):not(.playful) .list-column { border-top: 1px solid var(--hairline); }
@@ -205,9 +199,6 @@
 .management.playful .editor-region { padding: 10px 18px 8px; }
 .management.playful .inline-content { padding: 26px 26px 24px; }
 .management.playful .metadata { font-size: 10px; }
-.management.playful .note-actions .icon-control { margin: 0 5px; }
-.management.playful .note-actions drawingarea { min-width: 22px; min-height: 22px; }
-.management.playful .main-note-tools { padding: 10px; }
 .management.playful .note-controls .text-controls button:checked { box-shadow: inset 0 0 0 1px var(--focus); }
 
 /* Minimal Light review: white notes, restrained blue chrome and separate row dividers. */
@@ -237,9 +228,6 @@
 .management.minimal:not(.minimal-dark) .editor-region { padding: 10px 18px 8px; }
 .management.minimal:not(.minimal-dark) .inline-content { padding: 26px 26px 24px; }
 .management.minimal:not(.minimal-dark) .metadata { font-size: 10px; }
-.management.minimal:not(.minimal-dark) .note-actions .icon-control { margin: 0 5px; }
-.management.minimal:not(.minimal-dark) .note-actions drawingarea { min-width: 22px; min-height: 22px; }
-.management.minimal:not(.minimal-dark) .main-note-tools { padding: 10px; }
 .management.minimal:not(.minimal-dark) .note-controls .text-controls button:checked { box-shadow: inset 0 0 0 1px #8ebeff; }
 
 /* Minimal Dark review: charcoal notes and distinct selection, hover and focus states. */
@@ -269,9 +257,6 @@
 .management.minimal-dark .editor-region { padding: 10px 18px 8px; }
 .management.minimal-dark .inline-content { padding: 26px 26px 24px; }
 .management.minimal-dark .metadata { font-size: 10px; }
-.management.minimal-dark .note-actions .icon-control { margin: 0 5px; }
-.management.minimal-dark .note-actions drawingarea { min-width: 22px; min-height: 22px; }
-.management.minimal-dark .main-note-tools { padding: 10px; }
 .management.minimal-dark .note-controls .text-controls button:checked { box-shadow: inset 0 0 0 1px var(--focus); }
 
 .management.minimal-dark .collection-filters button.selected { background: var(--focus); color: #17212d; }
@@ -295,8 +280,7 @@
 .management .appearance-header { min-height: 24px; padding: 10px 12px; color: var(--ink); }
 .management .appearance-header label { font-size: 16px; font-weight: 600; }
 
-/* Keep both the sheet and the tools visible in the compact layout. */
-.management.management .inline-content.compact { padding: 10px 18px 12px 24px; }
-.management .main-note-tools { border-radius: 10px; }
-.management.management .main-note-tools.horizontal { padding: 6px; }
-.management .main-note-tools.horizontal .color-swatch { min-width: 16px; min-height: 16px; }
+
+.management { --rail-bg: var(--app-bg); --note-ink: var(--ink); --rail-line: var(--hairline); --rail-selected: var(--selected); }
+.management .note-footer { color: var(--ink); }
+.management .note-popover contents, .management .selection-tools contents { background: var(--rail-bg); color: var(--ink); }

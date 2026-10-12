@@ -244,3 +244,11 @@
   background: #88847d; border-radius: 1px; border: none; box-shadow: none;
 }
 .edge-window.edge-minimal-dark .edge-marker .marker-line { background: #ccc8c0; }
+
+/* The deletion toast shares the strip surface and the edge utility chrome. */
+.edge-window .edge-delete-toast { background: #F6EFDB; color: #2A2723; font-family: Inter, sans-serif; font-size: 13px; border: 1px solid alpha(#2A2723, .16); border-radius: 9px; padding: 6px 10px; box-shadow: 0 2px 4px alpha(black, .18); }
+.edge-window.edge-playful .edge-delete-toast { background: #ffffff; }
+.edge-window.edge-minimal .edge-delete-toast { background: #ffffff; color: #23262B; }
+.edge-window.edge-minimal-dark .edge-delete-toast { background: #22252C; color: #F0F0EE; border-color: alpha(#F0F0EE, .16); box-shadow: 0 2px 4px alpha(black, .35); }
+.edge-window .edge-delete-toast button { background: transparent; color: inherit; border: none; box-shadow: none; padding: 4px 6px; min-height: 22px; border-radius: 5px; font-size: 13px; }
+.edge-window .edge-delete-toast button:hover { background: alpha(currentColor, .1); }

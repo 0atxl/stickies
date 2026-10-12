@@ -2,6 +2,16 @@
 
 [SPEC.md](SPEC.md) is the current product truth derived from the code. [HISTORY.md](HISTORY.md) preserves the former milestone log unchanged. The active milestone remains final UI work and phase 5A/5B verification; [implementation.md](implementation.md) records later roadmap work.
 
+## October 12 footer controls pass
+
+Prompt 2 of [the redo plan](stickies-redo-plan.md) replaces both old tool presentations with the specified reserved footer, separate Color/Text popovers, flat More menus and selection-only B/I/U/S bubble. Individual More reuses list/pattern/pop-out handlers and the shared Archive/Delete save guards. All Notes More has only Copy text, Archive/Restore and Delete. Archived controls are disabled except Copy and Restore. The note minimum remains 300 × 280; the visible resize glyph is removed while its corner-drag input remains.
+
+Owner clarification restores Ctrl+B/I/U and the Ctrl+Y redo alias. Settings Reposition now has a visible label. Formatting encoding and stored per-note overrides are unchanged.
+
+Owner-approved individual deletion feedback uses the existing strip surface, beside its current position and clamped to the screen. Only the latest "Note deleted" / Undo toast remains, for six seconds. Its bounded input region leaves the rest of that surface click-through. It uses docked visibility policy and the existing 120 ms motion helper, with no fade under reduced motion. Archive has no toast; All Notes keeps its existing toast. No additional layer surface or config key is added.
+
+Verification passed: 35 non-display tests, all 17 native GTK tests in an isolated Sway 125% Wayland output, and all three release shutdown probes. Formatting, strict Clippy with existing GTK deprecations allowed, the locked offline release build and diff checks passed. The release build reports 24 GTK deprecation warnings. Both editors have five-state captures in every theme, with additional minimum-size, edge Undo and labeled Reposition captures in `/tmp/stickies-controls-check/review.md`. No requested control was omitted; the 300 × 280 minimum retained usable body space in every theme. User review is required before further UI work. Earlier controls records below describe superseded stages.
+
 ## October 12 removal-only controls pass
 
 Prompt 1 of [the redo plan](stickies-redo-plan.md) removes both body editing bars, Find in note, inline formatting access, the individual nested More menu, the five retired Settings choices and edge-tab tooltips. Stacked tabs and the bar marker are the only edge presentation. Old white-paper/tab-layout/marker-style keys are removed from valid configs on load. Fullscreen/DND keys remain file-only and are documented in README.

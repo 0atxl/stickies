@@ -1,8 +1,8 @@
 use crate::{
     app::{NoteColor, NoteId},
     appearance,
-    config::{Config, Paper, Theme},
-    note_controls::NoteControls,
+    config::{Config, Theme},
+    note_controls::{NoteControls, Surface},
     note_session::NoteSession,
     ui_assets,
 };
@@ -23,14 +23,11 @@ pub struct Editor {
     pub title: gtk::Entry,
     pub body: gtk::TextView,
     pub close: gtk::Button,
-    pub separate: gtk::Button,
+    pub separate: Option<gtk::Button>,
     pub keep: gtk::ToggleButton,
-    pub resize: gtk::Button,
-    toolbar: gtk::Popover,
-    tools_button: gtk::MenuButton,
+    pub resize: gtk::Box,
     docked: bool,
     docked_size: Cell<(i32, i32)>,
-    resize_edge: Rc<Cell<gtk::gdk::SurfaceEdge>>,
     syncing_style: Cell<bool>,
     session: Rc<NoteSession>,
     subscription: RefCell<Option<Rc<dyn Fn()>>>,
@@ -42,8 +39,8 @@ pub struct Editor {
     toast: adw::ToastOverlay,
     last_error: RefCell<Option<String>>,
     error_toast: RefCell<Option<adw::Toast>>,
-    pattern_choice: gtk::DropDown,
-    controls: NoteControls,
+    pub(crate) controls: NoteControls,
+    pub(crate) selection: crate::text_editing::SelectionTools,
     timeout: RefCell<Option<glib::SourceId>>,
     on_timeout: Box<dyn Fn()>,
     stopped: Cell<bool>,
@@ -82,9 +79,6 @@ impl Editor {
         title.set_width_chars(1);
         title.set_placeholder_text(Some("Untitled note"));
         title.set_buffer(&session.title);
-        let keep = appearance::toggle("view-pin-symbolic", "Always open");
-        keep.set_child(Some(&ui_assets::image("pin")));
-        keep.update_property(&[gtk::accessible::Property::Label("Always open")]);
         let close = ui_assets::icon("close", "Close note");
         header.append(&title);
         header.append(&close);
@@ -105,101 +99,45 @@ impl Editor {
             .vexpand(true)
             .child(&body)
             .build();
-        let checklist = appearance::icon("checkbox-checked-symbolic", "Checklist");
-        checklist.set_child(Some(&ui_assets::image("checklist")));
-        let bullet = appearance::icon("view-list-bullet-symbolic", "Bullet list");
-        let numbered = appearance::icon("view-list-ordered-symbolic", "Numbered list");
-        let separate = ui_assets::icon("popout", "Open away from edge");
-        let controls = NoteControls::new();
-        let paper_choice = gtk::DropDown::from_strings(&[
-            "Default pattern",
-            "Plain",
-            "Dots",
-            "Square grid",
-            "Ruled",
-        ]);
-        paper_choice.set_tooltip_text(Some("Canvas pattern"));
-        paper_choice.set_selected(style.paper.map_or(0, |paper| paper as u32 + 1));
-        let rail = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        rail.add_css_class("note-rail");
-        rail.set_width_request(120);
-        let collapse = ui_assets::icon("chevron", "Collapse note menu");
-        let rail_header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        rail_header.set_halign(gtk::Align::Center);
-        for button in [&collapse, keep.upcast_ref(), &checklist] {
-            rail_header.append(button);
-        }
-        rail.append(&rail_header);
-        rail.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        rail.append(&controls.root);
-        let toolbar = gtk::Popover::new();
-        toolbar.set_autohide(false);
-        toolbar.set_has_arrow(false);
-        toolbar.set_position(gtk::PositionType::Left);
-        toolbar.add_css_class("note-tools");
-        toolbar.set_child(Some(&rail));
+        let controls = NoteControls::new(if docked {
+            Surface::Docked
+        } else {
+            Surface::Detached
+        });
+        controls.bind_checklist(&body);
+        let keep = controls.pin.clone();
+        let checklist = controls.checklist.clone();
+        let bullet = controls.bullet.clone().unwrap();
+        let numbered = controls.numbered.clone().unwrap();
+        let separate = controls.separate.clone();
         let toast = adw::ToastOverlay::new();
         toast.set_child(Some(&sheet));
         root.set_child(Some(&toast));
-        let grip = gtk::MenuButton::new();
-        grip.set_direction(gtk::ArrowType::Left);
-        grip.add_css_class("icon-control");
-        grip.add_css_class("rail-grip");
-        grip.set_tooltip_text(Some("Open note tools"));
-        grip.set_child(Some(&ui_assets::image("more")));
-        grip.set_popover(Some(&toolbar));
-        header.prepend(&grip);
-        let panel = toolbar.downgrade();
-        collapse.connect_clicked(move |_| {
-            if let Some(panel) = panel.upgrade() {
-                panel.popdown();
-            }
-        });
         let window_handle = gtk::WindowHandle::new();
         window_handle.set_child(Some(&header));
         content.append(&window_handle);
         let weak_session = Rc::downgrade(&session);
         crate::text_editing::bind_history(&body, move || weak_session.upgrade());
         content.append(&scroll);
+        content.append(&controls.root);
         sheet.add_overlay(&content);
         sheet.set_measure_overlay(&content, true);
-        let resize = gtk::Button::new();
-        resize.add_css_class("note-resize");
-        resize.update_property(&[gtk::accessible::Property::Label("Resize note")]);
-        resize.set_margin_end(12);
-        resize.set_margin_bottom(12);
+        // Transparent native resize input, without an extra writing-area control.
+        let resize = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        resize.set_size_request(16, 16);
+        resize.set_margin_end(2);
+        resize.set_margin_bottom(2);
         resize.set_halign(gtk::Align::End);
         resize.set_valign(gtk::Align::End);
         resize.set_cursor_from_name(Some("se-resize"));
-        let resize_edge = Rc::new(Cell::new(gtk::gdk::SurfaceEdge::SouthEast));
-        let mark = gtk::DrawingArea::new();
-        mark.set_size_request(16, 16);
-        let corner = resize_edge.clone();
-        mark.set_draw_func(move |area, cr, w, h| {
-            let color = area.style_context().color();
-            cr.set_source_rgba(
-                color.red().into(),
-                color.green().into(),
-                color.blue().into(),
-                1.,
-            );
-            if corner.get() == gtk::gdk::SurfaceEdge::SouthWest {
-                cr.translate(f64::from(w), 0.);
-                cr.scale(-1., 1.);
-            } else if corner.get() == gtk::gdk::SurfaceEdge::NorthEast {
-                cr.translate(0., f64::from(h));
-                cr.scale(1., -1.);
-            }
-            cr.set_line_width(1.4);
-            cr.set_line_cap(gtk::cairo::LineCap::Round);
-            for inset in [3., 8.] {
-                cr.move_to(inset, 13.);
-                cr.line_to(13., inset);
-            }
-            let _ = cr.stroke();
-        });
-        resize.set_child(Some(&mark));
         sheet.add_overlay(&resize);
+        let weak_session = Rc::downgrade(&session);
+        let selection = crate::text_editing::SelectionTools::new(
+            &body,
+            &root,
+            move || weak_session.upgrade(),
+            &controls.popovers(),
+        );
         let font_provider = gtk::CssProvider::new();
         appearance::apply_note_font(&font_provider, &resolved.borrow(), &style);
         title
@@ -216,7 +154,6 @@ impl Editor {
             keep,
             resize,
             docked_size: Cell::new((WIDTH, HEIGHT)),
-            resize_edge,
             syncing_style: Cell::new(false),
             session: session.clone(),
             subscription: RefCell::new(None),
@@ -228,18 +165,20 @@ impl Editor {
             toast,
             last_error: RefCell::new(None),
             error_toast: RefCell::new(None),
-            toolbar,
-            tools_button: grip,
             docked,
-            pattern_choice: paper_choice.clone(),
+            selection,
             controls,
             timeout: RefCell::new(None),
             on_timeout: Box::new(on_timeout),
             stopped: Cell::new(false),
         });
         // Popovers handle Escape before the containing window receives it.
+        for panel in editor
+            .controls
+            .popovers()
+            .into_iter()
+            .chain(std::iter::once(editor.selection.popover.clone()))
         {
-            let panel = &editor.toolbar;
             let keys = gtk::EventControllerKey::new();
             keys.set_propagation_phase(gtk::PropagationPhase::Capture);
             let weak = Rc::downgrade(&editor);
@@ -285,20 +224,25 @@ impl Editor {
                 }
             });
         }
+        for (button, paper) in &editor.controls.patterns {
+            let paper = *paper;
+            let weak = Rc::downgrade(&editor);
+            button.connect_toggled(move |button| {
+                if let Some(editor) = weak.upgrade()
+                    && button.is_active()
+                    && !editor.syncing_style.get()
+                {
+                    let mut style = editor.session.style();
+                    style.paper = paper;
+                    editor.session.set_style(style);
+                    editor.activity();
+                }
+            });
+        }
         let weak = Rc::downgrade(&editor);
-        paper_choice.connect_selected_notify(move |choice| {
-            if let Some(editor) = weak.upgrade()
-                && !editor.syncing_style.get()
-            {
-                let mut style = editor.session.style();
-                style.paper = [
-                    None,
-                    Some(Paper::Plain),
-                    Some(Paper::Dots),
-                    Some(Paper::Grid),
-                    Some(Paper::Ruled),
-                ][choice.selected() as usize];
-                editor.session.set_style(style);
+        editor.controls.copy.connect_clicked(move |_| {
+            if let Some(editor) = weak.upgrade() {
+                crate::text_editing::copy_text(&editor.body);
             }
         });
         let weak = Rc::downgrade(&editor);
@@ -326,7 +270,15 @@ impl Editor {
                 }
             });
         }
-        for (button, prefix) in [(checklist, "- [ ] "), (bullet, "- "), (numbered, "1. ")] {
+        let weak = Rc::downgrade(&editor);
+        checklist.connect_clicked(move |_| {
+            if let Some(editor) = weak.upgrade() {
+                toggle_checklist(&editor.body);
+                editor.controls.sync_checklist(&editor.body);
+                editor.body.grab_focus();
+            }
+        });
+        for (button, prefix) in [(bullet, "- "), (numbered, "1. ")] {
             let weak = Rc::downgrade(&editor);
             button.connect_clicked(move |_| {
                 if let Some(e) = weak.upgrade() {
@@ -376,10 +328,10 @@ impl Editor {
             });
         }
         editor.root.add_controller(scrolling);
-        for target in [
-            editor.root.upcast_ref::<gtk::Widget>(),
-            editor.toolbar.upcast_ref(),
-        ] {
+        for target in std::iter::once(editor.root.clone().upcast::<gtk::Widget>())
+            .chain(editor.controls.popovers().into_iter().map(|p| p.upcast()))
+            .chain(std::iter::once(editor.selection.popover.clone().upcast()))
+        {
             let motion = gtk::EventControllerMotion::new();
             motion.set_propagation_phase(gtk::PropagationPhase::Capture);
             let weak = Rc::downgrade(&editor);
@@ -397,15 +349,9 @@ impl Editor {
             target.add_controller(motion);
         }
         let weak = Rc::downgrade(&editor);
-        editor.tools_button.set_create_popup_func(move |_| {
-            if let Some(editor) = weak.upgrade() {
-                editor.position_tools();
-            }
-        });
-        let weak = Rc::downgrade(&editor);
         editor.background.connect_resize(move |_, _, _| {
             if let Some(editor) = weak.upgrade() {
-                editor.position_tools();
+                editor.selection.refresh();
             }
         });
         editor.refresh_appearance();
@@ -428,20 +374,8 @@ impl Editor {
         self.root.set_size_request(size.0, size.1);
     }
     pub fn set_resize_edge(&self, edge: gtk::gdk::SurfaceEdge) {
-        self.tools_button
-            .set_direction(if edge == gtk::gdk::SurfaceEdge::SouthEast {
-                gtk::ArrowType::Right
-            } else {
-                gtk::ArrowType::Left
-            });
-        self.resize_edge.set(edge);
         let left = edge == gtk::gdk::SurfaceEdge::SouthWest;
         let top = edge == gtk::gdk::SurfaceEdge::NorthEast;
-        if top {
-            self.resize.add_css_class("north-resize");
-        } else {
-            self.resize.remove_css_class("north-resize");
-        }
         self.resize.set_halign(if left {
             gtk::Align::Start
         } else {
@@ -470,34 +404,14 @@ impl Editor {
             "se-resize"
         }));
         self.resize.queue_draw();
-        self.position_tools();
-    }
-    fn position_tools(&self) {
-        // Anchor to the sheet, so GTK's side flip also stays outside the text.
-        let Some(bounds) = self.background.compute_bounds(&self.tools_button) else {
-            return;
-        };
-        if bounds.width() <= 0. || bounds.height() <= 0. {
-            return;
-        }
-        let rect = gtk::gdk::Rectangle::new(
-            bounds.x().floor() as i32,
-            bounds.y().floor() as i32,
-            (bounds.x() + bounds.width()).ceil() as i32 - bounds.x().floor() as i32,
-            (bounds.y() + bounds.height()).ceil() as i32 - bounds.y().floor() as i32,
-        );
-        let (has_rect, previous) = self.toolbar.pointing_to();
-        if !has_rect || previous != rect {
-            self.toolbar.set_pointing_to(Some(&rect));
-        }
     }
     pub fn flush(&self) -> bool {
         self.session.flush()
     }
     pub fn escape(self: &Rc<Self>) {
         self.activity();
-        if self.toolbar.is_visible() {
-            self.toolbar.popdown();
+        let selected = self.selection.dismiss();
+        if self.controls.dismiss() || selected {
         } else {
             self.close.emit_clicked();
         }
@@ -506,7 +420,8 @@ impl Editor {
         if !self.session.release_view(&self.body) {
             return false;
         }
-        self.toolbar.popdown();
+        self.controls.dismiss();
+        self.selection.dismiss();
         self.stopped.set(true);
         if let Some(s) = self.timeout.borrow_mut().take() {
             s.remove();
@@ -518,9 +433,8 @@ impl Editor {
         self.syncing_style.set(true);
         self.controls
             .sync(&style, self.session.color(), self.config.borrow().theme);
-        self.pattern_choice
-            .set_selected(style.paper.map_or(0, |p| p as u32 + 1));
         self.syncing_style.set(false);
+        self.controls.sync_checklist(&self.body);
         self.resolved.replace(style.resolve(&self.config.borrow()));
         appearance::apply_note_font(&self.font_provider, &self.resolved.borrow(), &style);
         crate::note_session::style_checklists(&self.body.buffer(), &self.resolved.borrow());
@@ -562,6 +476,9 @@ impl Editor {
             }
         }
     }
+    pub fn message(&self, text: &str) {
+        self.toast.add_toast(adw::Toast::new(text));
+    }
     pub fn activity(self: &Rc<Self>) {
         if let Some(source) = self.timeout.borrow_mut().take() {
             source.remove();
@@ -586,6 +503,23 @@ impl Editor {
     }
     fn continue_list(&self) -> bool {
         continue_list(&self.body)
+    }
+}
+
+pub fn toggle_checklist(body: &gtk::TextView) {
+    let (mut start, _, text) = current_line(body);
+    if text.starts_with("- [ ] ") || text.starts_with("- [x] ") {
+        let buffer = body.buffer();
+        let mut end = start;
+        if end.child_anchor().is_some() {
+            end.forward_char();
+        }
+        end.forward_chars(6);
+        buffer.begin_user_action();
+        buffer.delete(&mut start, &mut end);
+        buffer.end_user_action();
+    } else {
+        toggle_line(body, "- [ ] ");
     }
 }
 
@@ -783,7 +717,7 @@ mod tests {
         assert!(timer(&separate).is_none());
         for target in [
             docked.root.upcast_ref::<gtk::Widget>(),
-            docked.toolbar.upcast_ref(),
+            docked.controls.more_popover.upcast_ref(),
         ] {
             let controllers = target.observe_controllers();
             let motion = (0..controllers.n_items())

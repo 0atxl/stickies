@@ -195,13 +195,35 @@ impl Ui {
                 }
             }
         });
-        editor.separate.set_visible(!detached);
-        let weak = Rc::downgrade(self);
-        editor.separate.connect_clicked(move |_| {
-            if let Some(ui) = weak.upgrade() {
-                ui.open_separate(id);
-            }
-        });
+        if let Some(separate) = &editor.separate {
+            let weak = Rc::downgrade(self);
+            separate.connect_clicked(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.open_separate(id);
+                }
+            });
+        }
+        for (button, change) in [
+            (&editor.controls.archive, manager::ManagerChange::Archive),
+            (&editor.controls.delete, manager::ManagerChange::Delete),
+        ] {
+            let weak = Rc::downgrade(self);
+            let weak_editor = Rc::downgrade(&editor);
+            button.connect_clicked(move |_| {
+                if let (Some(ui), Some(editor)) = (weak.upgrade(), weak_editor.upgrade())
+                    && editor.flush()
+                {
+                    if let Err(error) = manager::change_collection(&ui.storage, id, change) {
+                        editor.message(&format!("Could not update note: {error}"));
+                        return;
+                    }
+                    ui.finish_change(id, change);
+                    if change == manager::ManagerChange::Delete {
+                        ui.show_delete_toast(id);
+                    }
+                }
+            });
+        }
         if !detached {
             self.configure_docked_editor(&editor);
         }
@@ -1311,7 +1333,7 @@ mod edge_tests {
                 ui.open_docked(id);
                 let note = ui.edge.docked.borrow().clone().unwrap();
                 note.body.buffer().set_text("Saved before repositioning");
-                button(root, "Move strip").emit_clicked();
+                button(root, "Reposition").emit_clicked();
                 settle();
                 assert!(ui.edge.reposition_offset().is_some());
                 assert_eq!(
@@ -1607,7 +1629,7 @@ mod edge_tests {
             };
             for on_popover in [false, true] {
                 let (editor, window) = open();
-                let (tools_button, tools) = popover(&editor, "Open note tools");
+                let (tools_button, tools) = popover(&editor, "More");
                 tools_button.popup();
                 settle();
                 assert!(
@@ -1629,23 +1651,11 @@ mod edge_tests {
                     .downcast::<gtk::gdk::Popup>()
                     .unwrap();
                 assert!(popup.is_mapped());
-                let native = editor.root.native().unwrap();
-                let native_widget = native.clone().dynamic_cast::<gtk::Widget>().unwrap();
-                let body = editor.body.compute_bounds(&native_widget).unwrap();
-                let (dx, dy) = native.surface_transform();
-                // Compare the painted contents, excluding the native shadow.
-                let contents = tools.first_child().unwrap().compute_bounds(&tools).unwrap();
-                let (px, py) = tools.surface_transform();
-                let x = f64::from(popup.position_x()) + f64::from(contents.x()) + px - dx;
-                let y = f64::from(popup.position_y()) + f64::from(contents.y()) + py - dy;
+                let footer = editor.controls.root.compute_bounds(&editor.root).unwrap();
+                let body = editor.body.compute_bounds(&editor.root).unwrap();
                 assert!(
-                    x + f64::from(contents.width()) <= f64::from(body.x())
-                        || x >= f64::from(body.x() + body.width())
-                        || y + f64::from(contents.height()) <= f64::from(body.y())
-                        || y >= f64::from(body.y() + body.height()),
-                    "tools overlap writing area: detached={detached}, popup=({x},{y},{},{}), body={body:?}",
-                    contents.width(),
-                    contents.height()
+                    footer.intersection(&body).is_none(),
+                    "footer must have its own layout space"
                 );
                 let target = if on_popover {
                     tools.upcast_ref()
@@ -1671,7 +1681,7 @@ mod edge_tests {
             connection.execute_batch("CREATE TRIGGER reject_escape_save BEFORE UPDATE ON notes BEGIN SELECT RAISE(FAIL, 'save failure'); END;").unwrap();
             let unsaved_title = format!("Unsaved title {detached}");
             editor.title.set_text(&unsaved_title);
-            let (tools_button, tools) = popover(&editor, "Open note tools");
+            let (tools_button, tools) = popover(&editor, "More");
             tools_button.popup();
             settle();
             escape(&window);
@@ -2090,5 +2100,161 @@ mod edge_tests {
         assert!(ui.close_docked());
         ui.edge.strip_window.close();
         ui.edge.window.close();
+    }
+    #[test]
+    #[ignore = "requires Wayland and disposable XDG directories"]
+    fn note_footer_popovers_selection_and_minimum_fit_all_themes() {
+        for key in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+            assert!(std::path::Path::new(&std::env::var(key).unwrap()).starts_with("/tmp"));
+        }
+        ui_assets::register().unwrap();
+        adw::init().unwrap();
+        Config::default().save(&config::config_path()).unwrap();
+        let app = gtk::Application::builder()
+            .application_id("dev.stickies.FooterCheck")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let storage = Storage::open(&storage::database_path()).unwrap();
+        let id = storage
+            .create_note(
+                "Weekend plans",
+                "- [ ] Pick up groceries\n- [x] Finish the sketch\n\nA little space to think.",
+                NoteColor::Yellow,
+            )
+            .unwrap()
+            .id;
+        let ui = build(&app).unwrap();
+        let settle = || {
+            let end = std::time::Instant::now() + Duration::from_millis(240);
+            while std::time::Instant::now() < end {
+                while glib::MainContext::default().iteration(false) {}
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        for (theme, appearance, name) in [
+            (config::Theme::Paper, config::Appearance::Light, "paper"),
+            (config::Theme::Playful, config::Appearance::Light, "playful"),
+            (
+                config::Theme::Minimal,
+                config::Appearance::Light,
+                "minimal-light",
+            ),
+            (
+                config::Theme::Minimal,
+                config::Appearance::Dark,
+                "minimal-dark",
+            ),
+        ] {
+            let mut config = ui.config.borrow().clone();
+            config.theme = theme;
+            config.appearance = appearance;
+            config.font = config::Font::Theme;
+            ui.change_settings(config).unwrap();
+            ui.open_docked(id);
+            settle();
+            let editor = ui.edge.docked.borrow().clone().unwrap();
+            ui.edge.strip_window.set_visible(false);
+            settle();
+            let header = editor.title.parent().unwrap();
+            assert_eq!(header.first_child(), Some(editor.title.clone().upcast()));
+            assert_eq!(
+                editor.title.next_sibling(),
+                Some(editor.close.clone().upcast())
+            );
+            assert!(editor.close.next_sibling().is_none());
+            assert!(editor.body.height() > 80);
+            let body_before = editor.body.compute_bounds(&editor.root).unwrap();
+            let footer = editor.controls.root.compute_bounds(&editor.root).unwrap();
+            assert!(body_before.intersection(&footer).is_none());
+            crate::text_editing::capture_native(&format!("{name}-individual-resting"));
+            for (label, button) in [
+                ("color", &editor.controls.color),
+                ("text", &editor.controls.text),
+                ("more", &editor.controls.more),
+            ] {
+                button.popup();
+                settle();
+                let popup = button.popover().unwrap();
+                assert!(popup.is_mapped());
+                assert!(
+                    find_widget(popup.upcast_ref(), &|w| w.is::<gtk::MenuButton>()
+                        || w.is::<gtk::DropDown>())
+                    .is_none()
+                );
+                assert_eq!(
+                    editor.body.compute_bounds(&editor.root).unwrap(),
+                    body_before,
+                    "opening tools must not shift the writing area"
+                );
+                crate::text_editing::capture_native(&format!("{name}-individual-{label}"));
+                editor.controls.dismiss();
+                editor.body.grab_focus();
+                settle();
+            }
+            let buffer = editor.body.buffer();
+            buffer.select_range(
+                &crate::text_editing::iter(&buffer, 6),
+                &crate::text_editing::iter(&buffer, 13),
+            );
+            settle();
+            assert!(editor.selection.popover.is_mapped());
+            crate::text_editing::capture_native(&format!("{name}-individual-selected"));
+            let bold = find_widget(editor.selection.popover.upcast_ref(), &|w| {
+                w.downcast_ref::<gtk::Button>()
+                    .is_some_and(|b| b.label().as_deref() == Some("B"))
+            })
+            .unwrap()
+            .downcast::<gtk::Button>()
+            .unwrap();
+            bold.emit_clicked();
+            assert!(
+                crate::text_editing::spans(&buffer)
+                    .iter()
+                    .any(|s| s.mark == crate::text_editing::Mark::Bold)
+            );
+            bold.emit_clicked();
+            assert!(crate::text_editing::spans(&buffer).is_empty());
+            buffer.place_cursor(&buffer.end_iter());
+            editor.selection.dismiss();
+            editor.controls.patterns[3].0.set_active(true);
+            assert_eq!(
+                storage.load_note_style(id).unwrap().paper,
+                Some(config::Paper::Grid)
+            );
+            editor.controls.patterns[0].0.set_active(true);
+            editor.set_docked_size(editor::MIN_WIDTH, editor::MIN_HEIGHT);
+            ui.place_edge();
+            settle();
+            assert_eq!((editor.root.width(), editor.root.height()), (300, 280));
+            assert!(
+                editor.body.height() >= 64,
+                "minimum writing area is {}px",
+                editor.body.height()
+            );
+            let footer = editor.controls.root.compute_bounds(&editor.root).unwrap();
+            assert!(footer.width() <= 300. && footer.height() >= 44.);
+            crate::text_editing::capture_native(&format!("{name}-individual-minimum"));
+            editor.controls.more.popup();
+            settle();
+            let first = editor.controls.patterns[0]
+                .0
+                .compute_bounds(&editor.controls.more_popover)
+                .unwrap();
+            for (button, _) in &editor.controls.patterns {
+                assert_eq!(
+                    button
+                        .compute_bounds(&editor.controls.more_popover)
+                        .unwrap()
+                        .y(),
+                    first.y()
+                );
+            }
+            editor.controls.dismiss();
+            assert!(ui.close_docked());
+            settle();
+        }
+        ui.edge.window.close();
+        ui.edge.strip_window.close();
     }
 }
