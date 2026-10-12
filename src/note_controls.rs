@@ -19,10 +19,10 @@ impl NoteControls {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
         root.add_css_class("note-controls");
         root.set_width_request(120);
-        let label = gtk::Label::new(Some("Aa"));
-        label.add_css_class("type-label");
-        label.set_xalign(0.);
-        root.append(&label);
+        let typography = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        let palette = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        root.append(&typography);
+        root.append(&palette);
         let size_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         size_row.add_css_class("text-controls");
         size_row.set_homogeneous(true);
@@ -40,7 +40,7 @@ impl NoteControls {
             size_row.append(&button);
             sizes.push((button, size));
         }
-        root.append(&size_row);
+        typography.append(&size_row);
         let weight_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         weight_row.add_css_class("text-controls");
         weight_row.set_homogeneous(true);
@@ -57,11 +57,10 @@ impl NoteControls {
             weight_row.append(&button);
             weights.push((button, weight));
         }
-        root.append(&weight_row);
-        root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        typography.append(&weight_row);
         let color_label = gtk::Label::new(None);
         color_label.set_xalign(0.);
-        root.append(&color_label);
+        palette.append(&color_label);
         let grid = gtk::Grid::new();
         grid.set_row_spacing(7);
         grid.set_column_spacing(7);
@@ -75,7 +74,7 @@ impl NoteControls {
             grid.attach(&button, index as i32 % 4, index as i32 / 4, 1, 1);
             colors.push((button, color));
         }
-        root.append(&grid);
+        palette.append(&grid);
         Self {
             root,
             sizes,

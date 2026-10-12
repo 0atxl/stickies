@@ -9,7 +9,7 @@ use rusqlite::{Connection, OptionalExtension, functions::FunctionFlags, params};
 
 use crate::app::{Note, NoteColor, NoteId};
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -122,6 +122,7 @@ impl Storage {
         Ok(Note::new(NoteId::new(id), title, body, color))
     }
 
+    #[cfg(test)]
     pub fn update_note(&self, note: &Note) -> Result<(), StorageError> {
         let updated = self.connection.execute(
             "UPDATE notes
@@ -135,6 +136,34 @@ impl Storage {
                 note_id_to_i64(note.id)?,
             ],
         )?;
+        if updated == 0 {
+            Err(StorageError::MissingNote(note.id))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn load_formatting(
+        &self,
+        id: NoteId,
+    ) -> Result<Vec<crate::text_editing::Span>, StorageError> {
+        let text: String = self.connection.query_row(
+            "SELECT formatting FROM notes WHERE id = ?1",
+            [note_id_to_i64(id)?],
+            |row| row.get(0),
+        )?;
+        serde_json::from_str(&text).map_err(|e| StorageError::InvalidStyle(e.to_string()))
+    }
+
+    pub fn update_formatted_note(
+        &self,
+        note: &Note,
+        spans: &[crate::text_editing::Span],
+    ) -> Result<(), StorageError> {
+        let formatting =
+            serde_json::to_string(spans).map_err(|e| StorageError::InvalidStyle(e.to_string()))?;
+        let updated = self.connection.execute("UPDATE notes SET title = ?1, body = ?2, color = ?3, formatting = ?4, updated_at = ?5 WHERE id = ?6 AND archived_at IS NULL AND deleted_at IS NULL",
+            params![note.title, note.body, color_name(note.color), formatting, unix_timestamp_millis(), note_id_to_i64(note.id)?])?;
         if updated == 0 {
             Err(StorageError::MissingNote(note.id))
         } else {
@@ -318,6 +347,12 @@ impl Storage {
         if version < 3 {
             let transaction = self.connection.transaction()?;
             transaction.execute_batch(include_str!("../migrations/003_note_colors.sql"))?;
+            transaction.pragma_update(None, "user_version", 3)?;
+            transaction.commit()?;
+        }
+        if version < 4 {
+            let transaction = self.connection.transaction()?;
+            transaction.execute_batch(include_str!("../migrations/004_note_formatting.sql"))?;
             transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             transaction.commit()?;
         }

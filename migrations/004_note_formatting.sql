@@ -1,0 +1,1 @@
+ALTER TABLE notes ADD COLUMN formatting TEXT NOT NULL DEFAULT '[]';

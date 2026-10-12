@@ -15,11 +15,15 @@ pub struct Panel {
     timeouts: Rc<Vec<gtk::ToggleButton>>,
     syncing: Rc<Cell<bool>>,
     appearance: Rc<AppearanceControls>,
+    extras: Vec<Box<dyn Fn()>>,
 }
 impl Panel {
     pub fn refresh(&self) {
         self.appearance.sync();
         self.position.sync();
+        for sync in &self.extras {
+            sync();
+        }
         self.syncing.set(true);
         let seconds = self.position.current.borrow().inactivity_seconds;
         for (button, timeout) in self.timeouts.iter().zip([0, 60, 120, 300]) {
@@ -62,7 +66,6 @@ impl AppearanceControls {
             let mut sample = sample.borrow_mut();
             sample.appearance = config.appearance;
             sample.paper = config.paper;
-            sample.white_paper = config.white_paper;
             drawing.queue_draw();
         }
         self.syncing.set(was_syncing);
@@ -119,15 +122,9 @@ impl PositionControls {
         let presets = choices(&["Top", "Center", "Bottom"], 1);
         section(&root, "Screen edge", &edges.0);
         section(&root, "Position", &presets.0);
-        let hint = gtk::Label::new(Some(
-            "Choose a position or drag the strip to place it precisely.",
-        ));
-        hint.set_wrap(true);
-        hint.set_xalign(0.);
-        hint.add_css_class("metadata");
-        root.append(&hint);
-        let move_button = gtk::Button::with_label("Reposition…");
-        move_button.set_tooltip_text(Some("Drag the strip, then choose Done or Cancel"));
+
+        let move_button = gtk::Button::from_icon_name("transform-move-symbolic");
+        move_button.set_tooltip_text(Some("Move strip"));
         root.append(&move_button);
         let error = gtk::Label::new(None);
         error.set_wrap(true);
@@ -275,12 +272,25 @@ pub fn build(
     font_label.set_hexpand(true);
     font_label.set_xalign(0.);
     font_header.append(&font_label);
-    let reset = gtk::Button::with_label("Reset");
+    let reset = gtk::Button::from_icon_name("edit-undo-symbolic");
     reset.add_css_class("icon-control");
-    reset.set_tooltip_text(Some("Use the theme's default font"));
+    reset.set_tooltip_text(Some("Reset font"));
     font_header.append(&reset);
     font_section.append(&font_header);
-    let fonts = choices(&["Handwritten", "Clean", "Mono"], font_index(&config));
+    let fonts = choices(&["Virgil", "Inter", "Mono", "Kalam"], font_index(&config));
+    for (button, family) in
+        fonts
+            .1
+            .iter()
+            .zip(["Virgil 3 YOFF", "Inter", "JetBrains Mono", "Kalam"])
+    {
+        if let Some(label) = button.child().and_downcast::<gtk::Label>() {
+            label.set_markup(&format!(
+                "<span font_family=\"{family}\">{}</span>",
+                label.text()
+            ));
+        }
+    }
     font_section.append(&fonts.0);
     root.append(&font_section);
     let patterns = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -329,7 +339,8 @@ pub fn build(
             }
         });
         sample.set_child(Some(&drawing));
-        sample.add_overlay(&gtk::Label::new(Some(name)));
+        b.set_tooltip_text(Some(name));
+        b.update_property(&[gtk::accessible::Property::Label(name)]);
         b.set_child(Some(&sample));
         b.add_css_class("pattern-choice");
         b.set_hexpand(true);
@@ -414,7 +425,7 @@ pub fn build(
                 && !controls.syncing.get()
             {
                 let mut config = controls.current.borrow().clone();
-                config.font = [Font::Handwritten, Font::Grotesk, Font::Mono][index];
+                config.font = [Font::Handwritten, Font::Grotesk, Font::Mono, Font::Kalam][index];
                 update(config);
             }
         });
@@ -500,54 +511,56 @@ pub fn build(
             }
         });
     }
-    root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    let heading = gtk::Label::new(Some("Shortcuts"));
-    heading.set_xalign(0.);
-    heading.add_css_class("setting-label");
-    root.append(&heading);
-    let hint = gtk::Label::new(Some(
-        "Add these examples to your Hyprland config. Choose keys that suit your bindings.",
-    ));
-    hint.set_wrap(true);
-    hint.set_xalign(0.);
-    hint.add_css_class("metadata");
-    root.append(&hint);
-    for (name, binding) in [
-        ("New note", "bind = SUPER, N, exec, stickies --new-note"),
+    let mut extras: Vec<Box<dyn Fn()>> = Vec::new();
+    for (label, read, write) in [
         (
-            "Search notes",
-            "bind = SUPER, slash, exec, stickies --search",
+            "Hover to reveal",
+            (|c: &Config| c.edge_hover_enabled) as fn(&Config) -> bool,
+            (|c: &mut Config, v| c.edge_hover_enabled = v) as fn(&mut Config, bool),
         ),
         (
-            "Toggle edge strip",
-            "bind = SUPER, T, exec, stickies --toggle-strip",
-        ),
-        (
-            "All Notes",
-            "bind = SUPER, A, exec, stickies --show-all-notes",
+            "Launch at login",
+            |c: &Config| c.launch_at_login,
+            |c: &mut Config, v| c.launch_at_login = v,
         ),
     ] {
-        let example = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let label = gtk::Label::new(Some(name));
-        label.set_xalign(0.);
-        label.set_hexpand(true);
-        label.add_css_class("setting-label");
-        let copy = gtk::Button::with_label("Copy");
-        copy.set_tooltip_text(Some(&format!("Copy {name} Hyprland bind")));
-        copy.connect_clicked(move |button| button.clipboard().set_text(binding));
-        header.append(&label);
-        header.append(&copy);
-        let command = gtk::Label::new(Some(binding));
-        command.set_selectable(true);
-        command.set_wrap(true);
-        command.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-        command.set_max_width_chars(28);
-        command.set_xalign(0.);
-        command.add_css_class("monospace");
-        example.append(&header);
-        example.append(&command);
-        root.append(&example);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let text = gtk::Label::new(Some(label));
+        text.set_hexpand(true);
+        text.set_xalign(0.);
+        let switch = gtk::Switch::new();
+        switch.set_valign(gtk::Align::Center);
+        switch.update_property(&[gtk::accessible::Property::Label(label)]);
+        switch.set_active(read(&current.borrow()));
+        row.append(&text);
+        row.append(&switch);
+        root.append(&row);
+        let current = current.clone();
+        let update = update.clone();
+        let guard = Rc::new(Cell::new(false));
+        let sync: Rc<dyn Fn()> = Rc::new({
+            let current = current.clone();
+            let weak = switch.downgrade();
+            let guard = guard.clone();
+            move || {
+                guard.set(true);
+                if let Some(switch) = weak.upgrade() {
+                    switch.set_active(read(&current.borrow()));
+                }
+                guard.set(false);
+            }
+        });
+        let sync_after = sync.clone();
+        switch.connect_active_notify(move |switch| {
+            if guard.get() || read(&current.borrow()) == switch.is_active() {
+                return;
+            }
+            let mut config = current.borrow().clone();
+            write(&mut config, switch.is_active());
+            update(config);
+            sync_after();
+        });
+        extras.push(Box::new(move || sync()));
     }
     Panel {
         root: gtk::ScrolledWindow::builder()
@@ -558,11 +571,13 @@ pub fn build(
         timeouts,
         syncing,
         appearance,
+        extras,
     }
 }
 
 fn font_index(c: &Config) -> usize {
     match c.font {
+        Font::Kalam => 3,
         Font::Handwritten => 0,
         Font::Mono => 2,
         Font::Grotesk => 1,
@@ -665,5 +680,34 @@ mod tests {
         assert_eq!(current.borrow().theme, Theme::Playful);
         assert!(controls.themes[2].0.is_active());
         assert!(!controls.mode.is_visible());
+        reject.set(true);
+        controls.fonts[3].set_active(true);
+        assert!(
+            controls.fonts[0].is_active(),
+            "failed Kalam selection must revert"
+        );
+        fn descendants(widget: &gtk::Widget, result: &mut Vec<gtk::Widget>) {
+            result.push(widget.clone());
+            let mut child = widget.first_child();
+            while let Some(widget) = child {
+                descendants(&widget, result);
+                child = widget.next_sibling();
+            }
+        }
+        let mut widgets = Vec::new();
+        descendants(panel.root.upcast_ref(), &mut widgets);
+        for widget in widgets {
+            if let Some(switch) = widget.downcast_ref::<gtk::Switch>() {
+                let before = switch.is_active();
+                let count = attempts.get();
+                switch.set_active(!before);
+                assert_eq!(switch.is_active(), before, "rejected switch must revert");
+                assert_eq!(
+                    attempts.get(),
+                    count + 1,
+                    "reverting must not submit another write"
+                );
+            }
+        }
     }
 }

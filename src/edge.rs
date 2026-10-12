@@ -1,13 +1,15 @@
+#[cfg(test)]
+use crate::app::NoteColor;
 use crate::{
     Ui,
-    app::{Action, NoteColor, NoteId},
+    app::{Action, NoteId},
     appearance,
     config::{self, Config, ScreenEdge},
     editor, motion,
     storage::NoteCollection,
     ui_assets,
 };
-use gtk::{glib, prelude::*};
+use gtk::{glib, prelude::*, subclass::prelude::ObjectSubclassIsExt};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::{
     cell::{Cell, RefCell},
@@ -17,10 +19,12 @@ use std::{
 
 // Keep transformed children out of the tab group's measurement. GtkFixed uses
 // its layout manager directly, so overriding Widget::measure alone has no effect.
-mod tab_layout {
+mod stacked_tabs {
     use gtk::{glib, prelude::*, subclass::prelude::*};
     #[derive(Default)]
-    pub struct TabLayout;
+    pub struct TabLayout {
+        pub pointer: std::cell::Cell<f64>,
+    }
     #[glib::object_subclass]
     impl ObjectSubclass for TabLayout {
         const NAME: &'static str = "StickiesTabLayout";
@@ -31,7 +35,26 @@ mod tab_layout {
         }
     }
     impl ObjectImpl for TabLayout {}
-    impl WidgetImpl for TabLayout {}
+    impl WidgetImpl for TabLayout {
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let widget = self.obj();
+            let mut children = Vec::new();
+            let mut child = widget.first_child();
+            while let Some(tab) = child {
+                child = tab.next_sibling();
+                children.push(tab);
+            }
+            let index = self.pointer.get().round().max(0.) as usize;
+            for (i, tab) in children.iter().enumerate() {
+                if i != index {
+                    widget.snapshot_child(tab, snapshot);
+                }
+            }
+            if let Some(tab) = children.get(index) {
+                widget.snapshot_child(tab, snapshot);
+            }
+        }
+    }
     impl FixedImpl for TabLayout {}
 
     #[derive(Default)]
@@ -81,17 +104,17 @@ mod tab_layout {
     }
 }
 glib::wrapper! {
-    pub struct TabLayout(ObjectSubclass<tab_layout::TabLayout>)
+    pub struct TabLayout(ObjectSubclass<stacked_tabs::TabLayout>)
         @extends gtk::Fixed, gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 glib::wrapper! {
-    pub struct TabMeasure(ObjectSubclass<tab_layout::TabMeasure>) @extends gtk::LayoutManager;
+    pub struct TabMeasure(ObjectSubclass<stacked_tabs::TabMeasure>) @extends gtk::LayoutManager;
 }
 
 const WIDTH: i32 = 420;
 const HEIGHT: i32 = 500;
-const TAB_GAP: i32 = 6;
+const TAB_GAP: i32 = -8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum EdgeState {
@@ -280,7 +303,6 @@ pub(super) struct Strip {
     marker_bounds: Cell<(i32, i32, i32, i32)>,
     tab_motion: RefCell<Vec<motion::Motion>>,
     tab_hover: RefCell<Vec<Rc<motion::Motion>>>,
-    hovered_tab: Cell<Option<usize>>,
     marker_motion: motion::Motion,
     utilities_motion: motion::Motion,
     panel_motion: motion::Motion,
@@ -435,7 +457,6 @@ impl Strip {
             marker_bounds: Cell::new((0, 0, 0, 0)),
             tab_motion: RefCell::new(Vec::new()),
             tab_hover: RefCell::new(Vec::new()),
-            hovered_tab: Cell::new(None),
             marker_motion: motion::Motion::new(1.),
             utilities_motion: motion::Motion::new(0.),
             panel_motion: motion::Motion::new(0.),
@@ -634,22 +655,32 @@ impl Ui {
         progress: f64,
         hover: f64,
     ) {
+        let gap = TAB_GAP;
+        let inset = 16.;
+        let center = fixed
+            .downcast_ref::<TabLayout>()
+            .map_or(index as f64, |tabs| tabs.imp().pointer.get());
+        let spread = if center.is_finite() {
+            ((index as f64 - center) * hover * 16.) as f32
+        } else {
+            0.
+        };
         let distance = (24. * (1. - progress)) as f32;
         let (x, y) = match edge {
             ScreenEdge::Left => (
                 -distance,
-                index as f32 * (tab.height_request() + TAB_GAP) as f32,
+                inset + spread + index as f32 * (tab.height_request() + gap) as f32,
             ),
             ScreenEdge::Right => (
                 distance,
-                index as f32 * (tab.height_request() + TAB_GAP) as f32,
+                inset + spread + index as f32 * (tab.height_request() + gap) as f32,
             ),
             ScreenEdge::Top => (
-                index as f32 * (tab.width_request() + TAB_GAP) as f32,
+                inset + spread + index as f32 * (tab.width_request() + gap) as f32,
                 -distance,
             ),
             ScreenEdge::Bottom => (
-                index as f32 * (tab.width_request() + TAB_GAP) as f32,
+                inset + spread + index as f32 * (tab.width_request() + gap) as f32,
                 distance,
             ),
         };
@@ -660,7 +691,7 @@ impl Ui {
             ScreenEdge::Top => (width / 2., 0.),
             ScreenEdge::Bottom => (width / 2., height),
         };
-        let scale = (1. + (motion::HOVER_SCALE - 1.) * hover) as f32;
+        let scale = (1. + 0.24 * hover) as f32;
         let transform = gtk::gsk::Transform::new()
             .translate(&gtk::graphene::Point::new(x, y))
             .translate(&gtk::graphene::Point::new(cx, cy))
@@ -669,27 +700,7 @@ impl Ui {
         fixed.set_child_transform(tab, Some(&transform));
         tab.set_opacity(progress);
     }
-    fn hover_tab(self: &Rc<Self>, index: usize, hovered: bool) {
-        let hovered =
-            hovered && self.edge.state().is_revealed() && !self.edge.state().is_repositioning();
-        let previous = self.edge.hovered_tab.get();
-        if hovered {
-            if previous == Some(index) {
-                return;
-            }
-            self.edge.hovered_tab.set(Some(index));
-            // Transfer both titles on the same frame clock. A late leave from
-            // the old title must not restart its return animation.
-            if let Some(previous) = previous {
-                self.animate_tab_hover(previous, false);
-            }
-            self.animate_tab_hover(index, true);
-        } else if previous == Some(index) {
-            self.edge.hovered_tab.set(None);
-            self.animate_tab_hover(index, false);
-        }
-    }
-    fn animate_tab_hover(self: &Rc<Self>, index: usize, hovered: bool) {
+    fn animate_tab_hover(self: &Rc<Self>, index: usize, target: f64) {
         let Some(fixed) = self.edge.tabs.first_child().and_downcast::<gtk::Fixed>() else {
             return;
         };
@@ -709,7 +720,7 @@ impl Ui {
         let tab = tab.downgrade();
         hover.animate(
             &self.edge.strip_window,
-            if hovered { 1. } else { 0. },
+            target,
             (motion::HOVER_MS, 0),
             enabled,
             move |value| {
@@ -732,7 +743,6 @@ impl Ui {
         );
     }
     fn finish_hover_motion(self: &Rc<Self>) {
-        self.edge.hovered_tab.set(None);
         if let Some(fixed) = self.edge.tabs.first_child().and_downcast::<gtk::Fixed>() {
             let mut child = fixed.first_child();
             for (index, hover) in self.edge.tab_hover.borrow().iter().enumerate() {
@@ -740,17 +750,20 @@ impl Ui {
                     break;
                 };
                 child = tab.next_sibling();
+                let position = fixed
+                    .downcast_ref::<TabLayout>()
+                    .unwrap()
+                    .imp()
+                    .pointer
+                    .get();
                 let value = if self.edge.state().is_revealed()
                     && !self.edge.state().is_repositioning()
-                    && tab.state_flags().contains(gtk::StateFlags::PRELIGHT)
+                    && position.is_finite()
                 {
-                    1.
+                    (1. - (index as f64 - position).abs() / 2.).max(0.).powi(2)
                 } else {
                     0.
                 };
-                if value == 1. {
-                    self.edge.hovered_tab.set(Some(index));
-                }
                 hover.jump(value);
                 if let Some(reveal) = self.edge.tab_motion.borrow().get(index) {
                     Self::paint_tab(
@@ -876,7 +889,6 @@ impl Ui {
         let progress = if revealed { 1. } else { 0. };
         self.edge.strip_phase.set(StripPhase::Settled);
         if !revealed || self.edge.state().is_repositioning() {
-            self.edge.hovered_tab.set(None);
             for hover in self.edge.tab_hover.borrow().iter() {
                 hover.jump(0.);
             }
@@ -1296,7 +1308,6 @@ impl Ui {
             return;
         }
         self.edge.refresh_pending.set(false);
-        self.edge.hovered_tab.set(None);
         self.edge.tab_hover.borrow_mut().clear();
         while let Some(child) = self.edge.tabs.first_child() {
             self.edge.tabs.remove(&child);
@@ -1357,24 +1368,29 @@ impl Ui {
         };
         let tab_height = if horizontal { 24 } else { 80 };
         let fixed = glib::Object::new::<TabLayout>().upcast::<gtk::Fixed>();
+        fixed
+            .downcast_ref::<TabLayout>()
+            .unwrap()
+            .imp()
+            .pointer
+            .set(f64::NAN);
+        let gap = TAB_GAP;
+        let inset = 32;
+
         fixed.set_overflow(gtk::Overflow::Visible);
         fixed.set_size_request(
             if horizontal {
-                (notes.len() as i32 * (tab_width + TAB_GAP) - TAB_GAP).max(0)
+                (notes.len() as i32 * (tab_width + gap) - gap + inset).max(0)
             } else {
                 tab_width
             },
             if horizontal {
                 tab_height
             } else {
-                (notes.len() as i32 * (tab_height + TAB_GAP) - TAB_GAP).max(0)
+                (notes.len() as i32 * (tab_height + gap) - gap + inset).max(0)
             },
         );
         for (index, note) in notes.iter().enumerate() {
-            let dot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            dot.add_css_class("edge-pill");
-            appearance::set_color(&dot, note.color);
-            self.edge.marker.append(&dot);
             let tab = gtk::Button::new();
             tab.add_css_class("note-tab");
             tab.set_widget_name(&format!("note-{:?}", note.id));
@@ -1384,7 +1400,6 @@ impl Ui {
             } else {
                 &note.title
             };
-            tab.set_tooltip_text(Some(title));
             let label = gtk::Label::new(Some(&title.to_uppercase()));
             label.add_css_class("tab-title");
             label.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -1413,24 +1428,15 @@ impl Ui {
             }
             tab.set_size_request(tab_width, tab_height);
             let (x, y) = if horizontal {
-                (index as f64 * f64::from(tab_width + TAB_GAP), 0.)
+                (index as f64 * f64::from(tab_width + gap), 0.)
             } else {
-                (0., index as f64 * f64::from(tab_height + TAB_GAP))
+                (0., index as f64 * f64::from(tab_height + gap))
             };
             fixed.put(&tab, x, y);
             self.edge
                 .tab_hover
                 .borrow_mut()
                 .push(Rc::new(motion::Motion::new(0.)));
-            let weak = Rc::downgrade(self);
-            tab.connect_state_flags_changed(move |tab, previous| {
-                let hovered = tab.state_flags().contains(gtk::StateFlags::PRELIGHT);
-                if hovered != previous.contains(gtk::StateFlags::PRELIGHT)
-                    && let Some(ui) = weak.upgrade()
-                {
-                    ui.hover_tab(index, hovered);
-                }
-            });
             let id = note.id;
             let weak = Rc::downgrade(self);
             tab.connect_clicked(move |tab| {
@@ -1444,11 +1450,100 @@ impl Ui {
                 }
             });
         }
-        if notes.is_empty() {
-            let dot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            dot.add_css_class("edge-pill");
-            appearance::set_color(&dot, NoteColor::Yellow);
-            self.edge.marker.append(&dot);
+        let line = gtk::Box::new(orientation, 0);
+        line.add_css_class("marker-line");
+        line.set_size_request(
+            if horizontal { 28 } else { 3 },
+            if horizontal { 3 } else { 28 },
+        );
+        self.edge.marker.append(&line);
+        {
+            let motion = gtk::EventControllerMotion::new();
+            let weak = Rc::downgrade(self);
+            let weak_fixed = fixed.downgrade();
+            motion.connect_motion(move |_, x, y| {
+                let Some(ui) = weak.upgrade() else {
+                    return;
+                };
+                let Some(fixed) = weak_fixed.upgrade() else {
+                    return;
+                };
+                if !ui.edge.state().is_revealed() || ui.edge.state().is_repositioning() {
+                    return;
+                }
+                let size = if horizontal { tab_width } else { tab_height };
+                let position = ((if horizontal { x } else { y }) - 16. - f64::from(size) / 2.)
+                    / f64::from(size - 8);
+                fixed
+                    .downcast_ref::<TabLayout>()
+                    .unwrap()
+                    .imp()
+                    .pointer
+                    .set(position);
+                for i in 0..ui.edge.tab_hover.borrow().len() {
+                    let distance = (i as f64 - position).abs();
+                    ui.animate_tab_hover(i, (1. - distance / 2.).max(0.).powi(2));
+                }
+                fixed.queue_draw();
+            });
+            let weak = Rc::downgrade(self);
+            let weak_fixed = fixed.downgrade();
+            motion.connect_leave(move |_| {
+                if let Some(fixed) = weak_fixed.upgrade() {
+                    fixed
+                        .downcast_ref::<TabLayout>()
+                        .unwrap()
+                        .imp()
+                        .pointer
+                        .set(f64::NAN);
+                }
+                if let Some(ui) = weak.upgrade() {
+                    for i in 0..ui.edge.tab_hover.borrow().len() {
+                        ui.animate_tab_hover(i, 0.);
+                    }
+                }
+            });
+            fixed.add_controller(motion);
+            // Route overlap clicks to the same frontmost tab used by snapshot.
+            let click = gtk::GestureClick::new();
+            click.set_button(1);
+            click.set_propagation_phase(gtk::PropagationPhase::Capture);
+            let weak_fixed = fixed.downgrade();
+            click.connect_released(move |gesture, _, x, y| {
+                let Some(fixed) = weak_fixed.upgrade() else {
+                    return;
+                };
+                let front = fixed
+                    .downcast_ref::<TabLayout>()
+                    .unwrap()
+                    .imp()
+                    .pointer
+                    .get()
+                    .round()
+                    .max(0.) as usize;
+                let mut tabs = Vec::new();
+                let mut child = fixed.first_child();
+                while let Some(tab) = child {
+                    child = tab.next_sibling();
+                    tabs.push(tab);
+                }
+                let order =
+                    std::iter::once(front).chain((0..tabs.len()).rev().filter(|i| *i != front));
+                for i in order {
+                    if let Some(tab) = tabs.get(i)
+                        && tab.compute_bounds(&fixed).is_some_and(|bounds| {
+                            bounds.contains_point(&gtk::graphene::Point::new(x as f32, y as f32))
+                        })
+                    {
+                        if let Some(button) = tab.downcast_ref::<gtk::Button>() {
+                            button.emit_clicked();
+                            gesture.set_state(gtk::EventSequenceState::Claimed);
+                        }
+                        break;
+                    }
+                }
+            });
+            fixed.add_controller(click);
         }
         if !notes.is_empty() {
             self.edge.tabs.append(&fixed);
@@ -1576,7 +1671,7 @@ impl Ui {
         for note in &notes {
             let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
             let dot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            dot.add_css_class("edge-pill");
+            dot.add_css_class("edge-result-color");
             dot.set_valign(gtk::Align::Center);
             appearance::set_color(&dot, note.color);
             let title = gtk::Label::new(Some(if note.title.trim().is_empty() {
@@ -1976,7 +2071,7 @@ impl Ui {
                     };
                     self.edge
                         .pointer_origin
-                        .set(Some(offset + index * (length + TAB_GAP) + length / 2));
+                        .set(Some(offset + 16 + index * (length + TAB_GAP) + length / 2));
                     break;
                 }
                 index += 1;
@@ -2110,7 +2205,7 @@ impl Ui {
         let expanded = (self.edge.state().is_revealed()
             || self.edge.strip_phase.get() == StripPhase::Collapsing)
             && !self.edge.state().is_repositioning();
-        let pad = if expanded { motion::HOVER_PAD } else { 0 };
+        let pad = if expanded { 20 } else { 7 };
         let (screen_width, screen_height) = self.note_limits();
         let left = (x - pad).max(0);
         let top = (y - pad).max(0);
@@ -2252,7 +2347,6 @@ impl Ui {
                     (39. / 255., 44. / 255., 50. / 255.)
                 }
                 config::Theme::Minimal => (1., 1., 1.),
-                config::Theme::Paper if config.white_paper => (1., 1., 1.),
                 config::Theme::Paper => (1., 0.966, 0.864),
             }
         } else if config.theme == config::Theme::Minimal && appearance::dark(&config) {
@@ -2823,15 +2917,42 @@ mod tests {
         settle(250);
         ui.reveal();
         settle(400);
-        let tab = ui.edge.tabs.first_child().unwrap().first_child().unwrap();
-        tab.set_state_flags(gtk::StateFlags::PRELIGHT, false);
+        let hover = |enter: bool| {
+            let fixed = ui.edge.tabs.first_child().unwrap();
+            let tab = fixed.first_child().unwrap();
+            let horizontal = matches!(
+                ui.config.borrow().edge,
+                ScreenEdge::Top | ScreenEdge::Bottom
+            );
+            let size = if horizontal {
+                tab.width_request()
+            } else {
+                tab.height_request()
+            };
+            let along = 16. + f64::from(size) / 2.;
+            let (x, y) = if horizontal {
+                (along, 12.)
+            } else {
+                (12., along)
+            };
+            for controller in fixed.observe_controllers().iter::<glib::Object>().flatten() {
+                if let Ok(motion) = controller.downcast::<gtk::EventControllerMotion>() {
+                    if enter {
+                        motion.emit_by_name::<()>("motion", &[&x, &y]);
+                    } else {
+                        motion.emit_by_name::<()>("leave", &[]);
+                    }
+                }
+            }
+        };
+        hover(true);
         settle(45);
         let progress = ui.edge.tab_hover.borrow()[0].value();
         assert!(
             progress > 0. && progress < 1.,
             "hover must have intermediate progress: {progress}"
         );
-        tab.unset_state_flags(gtk::StateFlags::PRELIGHT);
+        hover(false);
         assert_eq!(
             ui.edge.tab_hover.borrow()[0].value(),
             progress,
@@ -2874,7 +2995,7 @@ mod tests {
                 let base = tab.compute_bounds(&ui.edge.strip_root).unwrap();
                 let input = ui.strip_input_bounds();
                 capture(&format!("{prefix}-normal"));
-                tab.set_state_flags(gtk::StateFlags::PRELIGHT, false);
+                hover(true);
                 settle(40);
                 assert_eq!(ui.edge.tab_hover.borrow()[0].value(), 1.);
                 assert!(
@@ -2882,10 +3003,8 @@ mod tests {
                     "reduced motion must jump"
                 );
                 let grown = tab.compute_bounds(&ui.edge.strip_root).unwrap();
-                assert!((grown.width() / base.width() - motion::HOVER_SCALE as f32).abs() < 0.001);
-                assert!(
-                    (grown.height() / base.height() - motion::HOVER_SCALE as f32).abs() < 0.001
-                );
+                assert!((grown.width() / base.width() - 1.24).abs() < 0.001);
+                assert!((grown.height() / base.height() - 1.24).abs() < 0.001);
                 let (anchor_before, anchor_after) = match edge {
                     ScreenEdge::Left => (base.x(), grown.x()),
                     ScreenEdge::Right => (base.x() + base.width(), grown.x() + grown.width()),
@@ -2894,7 +3013,7 @@ mod tests {
                 };
                 assert!(
                     (anchor_before - anchor_after).abs() < 0.01,
-                    "hover must stay attached to {edge:?}"
+                    "stacked hover must stay attached to {edge:?}"
                 );
                 assert_eq!(
                     (fixed.width(), fixed.height()),
@@ -2951,8 +3070,7 @@ mod tests {
         ui.change_settings(config).unwrap();
         let settings = gtk::Settings::default().unwrap();
         settings.set_gtk_enable_animations(true);
-        let tab = ui.edge.tabs.first_child().unwrap().first_child().unwrap();
-        tab.set_state_flags(gtk::StateFlags::PRELIGHT, false);
+        hover(true);
         settle(35);
         settings.set_gtk_enable_animations(false);
         assert_eq!(ui.edge.tab_hover.borrow()[0].value(), 1.);
@@ -2966,6 +3084,155 @@ mod tests {
                 .all(|hover| hover.value() == 0. && !hover.is_running())
         );
         ui.finish_reposition(false).unwrap();
+        ui.edge.window.close();
+        ui.edge.strip_window.close();
+    }
+}
+
+#[cfg(test)]
+mod feedback_tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires Wayland and disposable XDG directories"]
+    fn stacked_tabs_and_bar_keep_clicks_and_bounds_on_every_edge() {
+        for key in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+            assert!(std::path::Path::new(&std::env::var(key).unwrap()).starts_with("/tmp"));
+        }
+        ui_assets::register().unwrap();
+        adw::init().unwrap();
+        let app = gtk::Application::builder()
+            .application_id("dev.stickies.StackedCheck")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let storage = crate::storage::Storage::open(&crate::storage::database_path()).unwrap();
+        for title in ["Shopping", "Ideas", "Weekend", "Reading"] {
+            storage
+                .create_note(title, "Body", NoteColor::Yellow)
+                .unwrap();
+        }
+        let ui = crate::build(&app).unwrap();
+        let settle = || {
+            let end = std::time::Instant::now() + Duration::from_millis(200);
+            while std::time::Instant::now() < end {
+                while glib::MainContext::default().iteration(false) {}
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        for edge in [
+            ScreenEdge::Left,
+            ScreenEdge::Right,
+            ScreenEdge::Top,
+            ScreenEdge::Bottom,
+        ] {
+            for reduced in [false, true] {
+                let mut config = ui.config.borrow().clone();
+                config.edge = edge;
+                config.reduced_motion = reduced;
+                ui.change_settings(config).unwrap();
+                ui.dormant();
+                settle();
+                assert!(
+                    ui.edge
+                        .marker
+                        .first_child()
+                        .unwrap()
+                        .has_css_class("marker-line")
+                );
+                assert!(
+                    ui.edge
+                        .marker
+                        .first_child()
+                        .unwrap()
+                        .next_sibling()
+                        .is_none()
+                );
+                ui.reveal();
+                settle();
+                let fixed = ui
+                    .edge
+                    .tabs
+                    .first_child()
+                    .unwrap()
+                    .downcast::<gtk::Fixed>()
+                    .unwrap();
+                let tabs: Vec<_> = {
+                    let mut tabs = Vec::new();
+                    let mut child = fixed.first_child();
+                    while let Some(tab) = child {
+                        child = tab.next_sibling();
+                        tabs.push(tab);
+                    }
+                    tabs
+                };
+                assert!(tabs.iter().all(|tab| tab.tooltip_text().is_none()));
+                let horizontal = matches!(edge, ScreenEdge::Top | ScreenEdge::Bottom);
+                let size = if horizontal {
+                    tabs[0].width_request()
+                } else {
+                    tabs[0].height_request()
+                };
+                let along = 16. + f64::from(size - 8) + f64::from(size) / 2.;
+                let (x, y) = if horizontal {
+                    (along, 12.)
+                } else {
+                    (12., along)
+                };
+                let input = ui.strip_input_bounds();
+                for controller in fixed.observe_controllers().iter::<glib::Object>().flatten() {
+                    if let Ok(motion) = controller.downcast::<gtk::EventControllerMotion>() {
+                        motion.emit_by_name::<()>("motion", &[&x, &y]);
+                    }
+                }
+                settle();
+                assert!((ui.edge.tab_hover.borrow()[1].value() - 1.).abs() < 0.001);
+                assert!(ui.edge.tab_hover.borrow()[0].value() > 0.);
+                assert_eq!(ui.strip_input_bounds(), input);
+                for tab in &tabs {
+                    let bounds = tab.compute_bounds(&ui.edge.strip_root).unwrap();
+                    assert!(
+                        bounds.x() >= input.0 as f32 - 0.01 && bounds.y() >= input.1 as f32 - 0.01
+                    );
+                    assert!(
+                        bounds.x() + bounds.width() <= (input.0 + input.2) as f32 + 0.01
+                            && bounds.y() + bounds.height() <= (input.1 + input.3) as f32 + 0.01
+                    );
+                }
+                if let Ok(path) = std::env::var("STICKIES_EDGE_CAPTURES") {
+                    std::fs::create_dir_all(&path).unwrap();
+                    let snapshot = gtk::Snapshot::new();
+                    gtk::WidgetPaintable::new(Some(&ui.edge.strip_root)).snapshot(
+                        &snapshot,
+                        ui.edge.strip_root.width() as f64,
+                        ui.edge.strip_root.height() as f64,
+                    );
+                    let bounds = gtk::graphene::Rect::new(
+                        input.0 as f32,
+                        input.1 as f32,
+                        input.2 as f32,
+                        input.3 as f32,
+                    );
+                    ui.edge
+                        .strip_window
+                        .renderer()
+                        .unwrap()
+                        .render_texture(snapshot.to_node().unwrap(), Some(&bounds))
+                        .save_to_png(
+                            std::path::Path::new(&path)
+                                .join(format!("stacked-{edge:?}-{reduced}.png")),
+                        )
+                        .unwrap();
+                }
+                let id = ui.deck.borrow().notes()[1].id;
+                for controller in fixed.observe_controllers().iter::<glib::Object>().flatten() {
+                    if let Ok(click) = controller.downcast::<gtk::GestureClick>() {
+                        click.emit_by_name::<()>("released", &[&1i32, &x, &y]);
+                    }
+                }
+                assert_eq!(ui.edge.state(), EdgeState::Docked(id));
+                assert!(ui.close_docked());
+            }
+        }
         ui.edge.window.close();
         ui.edge.strip_window.close();
     }

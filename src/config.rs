@@ -57,20 +57,13 @@ pub enum Shape {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum TabLayout {
-    #[default]
-    Adjacent,
-    Overlapping,
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
 pub enum Font {
     #[default]
     Theme,
     Grotesk,
     Mono,
     Handwritten,
+    Kalam,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -130,9 +123,6 @@ pub struct Config {
     pub legacy_font_size: Option<u32>,
     pub paper: Paper,
     pub shape: Shape,
-    pub white_paper: bool,
-    // Legacy layouts still load; tab orientation now follows the edge.
-    pub tab_layout: TabLayout,
     pub visible_notes: usize,
     pub inactivity_seconds: u64,
     pub reduced_motion: bool,
@@ -153,8 +143,6 @@ impl Default for Config {
             legacy_font_size: None,
             paper: Paper::Plain,
             shape: Shape::Ticket,
-            white_paper: false,
-            tab_layout: TabLayout::Adjacent,
             visible_notes: 4,
             inactivity_seconds: 120,
             reduced_motion: false,
@@ -175,7 +163,12 @@ impl Config {
             }
             Err(error) => return Err(error.into()),
         };
-        let mut config: Self = toml::from_str(&contents)?;
+        let mut preferences: toml::Table = toml::from_str(&contents)?;
+        let mut removed = false;
+        for key in ["white_paper", "tab_layout", "marker_style"] {
+            removed |= preferences.remove(key).is_some();
+        }
+        let mut config: Self = preferences.try_into()?;
         // Older files allowed custom timeouts from 30 to 1800 seconds.
         // Use the default when a legacy value has no matching Behavior choice.
         if (30..=1800).contains(&config.inactivity_seconds)
@@ -184,6 +177,9 @@ impl Config {
             config.inactivity_seconds = Self::default().inactivity_seconds;
         }
         config.validate()?;
+        if removed {
+            config.save(path)?;
+        }
         Ok(config)
     }
 
@@ -325,7 +321,6 @@ mod tests {
             paper: Paper::Grid,
             shape: Shape::Ticket,
             visible_notes: 4,
-            tab_layout: TabLayout::Overlapping,
             inactivity_seconds: 60,
             ..Config::default()
         };
@@ -364,6 +359,24 @@ mod tests {
         assert!(path.is_file());
 
         fs::remove_dir_all(directory).expect("test directory should be removable");
+    }
+
+    #[test]
+    fn retired_choices_are_removed_without_losing_file_only_preferences() {
+        let directory = test_directory("retired-choices");
+        let path = directory.join("config.toml");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(&path, "white_paper = true\ntab_layout = 'adjacent'\nmarker_style = 'dots'\nedge = 'left'\nhide_in_fullscreen = false\nhide_in_dnd = false\n").unwrap();
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.edge, ScreenEdge::Left);
+        assert!(!config.hide_in_fullscreen);
+        assert!(!config.hide_in_dnd);
+        let saved = fs::read_to_string(&path).unwrap();
+        for key in ["white_paper", "tab_layout", "marker_style"] {
+            assert!(!saved.contains(key));
+        }
+        assert_eq!(Config::load(&path).unwrap(), config);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

@@ -2,6 +2,31 @@
 
 Run against the release build on the reference compositor. Record failures and pending checks, not a history of every run. Final UI approval belongs to the user.
 
+## October 12 removal-only review
+
+This pass supersedes the editing-bar and edge-style checks in older records below. Review the individual note, selected All Notes preview and Settings in Paper, Playful, Minimal Light and Minimal Dark. Both writing areas must have no editing/search bar. Individual tools retain their first-level contents and have no More or pattern dropdown. All Notes actions remain unchanged.
+
+Check Ctrl+Z and Ctrl+Shift+Z in both body editors, including after selecting another All Notes note. Ctrl+F/B/I/U must have no note-search/formatting action. Existing formatting and pattern overrides must survive reopening. Check stacked tabs and the bar marker on all edges without tab tooltips. Settings must omit White paper, Tabs, Marker and both hide-policy controls. The README documents the remaining file-only hide policies.
+
+Individual Bullet list, Numbered list, Pattern override, Copy text and docked Open away from edge return in Prompt 2. Do not review the footer or selection bubble as implemented yet.
+
+Verification passed: 35 non-display tests and all 15 native GTK tests, with three affected edge tests rerun after marker CSS cleanup. The isolated display used Sway at 125%. All three release shutdown probes passed. Formatting, strict Clippy with existing GTK deprecations allowed, the release build and diff checks passed. [The review report](/tmp/stickies-removal-check/review.md) includes the test changes and individual/All Notes/Settings screenshots in all four themes, plus lower Settings and wide All Notes views. User visual review remains pending.
+
+## October 12 daily-use feedback
+
+The approved feedback pass passed 34 non-display tests and 15 native GTK tests in an isolated 125% Wayland display. The final two settings checks were rerun after fixing rejected-switch feedback and updating the minimum-size expectation. Formatting, strict Clippy with existing deprecations allowed and the offline release build passed. Logs and screenshots are in `/tmp/stickies-feedback-check`.
+
+The new tests cover Unicode formatting ranges, checklist-prefix edits, undo/redo, atomic failed saves, reopening formatted notes, compact/wide tool placement across themes, stacked-tab click routing and bounds on all edges, and reduced motion. Existing shared-session, timeout, Escape, positioning and blank-note checks also pass.
+
+For owner review:
+
+- Open All Notes tools at 680 × 520 and at wider sizes. Tools must stay outside the sheet; the compact palette and actions must be visible. Date metadata returns when compact tools close.
+- Select body text for bold, italic, underline and strikethrough; edit, undo/redo, close and reopen. Check the same note in two views. Find in note advances on Enter and wraps; Copy text remains plain text.
+- Compare Virgil, Inter, Mono and Kalam with checked and unchecked items, including archived previews.
+- Select Classic/Stacked and Dots/Bar independently, then switch back. Check all screen edges and reduced motion. Existing styles remain defaults.
+- Check the concise Settings controls and font/pattern samples. Global keybinding instructions are in README. Launch-at-login still needs an actual login check.
+- Open a separate note on the owner's desktop and confirm the Hyprland border rule while retaining the note's own theme drawing.
+
 ## October 10 UI verification
 
 After the user authorized tests, 34 non-display tests and all 12 ignored native GTK tests passed. Formatting, strict Clippy with existing deprecations allowed, release compilation and the three shutdown signal probes also passed. Native assertions cover theme/edge geometry, default/minimum sizes, focus, interrupted/reduced motion, Search scrolling, rejected Appearance changes, list prefixes, shared editing and layered Escape. Release screenshots confirm the corrected toolbox and Search behavior. See [the results and evidence](../plans/README.md#verification-status).
@@ -61,7 +86,7 @@ The [October 9 motion frames and recordings](design-previews/2026-10-09-edge-mot
 
 12. Settings > Behavior > Docked note timeout offers Off / 1 / 2 / 5 minutes, default 2. Select each value, restart and confirm it persists. Off keeps docked notes open; otherwise a docked note with individual Pin off closes after the selected interval. Pin on prevents auto-close; turning it off starts a fresh selected interval. Changing the setting while a docked note is open restarts or cancels its timer immediately. Pointer-enter and pointer motion over the note or tools reset the timer alongside keys, clicks and scroll. Separate notes and All Notes never auto-close, with individual Pin on or off. Activity in those other views must not reset the docked timer. A rejected Settings write restores the saved timeout choice.
 
-Open individual tools, then More, in docked and separate notes. First Escape dismisses the tools and nested More together while preserving the note; second Escape closes the note, including with Always open enabled. Without an open popover, Escape closes immediately. Repeat with focus in the note body and in each popover. Close remains available. In disposable data, reject a save and confirm Escape still dismisses tools first but retains the dirty note when closing fails; restore writes and retry.
+Open individual tools in docked and separate notes. First Escape dismisses the tools while preserving the note; second Escape closes the note, including with Always open enabled. Without an open popover, Escape closes immediately. Repeat with focus in the note body and in the popover. Close remains available. In disposable data, reject a save and confirm Escape still dismisses tools first but retains the dirty note when closing fails; restore writes and retry.
 
 For old disposable configs, omit `inactivity_seconds` and verify the two-minute default. Valid legacy custom values such as 90 seconds also load as two minutes without rewriting the file on load. Existing invalid values outside the old range and unknown keys remain errors.
 

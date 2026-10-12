@@ -76,6 +76,7 @@ pub fn apply_note_font(
         Font::Theme if config.theme != Theme::Minimal => "'Virgil 3 YOFF', cursive",
         Font::Theme | Font::Grotesk => "Inter, sans-serif",
         Font::Mono => "'JetBrains Mono', monospace",
+        Font::Kalam => "Kalam, cursive",
         Font::Handwritten => "'Virgil 3 YOFF', cursive",
     };
     // Provisional preview values, reviewed separately for each theme.
@@ -124,7 +125,7 @@ pub fn palette_css() -> String {
             format!(
                 ".icon-control.{class} {{ color: rgb({r},{g},{b}); }}
             .note-tab.{class} {{ border-color: rgb({r},{g},{b}); --edge-accent: rgb({r},{g},{b}); }}
-            .edge-pill.{class}, .management .{class} .tag-bar,
+            .edge-result-color.{class}, .management .{class} .tag-bar,
             .note-controls .color-swatch.{class} {{ background: rgb({r},{g},{b}); }}
             .note-controls .color-swatch.{class} {{ color: {swatch_ink}; }}
             "
@@ -144,6 +145,7 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         Font::Theme if config.theme != Theme::Minimal => "'Virgil 3 YOFF', cursive",
         Font::Theme | Font::Grotesk => "Inter, sans-serif",
         Font::Mono => "'JetBrains Mono', monospace",
+        Font::Kalam => "Kalam, cursive",
         Font::Handwritten => "'Virgil 3 YOFF', cursive",
     };
     let palette_css = palette_css();
@@ -179,7 +181,7 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         {tab_colors}
         .edge-window .note-tab, .edge-window .strip-control, .edge-search, .edge-search * {{ transition: none; animation: none; }}
         .tab-title {{ font-family: Inter, sans-serif; font-size: 11px; font-weight: 600; }}
-        .edge-pill {{ min-width: 8px; min-height: 8px; border-radius: 50%; margin: 0; }}
+        .edge-result-color {{ min-width: 8px; min-height: 8px; border-radius: 50%; margin: 0; }}
         .edge-search {{ font-family: Inter, sans-serif; font-size: 13px; background: {bg}; color: {fg}; border: 1px solid {line}; border-radius: 10px; padding: 8px; }}
         .edge-search searchentry {{ min-height: 30px; background: transparent; color: {fg}; border: 1px solid {line}; border-radius: 8px; box-shadow: none; }}
         .edge-search list {{ background: transparent; }}
@@ -362,7 +364,6 @@ pub fn paper_background(
         let (r, g, b, a) = match config.theme {
             Theme::Minimal if dark(&config) => (39. / 255., 44. / 255., 50. / 255., 1.),
             Theme::Minimal => (1., 1., 1., 1.),
-            Theme::Paper if config.white_paper => (1., 1., 1., 1.),
             Theme::Paper => (1., 0.966, 0.864, 1.),
             Theme::Playful => {
                 let (r, g, b) = color.get().fill();

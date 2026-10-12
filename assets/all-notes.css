@@ -294,3 +294,9 @@
 .management.minimal .appearance-drawer { background: var(--panel-bg); }
 .management .appearance-header { min-height: 24px; padding: 10px 12px; color: var(--ink); }
 .management .appearance-header label { font-size: 16px; font-weight: 600; }
+
+/* Keep both the sheet and the tools visible in the compact layout. */
+.management.management .inline-content.compact { padding: 10px 18px 12px 24px; }
+.management .main-note-tools { border-radius: 10px; }
+.management.management .main-note-tools.horizontal { padding: 6px; }
+.management .main-note-tools.horizontal .color-swatch { min-width: 16px; min-height: 16px; }

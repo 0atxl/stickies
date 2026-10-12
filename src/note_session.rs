@@ -10,6 +10,15 @@ use std::{
     time::Duration,
 };
 
+#[derive(Clone, PartialEq)]
+struct EditState {
+    title: String,
+    body: String,
+    spans: Vec<crate::text_editing::Span>,
+    cursor: i32,
+    selection: i32,
+}
+
 /// One live note, shared by every editor displaying it.
 pub struct NoteSession {
     pub title: gtk::EntryBuffer,
@@ -30,6 +39,9 @@ pub struct NoteSession {
     save_source: RefCell<Option<glib::SourceId>>,
     listeners: RefCell<Vec<Weak<dyn Fn()>>>,
     on_saved: Rc<dyn Fn()>,
+    history: RefCell<Vec<EditState>>,
+    history_index: Cell<usize>,
+    formatting_error: Option<String>,
 }
 
 impl NoteSession {
@@ -40,6 +52,13 @@ impl NoteSession {
         let (style, error) = match storage.load_note_style(note.id) {
             Ok(style) => (style, None),
             Err(error) => (NoteStyle::default(), Some(error.to_string())),
+        };
+        let formatting_error = match storage.load_formatting(note.id) {
+            Ok(spans) => {
+                crate::text_editing::apply(&body, &spans);
+                None
+            }
+            Err(error) => Some(format!("Could not load text formatting: {error}")),
         };
         let session = Rc::new(Self {
             title,
@@ -60,10 +79,15 @@ impl NoteSession {
             save_source: RefCell::new(None),
             listeners: RefCell::new(Vec::new()),
             on_saved: Rc::new(on_saved),
+            history: RefCell::new(Vec::new()),
+            history_index: Cell::new(0),
+            formatting_error,
         });
         let weak = Rc::downgrade(&session);
         session.title.connect_text_notify(move |_| {
-            if let Some(session) = weak.upgrade() {
+            if let Some(session) = weak.upgrade()
+                && !session.decorating.get()
+            {
                 session.schedule_save();
             }
         });
@@ -79,6 +103,7 @@ impl NoteSession {
                         if let Some(session) = weak.upgrade() {
                             session.render_source.borrow_mut().take();
                             session.refresh_checklists();
+                            session.record_edit();
                             session.notify();
                         }
                     });
@@ -88,7 +113,98 @@ impl NoteSession {
             }
         });
         session.refresh_checklists();
+        session.record_edit();
         session
+    }
+
+    fn edit_state(&self) -> EditState {
+        EditState {
+            title: self.title.text().to_string(),
+            body: self
+                .body
+                .text(&self.body.start_iter(), &self.body.end_iter(), true)
+                .to_string(),
+            spans: crate::text_editing::spans(&self.body),
+            cursor: crate::text_editing::offset(
+                &self.body,
+                &self.body.iter_at_mark(&self.body.get_insert()),
+            ),
+            selection: crate::text_editing::offset(
+                &self.body,
+                &self.body.iter_at_mark(&self.body.selection_bound()),
+            ),
+        }
+    }
+    fn record_edit(&self) {
+        if self.decorating.get() {
+            return;
+        }
+        let state = self.edit_state();
+        let mut history = self.history.borrow_mut();
+        if let Some(previous) = history.get(self.history_index.get())
+            && previous.title == state.title
+            && previous.body == state.body
+            && previous.spans == state.spans
+        {
+            return;
+        }
+        history.truncate(self.history_index.get() + 1);
+        history.push(state);
+        if history.len() > 100 {
+            history.remove(0);
+        }
+        self.history_index.set(history.len() - 1);
+    }
+    pub fn undo(self: &Rc<Self>, redo: bool) {
+        self.record_edit();
+        let index = self.history_index.get();
+        let next = if redo {
+            index + 1
+        } else {
+            index.saturating_sub(1)
+        };
+        let Some(state) = self.history.borrow().get(next).cloned() else {
+            return;
+        };
+        if next == index {
+            return;
+        }
+        self.history_index.set(next);
+        self.decorating.set(true);
+        self.title.set_text(&state.title);
+        self.body.set_text(&state.body);
+        crate::text_editing::apply(&self.body, &state.spans);
+        self.decorating.set(false);
+        self.refresh_checklists();
+        self.body.select_range(
+            &crate::text_editing::iter(&self.body, state.cursor),
+            &crate::text_editing::iter(&self.body, state.selection),
+        );
+        self.schedule_save();
+    }
+    #[cfg(test)]
+    pub fn toggle_mark(self: &Rc<Self>, mark: crate::text_editing::Mark) {
+        let Some((start, end)) = self.body.selection_bounds() else {
+            return;
+        };
+        self.record_edit();
+        let tag = mark.tag(&self.body);
+        let mut at = start;
+        let mut all = true;
+        while at < end {
+            if at.child_anchor().is_none() && !at.has_tag(&tag) {
+                all = false;
+                break;
+            }
+            at.forward_char();
+        }
+        if all {
+            self.body.remove_tag(&tag, &start, &end);
+        } else {
+            self.body.apply_tag(&tag, &start, &end);
+        }
+        self.record_edit();
+        self.schedule_save();
     }
 
     pub fn attach_view(self: &Rc<Self>, view: &gtk::TextView) {
@@ -211,7 +327,7 @@ impl NoteSession {
                 let button = gtk::CheckButton::new();
                 button.add_css_class("inline-check");
                 button.set_active(active);
-                button.set_tooltip_text(Some("Mark item complete"));
+                button.update_property(&[gtk::accessible::Property::Label("Completed")]);
                 let weak = Rc::downgrade(self);
                 let target = anchor.clone();
                 button.connect_toggled(move |b| {
@@ -255,11 +371,13 @@ impl NoteSession {
         self.style.borrow().clone()
     }
     pub fn error(&self) -> Option<String> {
-        self.error
-            .borrow()
-            .clone()
-            .or_else(|| self.style_error.borrow().clone())
-            .or_else(|| self.pin_error.borrow().clone())
+        self.formatting_error.clone().or_else(|| {
+            self.error
+                .borrow()
+                .clone()
+                .or_else(|| self.style_error.borrow().clone())
+                .or_else(|| self.pin_error.borrow().clone())
+        })
     }
     pub fn is_dirty(&self) -> bool {
         self.dirty.get()
@@ -346,6 +464,10 @@ impl NoteSession {
     }
 
     pub fn flush(&self) -> bool {
+        if self.formatting_error.is_some() {
+            return false;
+        }
+        self.record_edit();
         if let Some(source) = self.save_source.borrow_mut().take() {
             source.remove();
         }
@@ -360,7 +482,10 @@ impl NoteSession {
             color: self.color.get(),
             pinned: self.pinned.get(),
         };
-        match self.storage.update_note(&note) {
+        match self
+            .storage
+            .update_formatted_note(&note, &crate::text_editing::spans(&self.body))
+        {
             Ok(()) => {
                 self.dirty.set(false);
                 self.error.borrow_mut().take();
@@ -415,6 +540,54 @@ pub fn decorate_checklists(buffer: &gtk::TextBuffer) {
             }
         }
     }
+}
+
+/// Completed text keeps Pango's font-specific strike metrics and the theme's ink.
+pub fn style_checklists(buffer: &gtk::TextBuffer, config: &crate::config::Config) {
+    let Some(tag) = buffer.tag_table().lookup("completed") else {
+        return;
+    };
+    let color = if config.theme == crate::config::Theme::Minimal && crate::appearance::dark(config)
+    {
+        gtk::gdk::RGBA::new(0.72, 0.73, 0.74, 1.)
+    } else {
+        gtk::gdk::RGBA::new(0.37, 0.35, 0.32, 1.)
+    };
+    tag.set_foreground_rgba(Some(&color));
+}
+
+pub fn readonly_checklists(view: &gtk::TextView) {
+    let buffer = view.buffer();
+    let hidden = gtk::TextTag::builder()
+        .name("check-marker")
+        .invisible(true)
+        .build();
+    buffer.tag_table().add(&hidden);
+    for line in 0..buffer.line_count() {
+        let Some(mut start) = buffer.iter_at_line(line) else {
+            continue;
+        };
+        let mut end = start;
+        end.forward_to_line_end();
+        let text = buffer.text(&start, &end, true);
+        if !text.starts_with("- [ ] ") && !text.starts_with("- [x] ") {
+            continue;
+        }
+        let anchor = buffer.create_child_anchor(&mut start);
+        let mut start = buffer.iter_at_child_anchor(&anchor);
+        start.forward_char();
+        let mut end = start;
+        end.forward_chars(6);
+        buffer.apply_tag(&hidden, &start, &end);
+        let check = gtk::CheckButton::new();
+        check.add_css_class("inline-check");
+        check.set_active(text.starts_with("- [x] "));
+        check.set_can_target(false);
+        check.set_focusable(false);
+        check.update_property(&[gtk::accessible::Property::Label("Completed")]);
+        view.add_child_at_anchor(&check, &anchor);
+    }
+    decorate_checklists(&buffer);
 }
 
 #[cfg(test)]

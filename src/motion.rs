@@ -9,7 +9,6 @@ pub const COLLAPSE_MS: u32 = 110;
 pub const PANEL_MS: u32 = 120;
 pub const STAGGER_MS: u32 = 20;
 pub const HOVER_MS: u32 = 120;
-pub const HOVER_SCALE: f64 = 1.06;
 pub const HOVER_PAD: i32 = 4;
 
 struct Running {

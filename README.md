@@ -9,7 +9,7 @@ The interaction is simple. Recent or pinned notes sit at the screen edge. Hoveri
 - Native Rust and GTK4 interface with Wayland Layer Shell integration.
 - Local SQLite storage, offline editing, and no telemetry. No account is required for local use.
 - Fast mouse and keyboard access without a normal tiled application window.
-- Plain-text notes and checklists, with Copy text for use elsewhere.
+- Plain-text notes and checklists with optional inline formatting, undo/redo and Copy text.
 - Hyprland is the reference environment. KDE Plasma Wayland, Sway, and other Wayland compositors that support Layer Shell are planned Linux targets.
 
 GNOME and X11 are outside the Linux release scope. Windows and macOS may receive separate ports later.
@@ -23,7 +23,13 @@ Notes save locally after 750 ms of quiet time. Failed saves block closing or rep
 The UI is awaiting manual design review and compositor checks. Minimal has fully opaque light and dark modes with no compositor blur dependency. Saved Glass preferences remain compatible. DND integration currently watches Omarchy shell state. Other desktop compatibility is unverified.
 New databases start empty. Use `+` at the edge to create your first note. Existing databases retain their notes, including any examples created by earlier prototypes.
 
-The handwritten font is Virgil, with Inter and JetBrains Mono as the other choices. Reference images guide layout and styling without replacing those font decisions.
+Font choices are Virgil, Inter, JetBrains Mono and Kalam. Existing theme fonts remain the defaults.
+
+All Notes tools reserve space beside the sheet, or below it in narrow windows. The edge always uses stacked tabs and a bar marker. Title tooltips are removed; the planned hover preview is not implemented yet.
+
+Ctrl+Z and Ctrl+Shift+Z undo and redo while editing the body. Existing bold, italic, underline and strikethrough ranges remain stored separately from the plain text and survive reopening. Their UI and shortcuts are temporarily unavailable pending the selection bubble. Search inside a note is removed. Copy text remains plain text.
+
+The individual nested More menu is temporarily removed. Bullet list, Numbered list, Pattern override, Copy text and docked Open away from edge are unavailable there until the flat menus arrive. Their underlying editing and pop-out handlers and stored per-note styles remain. All Notes tools and actions are unchanged apart from removal of the editing/search bar.
 
 ## Remaining work
 
@@ -68,6 +74,19 @@ hyprctl layers
 
 Press `Ctrl+C` to stop it.
 
+## File-only visibility preferences
+
+`$XDG_CONFIG_HOME/stickies/config.toml`, normally `~/.config/stickies/config.toml`, retains these keys without Settings controls. Both default to `true`:
+
+```toml
+hide_in_fullscreen = true
+hide_in_dnd = true
+```
+
+`hide_in_fullscreen` places the strip and transient search panel on the Top layer, below fullscreen windows. Set it to `false` to use Overlay. Docked notes use Overlay in either case. `hide_in_dnd` hides the strip and transient panel while Omarchy Do Not Disturb is active, preserving an open docked note. Set it to `false` to keep the strip visible. Restart Stickies after editing the file.
+
+Old `white_paper`, `tab_layout` and `marker_style` entries are removed when a valid config loads. Other preferences and stored note styles are preserved.
+
 ## Hyprland shortcuts and CLI actions
 
 Stickies accepts one action flag per invocation:
@@ -81,14 +100,24 @@ Stickies accepts one action flag per invocation:
 
 When Stickies is running, these flags use [GApplication's command-line forwarding](https://docs.gtk.org/gio/method.Application.add_main_option.html) over the session D-Bus. The second process sends the request to the primary instance and exits. With no running instance, Stickies starts and performs the requested action. Running without a flag retains the normal startup behavior. `stickies --help` lists the flags; unknown flags or multiple different action flags return an error.
 
-Settings > Shortcuts provides selectable examples and a Copy button for each bind. Add the examples you want to your Hyprland configuration, choosing keys that fit your existing bindings:
+Global shortcuts belong to the compositor and are documented here rather than shown in Settings. For current Omarchy Lua configurations, choose unused bindings:
 
-```ini
-bind = SUPER, N, exec, stickies --new-note
-bind = SUPER, slash, exec, stickies --search
-bind = SUPER, T, exec, stickies --toggle-strip
-bind = SUPER, A, exec, stickies --show-all-notes
+```lua
+o.bind("SUPER + N", "New note", "stickies --new-note")
+o.bind("SUPER + slash", "Search notes", "stickies --search")
+o.bind("SUPER + T", "Toggle strip", "stickies --toggle-strip")
+o.bind("SUPER + A", "All Notes", "stickies --show-all-notes")
 ```
+
+Older Hyprland configurations use `bind = SUPER, N, exec, stickies --new-note` and the equivalent action commands above.
+
+To hide Hyprland's border on pop-out notes while keeping the All Notes border:
+
+```lua
+o.window({ class = "^dev[.]stickies[.]Stickies$", title = "^Stickies · Note$" }, { border_size = 0 })
+```
+
+Add that rule to your user Hyprland Lua config, then run `hyprctl reload` and `hyprctl configerrors`.
 
 The `stickies` executable must be on Hyprland's PATH. For a workspace build, substitute the absolute path to `target/debug/stickies` or `target/release/stickies`. Hyprland owns the global keybindings; Stickies does not capture global keys or edit compositor configuration.
 

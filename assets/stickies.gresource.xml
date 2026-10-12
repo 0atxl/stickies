@@ -35,4 +35,7 @@
 <file>icons/edge/new.svg</file>
 <file>icons/edge/search.svg</file>
 <file>icons/edge/notes.svg</file>
+<file>fonts/Kalam-Regular.ttf</file>
+<file>fonts/Kalam-Bold.ttf</file>
+<file>fonts/Kalam-LICENSE.txt</file>
 </gresource></gresources>

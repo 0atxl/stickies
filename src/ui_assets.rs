@@ -18,7 +18,13 @@ unsafe extern "C" {
 pub fn register() -> Result<(), Box<dyn std::error::Error>> {
     gio::resources_register_include!("stickies.gresource")?;
     let cache = glib::user_cache_dir().join("stickies/fonts");
-    for name in ["Virgil.ttf", "Inter.ttf", "JetBrainsMono.ttf"] {
+    for name in [
+        "Virgil.ttf",
+        "Inter.ttf",
+        "JetBrainsMono.ttf",
+        "Kalam-Regular.ttf",
+        "Kalam-Bold.ttf",
+    ] {
         let register_font = || -> Result<(), Box<dyn std::error::Error>> {
             std::fs::create_dir_all(&cache)?;
             let bytes = gio::resources_lookup_data(

@@ -12,6 +12,7 @@ mod note_session;
 mod platform;
 mod settings;
 mod storage;
+mod text_editing;
 mod ui_assets;
 
 use app::{Action, AppState, NoteColor, NoteId};
@@ -1310,7 +1311,7 @@ mod edge_tests {
                 ui.open_docked(id);
                 let note = ui.edge.docked.borrow().clone().unwrap();
                 note.body.buffer().set_text("Saved before repositioning");
-                button(root, "Reposition…").emit_clicked();
+                button(root, "Move strip").emit_clicked();
                 settle();
                 assert!(ui.edge.reposition_offset().is_some());
                 assert_eq!(
@@ -1366,6 +1367,24 @@ mod edge_tests {
             }
             button(root, "Settings").emit_clicked();
             settle();
+            for removed in [
+                "White paper",
+                "Tabs",
+                "Marker",
+                "Hide in fullscreen",
+                "Hide in Do Not Disturb",
+            ] {
+                assert!(
+                    find_widget(root, &|widget| {
+                        widget
+                            .downcast_ref::<gtk::Label>()
+                            .is_some_and(|label| label.text() == removed)
+                    })
+                    .is_none(),
+                    "retired Settings control: {removed}"
+                );
+            }
+
             let content =
                 find_widget(root, &|widget| widget.has_css_class("appearance-panel")).unwrap();
             let mut parent = content.parent().unwrap();
@@ -1375,7 +1394,7 @@ mod edge_tests {
             let scroll = parent.downcast::<gtk::ScrolledWindow>().unwrap();
             scroll.vadjustment().set_value(scroll.vadjustment().upper());
             settle();
-            for (width, height, size) in [(720, 540, "default"), (680, 460, "minimum")] {
+            for (width, height, size) in [(720, 540, "default"), (680, 520, "minimum")] {
                 manager.window().set_visible(false);
                 manager.window().set_resizable(false);
                 gtk::prelude::WidgetExt::unrealize(manager.window());
@@ -1385,23 +1404,27 @@ mod edge_tests {
                 scroll.vadjustment().set_value(scroll.vadjustment().upper());
                 settle();
                 assert_eq!((root.width(), root.height()), (width, height));
-                if let Ok(directory) = std::env::var("STICKIES_EDGE_CAPTURES") {
-                    let snapshot = gtk::Snapshot::new();
-                    gtk::WidgetPaintable::new(Some(root)).snapshot(
-                        &snapshot,
-                        f64::from(root.width()),
-                        f64::from(root.height()),
-                    );
-                    manager
-                        .window()
-                        .renderer()
-                        .unwrap()
-                        .render_texture(snapshot.to_node().unwrap(), None)
-                        .save_to_png(
-                            std::path::Path::new(&directory)
-                                .join(format!("{name}-settings-{size}.png")),
-                        )
-                        .unwrap();
+                for (position, label) in [(0., "top"), (scroll.vadjustment().upper(), "bottom")] {
+                    scroll.vadjustment().set_value(position);
+                    settle();
+                    if let Ok(directory) = std::env::var("STICKIES_EDGE_CAPTURES") {
+                        let snapshot = gtk::Snapshot::new();
+                        gtk::WidgetPaintable::new(Some(root)).snapshot(
+                            &snapshot,
+                            f64::from(root.width()),
+                            f64::from(root.height()),
+                        );
+                        manager
+                            .window()
+                            .renderer()
+                            .unwrap()
+                            .render_texture(snapshot.to_node().unwrap(), None)
+                            .save_to_png(
+                                std::path::Path::new(&directory)
+                                    .join(format!("{name}-settings-{size}-{label}.png")),
+                            )
+                            .unwrap();
+                    }
                 }
             }
             manager.window().set_visible(false);
@@ -1583,65 +1606,61 @@ mod edge_tests {
                 }
             };
             for on_popover in [false, true] {
-                for nested in [false, true] {
-                    let (editor, window) = open();
-                    let (tools_button, tools) = popover(&editor, "Open note tools");
-                    let (more_button, more) = popover(&editor, "More note tools");
-                    tools_button.popup();
-                    settle();
-                    if nested {
-                        more_button.popup();
-                        settle();
-                    }
-                    assert!(
-                        tools.is_visible(),
-                        "tools closed before Escape: detached={detached}, on_popover={on_popover}, nested={nested}"
-                    );
-                    assert!(tools.is_mapped());
-                    let popup = tools
-                        .surface()
-                        .unwrap()
-                        .downcast::<gtk::gdk::Popup>()
-                        .unwrap();
-                    assert!(popup.is_mapped());
-                    let native = editor.root.native().unwrap();
-                    let native_widget = native.clone().dynamic_cast::<gtk::Widget>().unwrap();
-                    let body = editor.body.compute_bounds(&native_widget).unwrap();
-                    let (dx, dy) = native.surface_transform();
-                    // Compare the painted contents, excluding the native shadow.
-                    let contents = tools.first_child().unwrap().compute_bounds(&tools).unwrap();
-                    let (px, py) = tools.surface_transform();
-                    let x = f64::from(popup.position_x()) + f64::from(contents.x()) + px - dx;
-                    let y = f64::from(popup.position_y()) + f64::from(contents.y()) + py - dy;
-                    assert!(
-                        x + f64::from(contents.width()) <= f64::from(body.x())
-                            || x >= f64::from(body.x() + body.width())
-                            || y + f64::from(contents.height()) <= f64::from(body.y())
-                            || y >= f64::from(body.y() + body.height()),
-                        "tools overlap writing area: detached={detached}, popup=({x},{y},{},{}), body={body:?}",
-                        contents.width(),
-                        contents.height()
-                    );
-                    let target = if on_popover {
-                        if nested {
-                            more.upcast_ref()
-                        } else {
-                            tools.upcast_ref()
-                        }
-                    } else {
-                        &window
-                    };
-                    escape(target);
-                    settle();
-                    assert!(
-                        is_open(),
-                        "first Escape must preserve the note: detached={detached}, on_popover={on_popover}, nested={nested}"
-                    );
-                    assert!(!tools.is_visible());
-                    assert!(!more.is_visible());
-                    escape(&window);
-                    assert!(!is_open(), "second Escape must close an Always open note");
-                }
+                let (editor, window) = open();
+                let (tools_button, tools) = popover(&editor, "Open note tools");
+                tools_button.popup();
+                settle();
+                assert!(
+                    tools.is_visible(),
+                    "tools closed before Escape: detached={detached}, on_popover={on_popover}"
+                );
+                assert!(tools.is_mapped());
+                assert!(
+                    find_widget(tools.upcast_ref(), &|widget| {
+                        widget.is::<gtk::MenuButton>() || widget.is::<gtk::DropDown>()
+                    })
+                    .is_none(),
+                    "individual tools must have no nested menus"
+                );
+
+                let popup = tools
+                    .surface()
+                    .unwrap()
+                    .downcast::<gtk::gdk::Popup>()
+                    .unwrap();
+                assert!(popup.is_mapped());
+                let native = editor.root.native().unwrap();
+                let native_widget = native.clone().dynamic_cast::<gtk::Widget>().unwrap();
+                let body = editor.body.compute_bounds(&native_widget).unwrap();
+                let (dx, dy) = native.surface_transform();
+                // Compare the painted contents, excluding the native shadow.
+                let contents = tools.first_child().unwrap().compute_bounds(&tools).unwrap();
+                let (px, py) = tools.surface_transform();
+                let x = f64::from(popup.position_x()) + f64::from(contents.x()) + px - dx;
+                let y = f64::from(popup.position_y()) + f64::from(contents.y()) + py - dy;
+                assert!(
+                    x + f64::from(contents.width()) <= f64::from(body.x())
+                        || x >= f64::from(body.x() + body.width())
+                        || y + f64::from(contents.height()) <= f64::from(body.y())
+                        || y >= f64::from(body.y() + body.height()),
+                    "tools overlap writing area: detached={detached}, popup=({x},{y},{},{}), body={body:?}",
+                    contents.width(),
+                    contents.height()
+                );
+                let target = if on_popover {
+                    tools.upcast_ref()
+                } else {
+                    &window
+                };
+                escape(target);
+                settle();
+                assert!(
+                    is_open(),
+                    "first Escape must preserve the note: detached={detached}, on_popover={on_popover}"
+                );
+                assert!(!tools.is_visible());
+                escape(&window);
+                assert!(!is_open(), "second Escape must close an Always open note");
             }
             let (editor, window) = open();
             escape(&window);

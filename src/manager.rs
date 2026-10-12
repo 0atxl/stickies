@@ -50,7 +50,7 @@ struct ManagerUi {
     body: gtk::TextView,
     pin: gtk::ToggleButton,
     popout: gtk::Button,
-    more: gtk::MenuButton,
+    more: gtk::ToggleButton,
     controls: NoteControls,
     pattern_choice: gtk::DropDown,
     syncing_style: Cell<bool>,
@@ -219,8 +219,12 @@ impl ManagerUi {
                     .set_buffer(&gtk::EntryBuffer::new(Some(note.title.as_str())));
                 let buffer = gtk::TextBuffer::new(None::<&gtk::TextTagTable>);
                 buffer.set_text(&note.body);
+                if let Ok(spans) = self.storage.load_formatting(note.id) {
+                    crate::text_editing::apply(&buffer, &spans);
+                }
                 crate::note_session::decorate_checklists(&buffer);
                 self.body.set_buffer(Some(&buffer));
+                crate::note_session::readonly_checklists(&self.body);
             }
         }
         self.selected.set(Some(id));
@@ -429,6 +433,7 @@ impl ManagerUi {
         self.pattern_choice.set_sensitive(self.body.is_editable());
         self.syncing_style.set(false);
         appearance::apply_note_font(&self.font, &self.resolved.borrow(), &style);
+        crate::note_session::style_checklists(&self.body.buffer(), &self.resolved.borrow());
         self.seed
             .set(self.selected.get().map_or(0, |id| id.value()));
         self.background.queue_draw();
@@ -565,7 +570,7 @@ pub fn build_window(
         .default_width(720)
         .default_height(540)
         .width_request(680)
-        .height_request(460)
+        .height_request(520)
         .build();
     window.add_css_class("management");
     window.connect_destroy(move |_| {
@@ -673,6 +678,8 @@ pub fn build_window(
     paper_content.append(&title);
     paper_content.append(&body_scroll);
     sheet.add_overlay(&paper_content);
+    sheet.set_measure_overlay(&paper_content, true);
+    body_scroll.set_min_content_height(48);
     let vertical = adw::Clamp::builder()
         .orientation(gtk::Orientation::Vertical)
         .maximum_size(420)
@@ -684,7 +691,10 @@ pub fn build_window(
         .child(&vertical)
         .vexpand(true)
         .build();
-    editor.append(&clamp);
+    let sheet_tools = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    clamp.set_hexpand(true);
+    sheet_tools.append(&clamp);
+    editor.append(&sheet_tools);
     let dates = gtk::Label::new(None);
     dates.add_css_class("metadata");
     dates.set_wrap(true);
@@ -717,20 +727,22 @@ pub fn build_window(
     pin.set_child(Some(&ui_assets::image("pin")));
     pin.add_css_class("icon-control");
     let popout = ui_assets::icon("popout", "Open in floating window");
-    let more = menu_button("more", "Note actions");
+    let more = gtk::ToggleButton::new();
+    more.set_child(Some(&ui_assets::image("more")));
+    more.add_css_class("icon-control");
+    more.set_tooltip_text(Some("Note tools"));
+    more.update_property(&[gtk::accessible::Property::Label("Note tools")]);
     let archive = gtk::Button::with_label("Archive");
     let restore = gtk::Button::with_label("Restore");
     let delete = gtk::Button::with_label("Delete");
     let copy = gtk::Button::with_label("Copy text");
-    let checklist = ui_assets::icon("checklist", "Checklist · toggle current item");
+    let checklist = ui_assets::icon("checklist", "Checklist");
     let bullet = appearance::icon("view-list-bullet-symbolic", "Bullet list");
     let numbered = appearance::icon("view-list-ordered-symbolic", "Numbered list");
     let controls = NoteControls::new();
     let pattern_choice =
         gtk::DropDown::from_strings(&["Default pattern", "Plain", "Dots", "Square grid", "Ruled"]);
-    pattern_choice.set_tooltip_text(Some(
-        "Note canvas pattern; Default pattern follows Appearance",
-    ));
+    pattern_choice.set_tooltip_text(Some("Canvas pattern"));
     let tools = gtk::Box::new(gtk::Orientation::Vertical, 8);
     tools.add_css_class("main-note-tools");
     let edit_actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
@@ -738,26 +750,106 @@ pub fn build_window(
     for button in [&checklist, &bullet, &numbered] {
         edit_actions.append(button);
     }
-    tools.append(&edit_actions);
-    tools.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    let commands = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    commands.append(&edit_actions);
+    commands.append(&pattern_choice);
     tools.append(&controls.root);
-    tools.append(&pattern_choice);
-    tools.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    tools.append(&commands);
     let more_actions = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    for (button, icon, label) in [
+        (&copy, "edit-copy-symbolic", "Copy text"),
+        (&archive, "folder-download-symbolic", "Archive"),
+        (&restore, "edit-undo-symbolic", "Restore"),
+        (&delete, "user-trash-symbolic", "Delete"),
+    ] {
+        button.set_icon_name(icon);
+        button.set_tooltip_text(Some(label));
+        button.update_property(&[gtk::accessible::Property::Label(label)]);
+        button.add_css_class("icon-control");
+    }
     for button in [&copy, &archive, &restore, &delete] {
         button.set_hexpand(true);
         more_actions.append(button);
     }
-    tools.append(&more_actions);
+    commands.append(&more_actions);
     let tools_scroll = gtk::ScrolledWindow::new();
     tools_scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
     tools_scroll.set_vscrollbar_policy(gtk::PolicyType::Automatic);
     tools_scroll.set_propagate_natural_height(true);
     tools_scroll.set_max_content_height(420);
     tools_scroll.set_child(Some(&tools));
-    let tools_popover = gtk::Popover::new();
-    tools_popover.set_child(Some(&tools_scroll));
-    more.set_popover(Some(&tools_popover));
+    tools_scroll.set_widget_name("note-tools-panel");
+    tools_scroll.set_min_content_height(100);
+    tools_scroll.set_max_content_height(420);
+    tools_scroll.set_propagate_natural_width(true);
+    tools_scroll.set_max_content_width(200);
+    tools_scroll.set_hexpand(false);
+    tools_scroll.set_vexpand(false);
+    tools_scroll.set_halign(gtk::Align::Start);
+    tools_scroll.set_valign(gtk::Align::Start);
+    tools_scroll.set_visible(false);
+    sheet_tools.append(&tools_scroll);
+    let weak_tools = tools_scroll.downgrade();
+    let weak_dates = dates.downgrade();
+    let weak_content = paper_content.downgrade();
+    more.connect_toggled(move |button| {
+        if let (Some(dates), Some(content)) = (weak_dates.upgrade(), weak_content.upgrade()) {
+            dates.set_visible(!button.is_active() || !content.has_css_class("compact"));
+        }
+        if let Some(tools) = weak_tools.upgrade() {
+            tools.set_visible(button.is_active());
+        }
+    });
+    let tools_breakpoint =
+        adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 899px").unwrap());
+    tools_breakpoint.add_setter(
+        &sheet_tools,
+        "orientation",
+        Some(&gtk::Orientation::Vertical.to_value()),
+    );
+    tools_breakpoint.add_setter(
+        &tools_scroll,
+        "max-content-height",
+        Some(&130i32.to_value()),
+    );
+    tools_breakpoint.add_setter(&tools_scroll, "halign", Some(&gtk::Align::Fill.to_value()));
+    tools_breakpoint.add_setter(
+        &tools_scroll,
+        "min-content-height",
+        Some(&130i32.to_value()),
+    );
+    tools_breakpoint.add_setter(
+        &tools,
+        "orientation",
+        Some(&gtk::Orientation::Horizontal.to_value()),
+    );
+    tools_breakpoint.add_setter(
+        &controls.root,
+        "orientation",
+        Some(&gtk::Orientation::Horizontal.to_value()),
+    );
+    tools_breakpoint.add_setter(&tools_scroll, "max-content-width", Some(&420i32.to_value()));
+    let weak_content = paper_content.downgrade();
+    let weak_dates = dates.downgrade();
+    let weak_more = more.downgrade();
+    tools_breakpoint.connect_apply(move |_| {
+        if let (Some(dates), Some(more)) = (weak_dates.upgrade(), weak_more.upgrade()) {
+            dates.set_visible(!more.is_active());
+        }
+        if let Some(content) = weak_content.upgrade() {
+            content.add_css_class("compact");
+        }
+    });
+    let weak_content = paper_content.downgrade();
+    let weak_dates = dates.downgrade();
+    tools_breakpoint.connect_unapply(move |_| {
+        if let Some(dates) = weak_dates.upgrade() {
+            dates.set_visible(true);
+        }
+        if let Some(content) = weak_content.upgrade() {
+            content.remove_css_class("compact");
+        }
+    });
     actions.add_css_class("note-actions");
     actions.append(&pin);
     actions.append(&popout);
@@ -836,6 +928,8 @@ pub fn build_window(
         adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 979px").unwrap());
     breakpoint.add_setter(&drawer, "collapsed", Some(&true.to_value()));
     window.add_breakpoint(breakpoint);
+    tools_breakpoint.add_setter(&drawer, "collapsed", Some(&true.to_value()));
+    window.add_breakpoint(tools_breakpoint);
     let toast = adw::ToastOverlay::new();
     toast.set_child(Some(&root));
     window.set_content(Some(&toast));
@@ -887,6 +981,12 @@ pub fn build_window(
         seed,
         background,
         font,
+    });
+    let weak_session = Rc::downgrade(&ui);
+    crate::text_editing::bind_history(&ui.body, move || {
+        weak_session
+            .upgrade()
+            .and_then(|ui| ui.session.borrow().clone())
     });
     let weak = Rc::downgrade(&ui);
     ui.list.connect_row_selected(move |_, row| {
@@ -959,7 +1059,7 @@ pub fn build_window(
         let weak = Rc::downgrade(&ui);
         button.connect_clicked(move |_| {
             if let Some(ui) = weak.upgrade() {
-                ui.more.popdown();
+                ui.more.set_active(false);
                 ui.mutate(change);
             }
         });
@@ -986,18 +1086,16 @@ pub fn build_window(
             let b = ui.body.buffer();
             let (s, e) = b.bounds();
             ui.body.clipboard().set_text(&b.text(&s, &e, true));
-            ui.more.popdown();
         }
     });
     for (button, prefix) in [(checklist, "- [ ] "), (bullet, "- "), (numbered, "1. ")] {
         let weak = Rc::downgrade(&ui);
         button.connect_clicked(move |_| {
-            if let Some(ui) = weak.upgrade() {
-                if ui.body.is_editable() {
-                    crate::editor::toggle_line(&ui.body, prefix);
-                    ui.body.grab_focus();
-                }
-                ui.more.popdown();
+            if let Some(ui) = weak.upgrade()
+                && ui.body.is_editable()
+            {
+                crate::editor::toggle_line(&ui.body, prefix);
+                ui.body.grab_focus();
             }
         });
     }
@@ -1151,11 +1249,11 @@ fn note_row(note: &Note, archived: bool, updated: Option<i64>) -> gtk::ListBoxRo
     heading.append(&title);
     let date = gtk::Label::new(Some(&short_date(updated)));
     date.add_css_class("row-date");
-    date.set_tooltip_text(Some("Last updated"));
+
     heading.append(&date);
     if archived {
         let badge = ui_assets::image("archive");
-        badge.set_tooltip_text(Some("Archived"));
+
         badge.add_css_class("archive-badge");
         heading.append(&badge);
     }
@@ -1176,4 +1274,129 @@ fn short_date(millis: Option<i64>) -> String {
         .and_then(|date| date.format("%b %-d").ok())
         .map(|date| date.to_string())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod feedback_tests {
+    use super::*;
+    fn settle() {
+        let end = std::time::Instant::now() + std::time::Duration::from_millis(250);
+        while std::time::Instant::now() < end {
+            while gtk::glib::MainContext::default().iteration(false) {}
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+    fn named(widget: &gtk::Widget, name: &str) -> Option<gtk::Widget> {
+        if widget.widget_name() == name {
+            return Some(widget.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            if let Some(found) = named(&widget, name) {
+                return Some(found);
+            }
+            child = widget.next_sibling();
+        }
+        None
+    }
+    #[test]
+    #[ignore = "requires Wayland and disposable XDG directories"]
+    fn tools_reserve_space_and_checklists_render_across_themes() {
+        for key in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+            assert!(std::path::Path::new(&std::env::var(key).unwrap()).starts_with("/tmp"));
+        }
+        crate::ui_assets::register().unwrap();
+        adw::init().unwrap();
+        let app = gtk::Application::builder()
+            .application_id("dev.stickies.FeedbackCheck")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let storage = Storage::open(&crate::storage::database_path()).unwrap();
+        storage.create_note("Weekend plans", "- [ ] Pick up groceries\n- [x] Finish the sketch\n- [ ] A longer item that wraps onto the next line\n\nA little space to think.", NoteColor::Yellow).unwrap();
+        let ui = crate::build(&app).unwrap();
+        ui.show_manager();
+        let manager = ui.manager.borrow().clone().unwrap();
+        let manager = &manager.0;
+        manager
+            .list
+            .select_row(manager.list.row_at_index(0).as_ref());
+        manager.more.set_active(true);
+        for (theme, font, dark) in [
+            (Theme::Paper, crate::config::Font::Kalam, false),
+            (Theme::Playful, crate::config::Font::Handwritten, false),
+            (Theme::Minimal, crate::config::Font::Grotesk, false),
+            (Theme::Minimal, crate::config::Font::Mono, true),
+        ] {
+            let mut config = ui.config.borrow().clone();
+            config.theme = theme;
+            config.font = font;
+            config.appearance = if dark {
+                crate::config::Appearance::Dark
+            } else {
+                crate::config::Appearance::Light
+            };
+            ui.change_settings(config).unwrap();
+            for (width, height) in [(680, 520), (1040, 720)] {
+                manager.window.set_visible(false);
+                gtk::prelude::WidgetExt::unrealize(&manager.window);
+                manager.window.set_default_size(width, height);
+                manager.window.present();
+                settle();
+                assert!(
+                    (manager.window.width() - width).abs() < 32,
+                    "compositor must allow requested test size: {} vs {width}",
+                    manager.window.width()
+                );
+                let tools = named(manager.window.upcast_ref(), "note-tools-panel").unwrap();
+                let bounds = tools.compute_bounds(&manager.window).unwrap();
+                for widget in [
+                    manager.title.upcast_ref::<gtk::Widget>(),
+                    manager.body.upcast_ref(),
+                ] {
+                    let text = widget.compute_bounds(&manager.window).unwrap();
+                    assert!(
+                        bounds.intersection(&text).is_none(),
+                        "tools cover text: {bounds:?} {text:?}"
+                    );
+                }
+                assert!(
+                    manager.body.height() > 40,
+                    "writing area must remain usable"
+                );
+                assert_eq!(
+                    manager.body.buffer().text(
+                        &manager.body.buffer().start_iter(),
+                        &manager.body.buffer().end_iter(),
+                        false
+                    ),
+                    "Pick up groceries\nFinish the sketch\nA longer item that wraps onto the next line\n\nA little space to think."
+                );
+                if let Ok(path) = std::env::var("STICKIES_EDGE_CAPTURES") {
+                    let snapshot = gtk::Snapshot::new();
+                    gtk::WidgetPaintable::new(Some(&manager.window)).snapshot(
+                        &snapshot,
+                        manager.window.width() as f64,
+                        manager.window.height() as f64,
+                    );
+                    let node = snapshot.to_node().unwrap();
+                    let texture = manager
+                        .window
+                        .renderer()
+                        .unwrap()
+                        .render_texture(&node, None);
+                    std::fs::create_dir_all(&path).unwrap();
+                    texture
+                        .save_to_png(
+                            std::path::Path::new(&path)
+                                .join(format!("all-notes-{theme:?}-{font:?}-{width}.png")),
+                        )
+                        .unwrap();
+                }
+            }
+        }
+        manager.window.close();
+        ui.edge.window.close();
+        ui.edge.strip_window.close();
+    }
 }

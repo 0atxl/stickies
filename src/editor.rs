@@ -28,7 +28,6 @@ pub struct Editor {
     pub resize: gtk::Button,
     toolbar: gtk::Popover,
     tools_button: gtk::MenuButton,
-    more_popover: gtk::Popover,
     docked: bool,
     docked_size: Cell<(i32, i32)>,
     resize_edge: Rc<Cell<gtk::gdk::SurfaceEdge>>,
@@ -83,13 +82,10 @@ impl Editor {
         title.set_width_chars(1);
         title.set_placeholder_text(Some("Untitled note"));
         title.set_buffer(&session.title);
-        let keep = appearance::toggle(
-            "view-pin-symbolic",
-            "Pin · Always open, ignore inactivity timeout",
-        );
+        let keep = appearance::toggle("view-pin-symbolic", "Always open");
         keep.set_child(Some(&ui_assets::image("pin")));
         keep.update_property(&[gtk::accessible::Property::Label("Always open")]);
-        let close = ui_assets::icon("close", "Close note · Escape");
+        let close = ui_assets::icon("close", "Close note");
         header.append(&title);
         header.append(&close);
         let body = gtk::TextView::with_buffer(&session.body);
@@ -109,10 +105,7 @@ impl Editor {
             .vexpand(true)
             .child(&body)
             .build();
-        let checklist = appearance::icon(
-            "checkbox-checked-symbolic",
-            "Checklist · toggle current item",
-        );
+        let checklist = appearance::icon("checkbox-checked-symbolic", "Checklist");
         checklist.set_child(Some(&ui_assets::image("checklist")));
         let bullet = appearance::icon("view-list-bullet-symbolic", "Bullet list");
         let numbered = appearance::icon("view-list-ordered-symbolic", "Numbered list");
@@ -125,41 +118,12 @@ impl Editor {
             "Square grid",
             "Ruled",
         ]);
-        paper_choice.set_tooltip_text(Some(
-            "Note canvas pattern; Default pattern follows Appearance",
-        ));
+        paper_choice.set_tooltip_text(Some("Canvas pattern"));
         paper_choice.set_selected(style.paper.map_or(0, |paper| paper as u32 + 1));
         let rail = gtk::Box::new(gtk::Orientation::Vertical, 8);
         rail.add_css_class("note-rail");
         rail.set_width_request(120);
         let collapse = ui_assets::icon("chevron", "Collapse note menu");
-        let more = gtk::MenuButton::builder()
-            .icon_name("view-more-symbolic")
-            .tooltip_text("More note tools")
-            .build();
-        more.add_css_class("icon-control");
-        more.set_direction(gtk::ArrowType::Right);
-        more.set_child(Some(&ui_assets::image("more")));
-        let more_popover = gtk::Popover::new();
-        more_popover.set_position(gtk::PositionType::Right);
-        let more_tools = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        for (button, label) in [
-            (&bullet, "Bullet list"),
-            (&numbered, "Numbered list"),
-            (&separate, "Open away from edge"),
-        ] {
-            button.set_label(label);
-            more_tools.append(button);
-            let menu = more_popover.downgrade();
-            button.connect_clicked(move |_| {
-                if let Some(menu) = menu.upgrade() {
-                    menu.popdown();
-                }
-            });
-        }
-        more_tools.append(&paper_choice);
-        more_popover.set_child(Some(&more_tools));
-        more.set_popover(Some(&more_popover));
         let rail_header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         rail_header.set_halign(gtk::Align::Center);
         for button in [&collapse, keep.upcast_ref(), &checklist] {
@@ -168,9 +132,6 @@ impl Editor {
         rail.append(&rail_header);
         rail.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         rail.append(&controls.root);
-        rail.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        more.set_halign(gtk::Align::Center);
-        rail.append(&more);
         let toolbar = gtk::Popover::new();
         toolbar.set_autohide(false);
         toolbar.set_has_arrow(false);
@@ -197,12 +158,14 @@ impl Editor {
         let window_handle = gtk::WindowHandle::new();
         window_handle.set_child(Some(&header));
         content.append(&window_handle);
+        let weak_session = Rc::downgrade(&session);
+        crate::text_editing::bind_history(&body, move || weak_session.upgrade());
         content.append(&scroll);
         sheet.add_overlay(&content);
         sheet.set_measure_overlay(&content, true);
         let resize = gtk::Button::new();
         resize.add_css_class("note-resize");
-        resize.set_tooltip_text(Some("Resize note"));
+        resize.update_property(&[gtk::accessible::Property::Label("Resize note")]);
         resize.set_margin_end(12);
         resize.set_margin_bottom(12);
         resize.set_halign(gtk::Align::End);
@@ -267,7 +230,6 @@ impl Editor {
             error_toast: RefCell::new(None),
             toolbar,
             tools_button: grip,
-            more_popover,
             docked,
             pattern_choice: paper_choice.clone(),
             controls,
@@ -276,7 +238,8 @@ impl Editor {
             stopped: Cell::new(false),
         });
         // Popovers handle Escape before the containing window receives it.
-        for panel in [&editor.toolbar, &editor.more_popover] {
+        {
+            let panel = &editor.toolbar;
             let keys = gtk::EventControllerKey::new();
             keys.set_propagation_phase(gtk::PropagationPhase::Capture);
             let weak = Rc::downgrade(&editor);
@@ -416,7 +379,6 @@ impl Editor {
         for target in [
             editor.root.upcast_ref::<gtk::Widget>(),
             editor.toolbar.upcast_ref(),
-            editor.more_popover.upcast_ref(),
         ] {
             let motion = gtk::EventControllerMotion::new();
             motion.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -534,8 +496,7 @@ impl Editor {
     }
     pub fn escape(self: &Rc<Self>) {
         self.activity();
-        if self.toolbar.is_visible() || self.more_popover.is_visible() {
-            self.more_popover.popdown();
+        if self.toolbar.is_visible() {
             self.toolbar.popdown();
         } else {
             self.close.emit_clicked();
@@ -562,6 +523,7 @@ impl Editor {
         self.syncing_style.set(false);
         self.resolved.replace(style.resolve(&self.config.borrow()));
         appearance::apply_note_font(&self.font_provider, &self.resolved.borrow(), &style);
+        crate::note_session::style_checklists(&self.body.buffer(), &self.resolved.borrow());
         self.color.set(self.session.color());
         self.background.queue_draw();
         let config = self.resolved.borrow();
@@ -663,7 +625,7 @@ fn current_line(body: &gtk::TextView) -> (gtk::TextIter, gtk::TextIter, String) 
 }
 pub fn toggle_line(body: &gtk::TextView, prefix: &str) {
     let buffer = body.buffer();
-    let (mut start, mut end, text) = current_line(body);
+    let (mut start, _, text) = current_line(body);
     let replacement = if prefix == "- [ ] " && text.starts_with("- [ ] ") {
         text.replacen("- [ ] ", "- [x] ", 1)
     } else if prefix == "- [ ] " && text.starts_with("- [x] ") {
@@ -677,9 +639,24 @@ pub fn toggle_line(body: &gtk::TextView, prefix: &str) {
     } else {
         format!("{prefix}{text}")
     };
+    // Change only the prefix so inline formatting on the item's text survives.
+    let old_chars: Vec<char> = text.chars().collect();
+    let new_chars: Vec<char> = replacement.chars().collect();
+    let common = old_chars
+        .iter()
+        .rev()
+        .zip(new_chars.iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    if start.child_anchor().is_some() {
+        start.forward_char();
+    }
+    let mut end = start;
+    end.forward_chars((old_chars.len() - common) as i32);
+    let prefix: String = new_chars[..new_chars.len() - common].iter().collect();
     buffer.begin_user_action();
     buffer.delete(&mut start, &mut end);
-    buffer.insert(&mut start, &replacement);
+    buffer.insert(&mut start, &prefix);
     buffer.end_user_action();
 }
 pub fn continue_list(body: &gtk::TextView) -> bool {
@@ -807,7 +784,6 @@ mod tests {
         for target in [
             docked.root.upcast_ref::<gtk::Widget>(),
             docked.toolbar.upcast_ref(),
-            docked.more_popover.upcast_ref(),
         ] {
             let controllers = target.observe_controllers();
             let motion = (0..controllers.n_items())
