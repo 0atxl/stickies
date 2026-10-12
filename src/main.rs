@@ -4,6 +4,7 @@ mod autostart;
 mod cli;
 mod config;
 mod edge;
+mod edit_history;
 mod editor;
 mod manager;
 mod motion;

@@ -31,6 +31,8 @@ Individual More contains Bullet list, Numbered list, the inline Default/Plain/Do
 
 Selecting editable body text opens a floating Bold/Italic/Underline/Strikethrough bubble. Ctrl+B, Ctrl+I and Ctrl+U use the same formatting handler. Ctrl+Z undoes; Ctrl+Shift+Z and Ctrl+Y redo. Formatting remains separate from the plain body and survives reopening. Copy text is plain text. Search inside a note remains removed.
 
+Title and body edits use the note's shared, session-local undo history. Continuous typing or deletion groups into one step, up to 100 Unicode characters. A pause of at least one second, a typed newline, changing between insertion and deletion, or moving the cursor/selection starts another step. Paste, cut, drop, formatting, list-prefix and checkbox changes, and list continuation each have their own step. Undo/redo restores text and formatting together and returns the cursor to the changed range. A new edit after undo clears redo.
+
 Archive and Delete first save the shared note. A failed save retains its editor. Archive closes individual views without a toast. Delete closes them and shows one replaceable six-second "Note deleted" / Undo toast beside the current strip position, on the existing strip surface. The toast uses the docked-note Overlay/DND policy, accepts input only within its own bounds and fades over 120 ms unless motion is reduced. Undo restores the previous collection and pin state. All Notes keeps its existing deletion toast.
 
 The edge always uses stacked tabs and a bar marker. Title tooltips are removed; hover peek cards are not implemented yet.

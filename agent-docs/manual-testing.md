@@ -2,6 +2,12 @@
 
 Run against the release build on the reference compositor. Record failures and pending checks, not a history of every run. Final UI approval belongs to the user.
 
+## October 12 undo grouping
+
+In each individual/All Notes title and body, type a phrase without pausing and undo it once. Pause for at least one second between phrases and undo them separately. Repeat with Enter, an insertion-to-backspace transition, arrow/mouse selection movement, paste, cut and drop. Keep formatting and list/checkbox commands as separate steps. Undo and redo must restore text/spans together, return to the changed range and preserve Unicode. Typing after undo must clear redo. The fake-clock unit tests exercise the pause rule without sleeping; the native regression also exercises GTK title/body input, clipboard, list and checkbox actions.
+
+Verification passed: 48 non-display tests, all 18 native GTK tests, three affected native rechecks and all three release shutdown probes. Formatting, strict Clippy with existing GTK deprecations allowed, the release build and diff checks passed. [The report](/tmp/stickies-undo-check/review.md) includes the grouping behavior, added tests and scoped diff. User review remains pending.
+
 ## October 12 footer controls review
 
 Review the individual note and selected All Notes preview in Paper, Playful, Minimal Light and Minimal Dark, resting and with Color, Text, More and the selection bubble open. Verify the footer does not move the title/body or change note size. At 300 × 280, the individual writing area must remain usable and all five footer controls must fit.

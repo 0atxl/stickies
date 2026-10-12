@@ -1,23 +1,15 @@
 use crate::{
     app::{Note, NoteColor, NoteId},
     config::NoteStyle,
+    edit_history::{EditState, Field, History},
     storage::{Storage, StorageError},
 };
 use gtk::{glib, prelude::*};
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
-    time::Duration,
+    time::{Duration, Instant},
 };
-
-#[derive(Clone, PartialEq)]
-struct EditState {
-    title: String,
-    body: String,
-    spans: Vec<crate::text_editing::Span>,
-    cursor: i32,
-    selection: i32,
-}
 
 /// One live note, shared by every editor displaying it.
 pub struct NoteSession {
@@ -33,21 +25,34 @@ pub struct NoteSession {
     decorating: Cell<bool>,
     render_source: RefCell<Option<glib::SourceId>>,
     views: RefCell<Vec<glib::WeakRef<gtk::TextView>>>,
+    title_views: RefCell<Vec<glib::WeakRef<gtk::Entry>>>,
     error: RefCell<Option<String>>,
     style_error: RefCell<Option<String>>,
     pin_error: RefCell<Option<String>>,
     save_source: RefCell<Option<glib::SourceId>>,
     listeners: RefCell<Vec<Weak<dyn Fn()>>>,
     on_saved: Rc<dyn Fn()>,
-    history: RefCell<Vec<EditState>>,
-    history_index: Cell<usize>,
+    history: RefCell<History>,
+    edit_depth: Cell<usize>,
+    mutation_depth: Cell<usize>,
+    isolated: Cell<bool>,
     formatting_error: Option<String>,
 }
 
 impl NoteSession {
     pub fn new(note: Note, storage: Rc<Storage>, on_saved: impl Fn() + 'static) -> Rc<Self> {
+        let start = Instant::now();
+        Self::new_with_clock(note, storage, on_saved, move || start.elapsed())
+    }
+    pub fn new_with_clock(
+        note: Note,
+        storage: Rc<Storage>,
+        on_saved: impl Fn() + 'static,
+        clock: impl Fn() -> Duration + 'static,
+    ) -> Rc<Self> {
         let title = gtk::EntryBuffer::new(Some(note.title.as_str()));
         let body = gtk::TextBuffer::new(None::<&gtk::TextTagTable>);
+        body.set_enable_undo(false);
         body.set_text(&note.body);
         let (style, error) = match storage.load_note_style(note.id) {
             Ok(style) => (style, None),
@@ -59,6 +64,13 @@ impl NoteSession {
                 None
             }
             Err(error) => Some(format!("Could not load text formatting: {error}")),
+        };
+        let initial = EditState {
+            title: note.title,
+            body: note.body,
+            spans: crate::text_editing::spans(&body),
+            cursor: body.cursor_position(),
+            selection: body.cursor_position(),
         };
         let session = Rc::new(Self {
             title,
@@ -73,14 +85,17 @@ impl NoteSession {
             decorating: Cell::new(false),
             render_source: RefCell::new(None),
             views: RefCell::new(Vec::new()),
+            title_views: RefCell::new(Vec::new()),
             error: RefCell::new(None),
             style_error: RefCell::new(error),
             pin_error: RefCell::new(None),
             save_source: RefCell::new(None),
             listeners: RefCell::new(Vec::new()),
             on_saved: Rc::new(on_saved),
-            history: RefCell::new(Vec::new()),
-            history_index: Cell::new(0),
+            history: RefCell::new(History::new(initial, clock)),
+            edit_depth: Cell::new(0),
+            mutation_depth: Cell::new(0),
+            isolated: Cell::new(false),
             formatting_error,
         });
         let weak = Rc::downgrade(&session);
@@ -88,6 +103,11 @@ impl NoteSession {
             if let Some(session) = weak.upgrade()
                 && !session.decorating.get()
             {
+                if session.isolated.get() {
+                    session.queue_record();
+                } else {
+                    session.record_edit();
+                }
                 session.schedule_save();
             }
         });
@@ -97,24 +117,92 @@ impl NoteSession {
                 if session.decorating.get() {
                     return;
                 }
-                if session.render_source.borrow().is_none() {
-                    let weak = Rc::downgrade(&session);
-                    let source = glib::idle_add_local_once(move || {
-                        if let Some(session) = weak.upgrade() {
-                            session.render_source.borrow_mut().take();
-                            session.refresh_checklists();
-                            session.record_edit();
-                            session.notify();
-                        }
-                    });
-                    session.render_source.replace(Some(source));
-                }
+                session.queue_record();
                 session.schedule_save();
+            }
+        });
+        for signal in ["insert-text", "delete-range"] {
+            let weak = Rc::downgrade(&session);
+            session.body.connect_local(signal, false, move |values| {
+                if let Some(session) = weak.upgrade()
+                    && !session.decorating.get()
+                {
+                    let start = values[1].get::<gtk::TextIter>().unwrap();
+                    if signal == "delete-range" {
+                        let end = values[2].get::<gtk::TextIter>().unwrap();
+                        let removed = session.body.text(&start, &end, true);
+                        if start.starts_line() && matches!(removed.as_str(), "- [ ] " | "- [x] ") {
+                            session.isolate_next_edit();
+                        }
+                    }
+                    let offset = crate::text_editing::offset(&session.body, &start);
+                    session.note_change(Field::Body, offset);
+                    session.mutation_depth.set(session.mutation_depth.get() + 1);
+                }
+                None
+            });
+            let weak = Rc::downgrade(&session);
+            session.body.connect_local(signal, true, move |_| {
+                if let Some(session) = weak.upgrade()
+                    && !session.decorating.get()
+                {
+                    session.mutation_depth.set(session.mutation_depth.get() - 1);
+                    session.record_edit();
+                }
+                None
+            });
+        }
+        let weak = Rc::downgrade(&session);
+        session.body.connect_begin_user_action(move |_| {
+            if let Some(session) = weak.upgrade()
+                && !session.decorating.get()
+            {
+                session.edit_depth.set(session.edit_depth.get() + 1);
+            }
+        });
+        let weak = Rc::downgrade(&session);
+        session.body.connect_end_user_action(move |_| {
+            if let Some(session) = weak.upgrade()
+                && !session.decorating.get()
+            {
+                session.edit_depth.set(session.edit_depth.get() - 1);
+                session.record_edit();
+            }
+        });
+        let weak = Rc::downgrade(&session);
+        session.body.connect_mark_set(move |buffer, _, mark| {
+            if let Some(session) = weak.upgrade()
+                && session.mutation_depth.get() == 0
+                && session.edit_depth.get() == 0
+                && (mark == &buffer.get_insert() || mark == &buffer.selection_bound())
+            {
+                session.break_typing();
+            }
+        });
+        let weak = Rc::downgrade(&session);
+        session.body.connect_paste_done(move |_, _| {
+            if let Some(session) = weak.upgrade() {
+                session.finish_isolated_edit();
             }
         });
         session.refresh_checklists();
         session.record_edit();
         session
+    }
+
+    fn queue_record(self: &Rc<Self>) {
+        if self.render_source.borrow().is_none() {
+            let weak = Rc::downgrade(self);
+            let source = glib::idle_add_local_once(move || {
+                if let Some(session) = weak.upgrade() {
+                    session.render_source.borrow_mut().take();
+                    session.refresh_checklists();
+                    session.record_edit();
+                    session.notify();
+                }
+            });
+            self.render_source.replace(Some(source));
+        }
     }
 
     fn edit_state(&self) -> EditState {
@@ -136,57 +224,81 @@ impl NoteSession {
         }
     }
     fn record_edit(&self) {
-        if self.decorating.get() {
+        if self.decorating.get() || self.edit_depth.get() > 0 || self.mutation_depth.get() > 0 {
             return;
         }
         let state = self.edit_state();
-        let mut history = self.history.borrow_mut();
-        if let Some(previous) = history.get(self.history_index.get())
-            && previous.title == state.title
-            && previous.body == state.body
-            && previous.spans == state.spans
-        {
-            return;
+        if self.history.borrow_mut().record(state, self.isolated.get()) {
+            self.isolated.set(false);
         }
-        history.truncate(self.history_index.get() + 1);
-        history.push(state);
-        if history.len() > 100 {
-            history.remove(0);
+    }
+    pub fn break_typing(&self) {
+        if !self.decorating.get() {
+            self.record_edit();
+            self.history.borrow_mut().boundary();
         }
-        self.history_index.set(history.len() - 1);
+    }
+    pub fn note_change(&self, field: Field, start: i32) {
+        if !self.decorating.get() {
+            self.history
+                .borrow_mut()
+                .note_change(field, start.max(0) as usize);
+        }
+    }
+    pub fn isolate_next_edit(&self) {
+        self.break_typing();
+        self.isolated.set(true);
+    }
+    pub fn finish_isolated_edit(&self) {
+        self.record_edit();
+        self.isolated.set(false);
+        self.history.borrow_mut().boundary();
+    }
+    pub fn edit_action<T>(&self, action: impl FnOnce() -> T) -> T {
+        self.isolate_next_edit();
+        self.edit_depth.set(self.edit_depth.get() + 1);
+        let result = action();
+        self.edit_depth.set(self.edit_depth.get() - 1);
+        if self.edit_depth.get() == 0 {
+            self.finish_isolated_edit();
+        }
+        result
     }
     pub fn undo(self: &Rc<Self>, redo: bool) {
         self.record_edit();
-        let index = self.history_index.get();
-        let next = if redo {
-            index + 1
-        } else {
-            index.saturating_sub(1)
-        };
-        let Some(state) = self.history.borrow().get(next).cloned() else {
+        let Some(restored) = self.history.borrow_mut().restore(redo) else {
             return;
         };
-        if next == index {
-            return;
-        }
-        self.history_index.set(next);
+        let state = restored.state;
         self.decorating.set(true);
         self.title.set_text(&state.title);
         self.body.set_text(&state.body);
         crate::text_editing::apply(&self.body, &state.spans);
         self.decorating.set(false);
         self.refresh_checklists();
+        let (cursor, selection) = if restored.field == Field::Body {
+            (restored.cursor, restored.selection)
+        } else {
+            (state.cursor, state.selection)
+        };
         self.body.select_range(
-            &crate::text_editing::iter(&self.body, state.cursor),
-            &crate::text_editing::iter(&self.body, state.selection),
+            &crate::text_editing::iter(&self.body, cursor),
+            &crate::text_editing::iter(&self.body, selection),
         );
+        if restored.field == Field::Title {
+            for view in self.title_views.borrow().iter().filter_map(|v| v.upgrade()) {
+                if view.buffer() == self.title {
+                    view.set_position(restored.cursor);
+                }
+            }
+        }
         self.schedule_save();
     }
     pub fn toggle_mark(self: &Rc<Self>, mark: crate::text_editing::Mark) {
         let Some((start, end)) = self.body.selection_bounds() else {
             return;
         };
-        self.record_edit();
+        self.isolate_next_edit();
         let tag = mark.tag(&self.body);
         let mut at = start;
         let mut all = true;
@@ -202,7 +314,7 @@ impl NoteSession {
         } else {
             self.body.apply_tag(&tag, &start, &end);
         }
-        self.record_edit();
+        self.finish_isolated_edit();
         self.schedule_save();
     }
 
@@ -214,6 +326,13 @@ impl NoteSession {
         }
         drop(views);
         self.refresh_checklists();
+    }
+    pub fn attach_title(&self, view: &gtk::Entry) {
+        let mut views = self.title_views.borrow_mut();
+        views.retain(|v| v.upgrade().is_some());
+        if !views.iter().any(|v| v.upgrade().as_ref() == Some(view)) {
+            views.push(view.downgrade());
+        }
     }
 
     pub fn mark_new_blank(&self) {
@@ -340,15 +459,17 @@ impl NoteSession {
                     at.forward_chars(4);
                     let mut end = at;
                     end.forward_char();
-                    session.body.begin_user_action();
-                    session.decorating.set(true);
-                    session.body.delete(&mut at, &mut end);
-                    session
-                        .body
-                        .insert(&mut at, if b.is_active() { "x" } else { " " });
-                    session.decorating.set(false);
-                    session.body.end_user_action();
-                    session.refresh_checklists();
+                    session.edit_action(|| {
+                        session.body.begin_user_action();
+                        session.decorating.set(true);
+                        session.body.delete(&mut at, &mut end);
+                        session
+                            .body
+                            .insert(&mut at, if b.is_active() { "x" } else { " " });
+                        session.decorating.set(false);
+                        session.body.end_user_action();
+                        session.refresh_checklists();
+                    });
                     session.schedule_save();
                 });
                 view.add_child_at_anchor(&button, &anchor);
@@ -592,6 +713,202 @@ pub fn readonly_checklists(view: &gtk::TextView) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires a GTK display; uses a disposable database"]
+    fn typing_groups_follow_gtk_actions_in_title_and_body() {
+        gtk::init().unwrap();
+        let root = std::env::temp_dir().join(format!("stickies-grouping-{}", std::process::id()));
+        let storage = Rc::new(Storage::open(&root.join("notes.db")).unwrap());
+        let note = storage.create_note("", "", NoteColor::Yellow).unwrap();
+        let time = Rc::new(Cell::new(Duration::ZERO));
+        let clock = time.clone();
+        let session =
+            NoteSession::new_with_clock(note, storage.clone(), || {}, move || clock.get());
+        let body = gtk::TextView::with_buffer(&session.body);
+        crate::editor::connect_checklist_backspace(&body);
+        let title = gtk::Entry::with_buffer(&session.title);
+        session.attach_view(&body);
+        session.attach_title(&title);
+        let weak = Rc::downgrade(&session);
+        crate::text_editing::bind_history(&body, move || weak.upgrade());
+        let weak = Rc::downgrade(&session);
+        crate::text_editing::bind_title_history(&title, move || weak.upgrade());
+        let layout = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        layout.append(&title);
+        layout.append(&body);
+        let window = gtk::Window::new();
+        window.set_child(Some(&layout));
+        window.present();
+        let wait = |done: &dyn Fn() -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !done() && Instant::now() < deadline {
+                while glib::MainContext::default().iteration(false) {}
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(done());
+        };
+        wait(&|| window.is_mapped());
+        body.grab_focus();
+        let text = || {
+            session
+                .body
+                .text(&session.body.start_iter(), &session.body.end_iter(), true)
+                .to_string()
+        };
+        let type_body = |input: &str| {
+            for c in input.chars() {
+                time.set(time.get() + Duration::from_millis(20));
+                body.emit_insert_at_cursor(&c.to_string());
+            }
+        };
+        type_body("hello world");
+        session.undo(false);
+        assert_eq!(text(), "");
+        session.undo(true);
+        assert_eq!(text(), "hello world");
+        assert_eq!(session.body.cursor_position(), 11);
+        time.set(time.get() + Duration::from_millis(1200));
+        type_body("!");
+        session.undo(false);
+        assert_eq!(text(), "hello world");
+        session.undo(true);
+        type_body("\nnext");
+        session.undo(false);
+        assert_eq!(text(), "hello world!\n");
+        session.undo(false);
+        assert_eq!(text(), "hello world!");
+        session.undo(true);
+        session.undo(true);
+        for _ in 0..3 {
+            body.emit_backspace();
+        }
+        assert_eq!(text(), "hello world!\nn");
+        session.undo(false);
+        assert_eq!(text(), "hello world!\nnext");
+        body.clipboard().set_text(" PASTE");
+        body.emit_by_name::<()>("paste-clipboard", &[]);
+        wait(&|| text().ends_with(" PASTE"));
+        session.undo(false);
+        assert_eq!(text(), "hello world!\nnext");
+        type_body("z");
+        session.undo(true);
+        assert_eq!(
+            text(),
+            "hello world!\nnextz",
+            "new typing must discard paste redo"
+        );
+        session.body.select_range(
+            &session.body.start_iter(),
+            &crate::text_editing::iter(&session.body, 5),
+        );
+        body.emit_by_name::<()>("cut-clipboard", &[]);
+        assert_eq!(text(), " world!\nnextz");
+        session.undo(false);
+        assert_eq!(text(), "hello world!\nnextz");
+        session.body.select_range(
+            &session.body.start_iter(),
+            &crate::text_editing::iter(&session.body, 5),
+        );
+        session.toggle_mark(crate::text_editing::Mark::Bold);
+        assert_eq!(crate::text_editing::spans(&session.body).len(), 1);
+        session.undo(false);
+        assert_eq!(text(), "hello world!\nnextz");
+        assert!(crate::text_editing::spans(&session.body).is_empty());
+        session.undo(true);
+        assert_eq!(crate::text_editing::spans(&session.body)[0].end, 5);
+        title.grab_focus();
+        let entry = title.delegate().unwrap().downcast::<gtk::Text>().unwrap();
+        for c in "café 東京".chars() {
+            entry.emit_insert_at_cursor(c.to_string());
+        }
+        let keys = title
+            .observe_controllers()
+            .iter::<glib::Object>()
+            .flatten()
+            .filter_map(|c| c.downcast::<gtk::EventControllerKey>().ok())
+            .find(|c| c.propagation_phase() == gtk::PropagationPhase::Capture)
+            .unwrap();
+        assert!(keys.emit_by_name::<bool>(
+            "key-pressed",
+            &[
+                &gtk::gdk::Key::z,
+                &0u32,
+                &gtk::gdk::ModifierType::CONTROL_MASK
+            ]
+        ));
+        assert_eq!(title.text(), "");
+        assert_eq!(title.position(), 0);
+        assert!(keys.emit_by_name::<bool>(
+            "key-pressed",
+            &[
+                &gtk::gdk::Key::y,
+                &0u32,
+                &gtk::gdk::ModifierType::CONTROL_MASK
+            ]
+        ));
+        assert_eq!(title.text(), "café 東京");
+        assert_eq!(title.position(), 7);
+        entry.emit_insert_at_cursor("a");
+        entry.emit_move_cursor(gtk::MovementStep::LogicalPositions, -1, false);
+        entry.emit_move_cursor(gtk::MovementStep::LogicalPositions, 1, false);
+        entry.emit_insert_at_cursor("b");
+        session.undo(false);
+        assert_eq!(title.text(), "café 東京a");
+        session.undo(false);
+        assert_eq!(title.text(), "café 東京");
+        title.clipboard().set_text(" title paste");
+        entry.emit_paste_clipboard();
+        wait(&|| title.text().ends_with(" title paste"));
+        session.undo(false);
+        assert_eq!(title.text(), "café 東京");
+        title.select_region(0, 4);
+        entry.emit_cut_clipboard();
+        assert_eq!(title.text(), " 東京");
+        session.undo(false);
+        assert_eq!(title.text(), "café 東京");
+        assert_eq!(title.position(), 4);
+        title.set_position(-1);
+        entry.emit_insert_at_cursor("a");
+        title.emit_by_name::<()>("activate", &[]);
+        entry.emit_insert_at_cursor("b");
+        session.undo(false);
+        assert_eq!(title.text(), "café 東京a");
+        session.undo(false);
+        assert_eq!(title.text(), "café 東京");
+        session.body.set_text("Item");
+        session.body.place_cursor(&session.body.end_iter());
+        session.edit_action(|| crate::editor::toggle_line(&body, "- "));
+        session.body.place_cursor(&session.body.end_iter());
+        assert!(session.edit_action(|| crate::editor::continue_list(&body)));
+        assert_eq!(text(), "- Item\n- ");
+        session.undo(false);
+        assert_eq!(text(), "- Item");
+        session.undo(false);
+        assert_eq!(text(), "Item");
+        session.body.set_text("- [ ] Item");
+        while glib::MainContext::default().iteration(false) {}
+        let check = session.body.start_iter().child_anchor().unwrap().widgets()[0]
+            .clone()
+            .downcast::<gtk::CheckButton>()
+            .unwrap();
+        check.set_active(true);
+        assert_eq!(text(), "- [x] Item");
+        session.undo(false);
+        assert_eq!(text(), "- [ ] Item");
+        session
+            .body
+            .place_cursor(&crate::text_editing::iter(&session.body, 6));
+        body.emit_backspace();
+        assert_eq!(text(), "Item");
+        session.undo(false);
+        assert_eq!(text(), "- [ ] Item");
+        assert!(session.flush());
+        window.close();
+        drop(session);
+        drop(storage);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     #[ignore = "requires a GTK display; uses a disposable database"]

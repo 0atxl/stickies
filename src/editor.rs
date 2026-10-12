@@ -79,6 +79,9 @@ impl Editor {
         title.set_width_chars(1);
         title.set_placeholder_text(Some("Untitled note"));
         title.set_buffer(&session.title);
+        session.attach_title(&title);
+        let weak_session = Rc::downgrade(&session);
+        crate::text_editing::bind_title_history(&title, move || weak_session.upgrade());
         let close = ui_assets::icon("close", "Close note");
         header.append(&title);
         header.append(&close);
@@ -305,7 +308,9 @@ impl Editor {
         let weak = Rc::downgrade(&editor);
         checklist.connect_clicked(move |_| {
             if let Some(editor) = weak.upgrade() {
-                toggle_checklist(&editor.body);
+                editor
+                    .session
+                    .edit_action(|| toggle_checklist(&editor.body));
                 editor.controls.sync_checklist(&editor.body);
                 editor.body.grab_focus();
             }
@@ -534,10 +539,10 @@ impl Editor {
         )));
     }
     fn toggle_line(&self, prefix: &str) {
-        toggle_line(&self.body, prefix);
+        self.session.edit_action(|| toggle_line(&self.body, prefix));
     }
     fn continue_list(&self) -> bool {
-        continue_list(&self.body)
+        self.session.edit_action(|| continue_list(&self.body))
     }
 }
 

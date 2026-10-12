@@ -2,6 +2,12 @@
 
 [SPEC.md](SPEC.md) is the current product truth derived from the code. [HISTORY.md](HISTORY.md) preserves the former milestone log unchanged. The active milestone remains final UI work and phase 5A/5B verification; [implementation.md](implementation.md) records later roadmap work.
 
+## October 12 undo grouping
+
+Owner-approved undo grouping keeps the note's shared custom title/body snapshots and formatting encoding. Typing/deletion groups until a one-second pause, typed newline, direction/field change, cursor movement or the 100-character cap. Paste/cut/drop, formatting and list/checkbox actions are isolated. Cursor restoration uses the actual changed range, including repeated text and partial formatting. Title shortcuts now use the same custom history; Enter in the single-line title also ends a group. The monotonic clock is injectable for deterministic pause tests. No UI or configuration key is added.
+
+Verification passed: 48 non-display tests, all 18 native GTK tests and three affected native rechecks, plus all three release shutdown probes. Formatting, strict Clippy with existing GTK deprecations allowed, the locked offline release build and diff checks passed. The release build retains 24 GTK deprecation warnings. Thirteen pure history tests and one GTK integration test cover the requested grouping cases, cursor placement, title/body actions, clipboard, formatting, list continuation and checkboxes. Pause tests use a fake clock without sleeping. The results and scoped diff are in `/tmp/stickies-undo-check/review.md`. Work stops for owner review; this stage remains uncommitted.
+
 ## October 12 footer controls pass
 
 Prompt 2 of [the redo plan](stickies-redo-plan.md) replaces both old tool presentations with the specified reserved footer, separate Color/Text popovers, flat More menus and selection-only B/I/U/S bubble. Individual More reuses list/pattern/pop-out handlers and the shared Archive/Delete save guards. All Notes More has only Copy text, Archive/Restore and Delete. Archived controls are disabled except Copy and Restore. The note minimum remains 300 × 280; its corner-drag input remains unchanged.

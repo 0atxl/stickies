@@ -116,6 +116,137 @@ pub fn apply(buffer: &gtk::TextBuffer, spans: &[Span]) {
 
 /// Keep body history shortcuts attached when All Notes replaces its buffer.
 pub fn bind_history(view: &gtk::TextView, session: impl Fn() -> Option<Rc<NoteSession>> + 'static) {
+    let session: SessionGetter = Rc::new(session);
+    bind_edit_boundaries(view.upcast_ref(), session.clone());
+    let getter = session.clone();
+    view.connect_move_cursor(move |_, _, _, _| {
+        if let Some(session) = getter() {
+            session.break_typing();
+        }
+    });
+    for signal in ["paste-clipboard", "cut-clipboard"] {
+        let getter = session.clone();
+        view.connect_local(signal, false, move |_| {
+            if let Some(session) = getter() {
+                session.isolate_next_edit();
+            }
+            None
+        });
+    }
+    let getter = session.clone();
+    view.connect_local("cut-clipboard", true, move |_| {
+        if let Some(session) = getter() {
+            session.finish_isolated_edit();
+        }
+        None
+    });
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let weak_view = view.downgrade();
+    keys.connect_key_pressed(move |_, key, _, modifiers| {
+        if !modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK)
+            || !weak_view.upgrade().is_some_and(|view| view.is_editable())
+        {
+            return gtk::glib::Propagation::Proceed;
+        }
+        let Some(session) = session() else {
+            return gtk::glib::Propagation::Proceed;
+        };
+        if key.to_lower() == gtk::gdk::Key::a {
+            session.break_typing();
+        }
+        match key.to_lower() {
+            gtk::gdk::Key::z => {
+                session.undo(modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK))
+            }
+            gtk::gdk::Key::y => session.undo(true),
+            gtk::gdk::Key::b => session.toggle_mark(Mark::Bold),
+            gtk::gdk::Key::i => session.toggle_mark(Mark::Italic),
+            gtk::gdk::Key::u => session.toggle_mark(Mark::Underline),
+            _ => return gtk::glib::Propagation::Proceed,
+        }
+        gtk::glib::Propagation::Stop
+    });
+    view.add_controller(keys);
+}
+
+type SessionGetter = Rc<dyn Fn() -> Option<Rc<NoteSession>>>;
+
+fn bind_edit_boundaries(widget: &gtk::Widget, session: SessionGetter) {
+    let events = gtk::EventControllerLegacy::new();
+    events.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let getter = session.clone();
+    events.connect_event(move |_, event| {
+        if let Some(session) = getter() {
+            if event.event_type() == gtk::gdk::EventType::DropStart
+                || event
+                    .downcast_ref::<gtk::gdk::ButtonEvent>()
+                    .is_some_and(|e| e.button() == 2)
+            {
+                session.isolate_next_edit();
+            } else if event.event_type() == gtk::gdk::EventType::ButtonPress {
+                session.break_typing();
+            }
+        }
+        gtk::glib::Propagation::Proceed
+    });
+    widget.add_controller(events);
+    widget.connect_has_focus_notify(move |_| {
+        if let Some(session) = session() {
+            session.break_typing();
+        }
+    });
+}
+
+pub fn bind_title_history(
+    view: &gtk::Entry,
+    session: impl Fn() -> Option<Rc<NoteSession>> + 'static,
+) {
+    view.set_enable_undo(false);
+    let session: SessionGetter = Rc::new(session);
+    bind_edit_boundaries(view.upcast_ref(), session.clone());
+    let getter = session.clone();
+    view.connect_activate(move |_| {
+        if let Some(session) = getter() {
+            session.break_typing();
+        }
+    });
+    if let Some(text) = view.delegate().and_then(|d| d.downcast::<gtk::Text>().ok()) {
+        let getter = session.clone();
+        text.connect_insert_text(move |_, _, position| {
+            if let Some(session) = getter() {
+                session.note_change(crate::edit_history::Field::Title, *position);
+            }
+        });
+        let getter = session.clone();
+        text.connect_delete_text(move |_, start, _| {
+            if let Some(session) = getter() {
+                session.note_change(crate::edit_history::Field::Title, start);
+            }
+        });
+        let getter = session.clone();
+        text.connect_move_cursor(move |_, _, _, _| {
+            if let Some(session) = getter() {
+                session.break_typing();
+            }
+        });
+        for signal in ["paste-clipboard", "cut-clipboard"] {
+            let getter = session.clone();
+            text.connect_local(signal, false, move |_| {
+                if let Some(session) = getter() {
+                    session.isolate_next_edit();
+                }
+                None
+            });
+        }
+        let getter = session.clone();
+        text.connect_local("cut-clipboard", true, move |_| {
+            if let Some(session) = getter() {
+                session.finish_isolated_edit();
+            }
+            None
+        });
+    }
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     let weak_view = view.downgrade();
@@ -133,9 +264,10 @@ pub fn bind_history(view: &gtk::TextView, session: impl Fn() -> Option<Rc<NoteSe
                 session.undo(modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK))
             }
             gtk::gdk::Key::y => session.undo(true),
-            gtk::gdk::Key::b => session.toggle_mark(Mark::Bold),
-            gtk::gdk::Key::i => session.toggle_mark(Mark::Italic),
-            gtk::gdk::Key::u => session.toggle_mark(Mark::Underline),
+            gtk::gdk::Key::a => {
+                session.break_typing();
+                return gtk::glib::Propagation::Proceed;
+            }
             _ => return gtk::glib::Propagation::Proceed,
         }
         gtk::glib::Propagation::Stop

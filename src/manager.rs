@@ -220,6 +220,7 @@ impl ManagerUi {
                 self.title.set_buffer(&session.title);
                 self.body.set_buffer(Some(&session.body));
                 session.attach_view(&self.body);
+                session.attach_title(&self.title);
                 let weak = Rc::downgrade(self);
                 self.subscription.replace(Some(session.subscribe(move || {
                     if let Some(ui) = weak.upgrade() {
@@ -884,6 +885,12 @@ pub fn build_window(
             .upgrade()
             .and_then(|ui| ui.session.borrow().clone())
     });
+    let weak_session = Rc::downgrade(&ui);
+    crate::text_editing::bind_title_history(&ui.title, move || {
+        weak_session
+            .upgrade()
+            .and_then(|ui| ui.session.borrow().clone())
+    });
     let weak = Rc::downgrade(&ui);
     ui.list.connect_row_selected(move |_, row| {
         if let Some(ui) = weak.upgrade() {
@@ -987,7 +994,9 @@ pub fn build_window(
         if let Some(ui) = weak.upgrade()
             && ui.body.is_editable()
         {
-            crate::editor::toggle_checklist(&ui.body);
+            if let Some(session) = ui.session.borrow().clone() {
+                session.edit_action(|| crate::editor::toggle_checklist(&ui.body));
+            }
             ui.controls.sync_checklist(&ui.body);
             ui.body.grab_focus();
         }
@@ -1045,7 +1054,9 @@ pub fn build_window(
             && key == gtk::gdk::Key::Return
             && !modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK)
             && ui.body.is_editable()
-            && crate::editor::continue_list(&ui.body)
+            && ui.session.borrow().clone().is_some_and(|session| {
+                session.edit_action(|| crate::editor::continue_list(&ui.body))
+            })
         {
             return gtk::glib::Propagation::Stop;
         }
