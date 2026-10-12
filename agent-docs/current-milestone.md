@@ -2,6 +2,16 @@
 
 [SPEC.md](SPEC.md) is the current product truth derived from the code. [HISTORY.md](HISTORY.md) preserves the former milestone log unchanged. The active milestone remains final UI work and phase 5A/5B verification; [implementation.md](implementation.md) records later roadmap work.
 
+## October 13 edge titles and restored hover
+
+The preceding peek and draft/default-filter work is committed locally as `b9b45dd`, excluding the owner's `implementation.md` edit. No push was requested.
+
+The owner confirmed that the perfect animation was the clean `b9b45dd` checkout. Its tab-crossing trigger, selected-tab targets, 120 ms handoff, reveal/collapse timing and motion helper are reused. Motion retargets only when the hovered tab changes, rather than restarting on every pointer movement. Neighboring spread and continuous proximity scaling are removed. The existing 24% edge-anchored scale remains in place of that commit's detached 6 px translation, preserving the owner's attached-title requirement. Reduced/system motion settings settle the values immediately; Reposition resets them. No motion timing was retuned.
+
+All peek rendering, private buffers, label transfer, masks, timers, input exclusions and editor-handoff code remain deleted. The normal individual editor renderer has no read-only peek path. Draft visibility, Active defaults, note controls, storage and configuration choices are unchanged. README, SPEC and section 4.4 describe the title-only hover behavior.
+
+Existing hover/stacked-tab regressions cover movement within one tab without retargeting, handoff/exit reversal, edge attachment, enlarged-area clicks, stable input/surface bounds and reduced/system motion plus Reposition. Tests and native app sessions are not authorized for this change and were not run. Formatting, strict all-target Clippy with existing GTK deprecations allowed, the locked offline build and diff checks passed. The build retains 24 existing GTK deprecation warnings. The owner requested a local commit of this stage, with no push. The clean comparison checkout remains at `/home/rinzler/.codex/worktrees/last-commit-review/Stickies` and is untouched.
+
 ## October 13 draft visibility and All Notes defaults
 
 Owner-approved blank creation now opens a hidden draft from the strip, All Notes or the new-note action. The existing creation timestamp stores an unpublished marker, so schema 4 stays unchanged. List and strip queries exclude drafts before sorting and limiting. The first successful non-blank text/formatting save publishes the note atomically; failed saves retain hidden drafts and their editors. All Notes keeps its rows, list selection, filter and search while editing a draft, then selects the published row. Search-created titles and existing blank notes remain visible. Last-view blank cleanup retains the shared-view/save guards, and startup removes orphan drafts and their styles.

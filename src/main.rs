@@ -240,10 +240,8 @@ impl Ui {
     fn open_docked(self: &Rc<Self>, id: NoteId) {
         self.finish_reposition(false).ok();
         if self.edge.state() == EdgeState::Docked(id) {
-            self.hide_peek_now();
             return;
         }
-        let peek_offset = self.peek_dock_offset(id);
         let origin = self.edge.pointer_origin.get();
         if !self.close_docked() {
             return;
@@ -251,7 +249,6 @@ impl Ui {
         self.edge.pointer_origin.set(origin);
         if let Some(note) = self.separate.borrow().get(&id) {
             self.close_edge_search();
-            self.hide_peek_now();
             note.window.present();
             return;
         }
@@ -271,13 +268,9 @@ impl Ui {
         self.edge.stack.add_named(&editor.root, Some("editor"));
         self.edge.docked.replace(Some(editor.clone()));
         self.transition_edge(EdgeEvent::Dock(id));
-        if peek_offset.is_some() {
-            self.finish_panel_motion();
-        }
         self.edge.pointer.queue_draw();
-        self.edge.docked_offset.set(peek_offset);
+        self.edge.docked_offset.set(None);
         self.place_edge();
-        self.hide_peek_now();
         self.update_visibility();
         self.set_input();
         self.transition_edge(EdgeEvent::FocusWindow);

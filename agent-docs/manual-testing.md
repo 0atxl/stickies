@@ -2,11 +2,11 @@
 
 Run against the release build on the reference compositor. Record failures and pending checks, not a history of every run. Final UI approval belongs to the user.
 
-## October 12 edge peek review
+## October 13 edge titles and restored hover
 
-Review the pointer recording and extracted frames in [the peek report](/tmp/stickies-peek-check/review.md). Move across all four tabs, leave the tabs and click one. The hovered tab translates about 6 px without scaling or moving neighbors. The card uses the shared individual sheet renderer, wraps the title, shows about five body lines and preserves note font, formatting, checklist presentation and pattern. Empty bodies show "Empty note". Its width is at most 260 px and its position is centered along the hovered tab, clamped to the screen.
+Review title tabs in Paper, Playful, Minimal Light and Minimal Dark on each edge. They should slide out smoothly, magnify only the hovered title and remain attached to the screen edge. Move repeatedly within one title while it opens; that movement must not restart or shorten its animation. Move quickly between overlapping titles and leave midway; the old title should return as the new title opens, both from their current sizes. Neighbors must keep their resting positions. Click the enlarged free edge and verify the intended docked editor and save guards. Check that no preview, tooltip, moved label or extra surface appears. Reduced motion and disabled GTK animations should settle changes immediately. Reposition should return titles to their resting size and position.
 
-The card fades over 120 ms and leaves after a 150 ms grace. Reduced motion removes the fade. It takes no focus, is excluded from the input regions and never starts note activity, marks text dirty or saves. Clicking a tab retains save guards and transfers the peek's edge position to an opaque editor in the same frame. Hover may preview another note while the current docked editor stays intact.
+The existing hover regression covers edge attachment during magnification, same-tab movement without retargeting and switch/exit reversal, enlarged-area clicks and fixed input/surface bounds across themes/edges. The stacked-tabs regression checks the selected-tab-only enlargement and matching click order. Tests and native app sessions were not run because the owner requested compile/static checks only. Earlier peek captures show removed behavior and are not acceptance evidence for this version.
 
 ## October 12 undo grouping
 

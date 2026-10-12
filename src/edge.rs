@@ -291,11 +291,6 @@ pub(super) struct Strip {
     pub(super) pointer_origin: Cell<Option<i32>>,
     pub(super) docked: RefCell<Option<Rc<editor::Editor>>>,
     pub(super) docked_offset: Cell<Option<(ScreenEdge, i32)>>,
-    peek: RefCell<Option<(NoteId, editor::NoteSheet)>>,
-    peek_bounds: Cell<(i32, i32, i32, i32)>,
-    peek_hide: RefCell<Option<glib::SourceId>>,
-    peek_motion: motion::Motion,
-    peek_target: Cell<f64>,
     delete_toast: gtk::Box,
     undo_delete: gtk::Button,
     toast_note: Cell<Option<NoteId>>,
@@ -467,11 +462,6 @@ impl Strip {
             pointer_origin: Cell::new(None),
             docked: RefCell::new(None),
             docked_offset: Cell::new(None),
-            peek: RefCell::new(None),
-            peek_bounds: Cell::new((0, 0, 0, 0)),
-            peek_hide: RefCell::new(None),
-            peek_motion: motion::Motion::new(0.),
-            peek_target: Cell::new(0.),
             delete_toast,
             undo_delete,
             toast_note: Cell::new(None),
@@ -646,12 +636,7 @@ impl Ui {
             self.edge.outgoing_origin.set(None);
         } else {
             self.finish_panel_motion();
-            if matches!(state, EdgeState::Docked(_) | EdgeState::Search)
-                && enabled
-                && !state
-                    .docked_id()
-                    .is_some_and(|id| self.peek_dock_offset(id).is_some())
-            {
+            if matches!(state, EdgeState::Docked(_) | EdgeState::Search) && enabled {
                 self.edge.panel_motion.jump(0.);
                 self.edge.stack.set_opacity(0.);
                 self.edge.pointer.set_opacity(0.);
@@ -701,7 +686,7 @@ impl Ui {
     ) {
         let gap = TAB_GAP;
         let inset = 16.;
-        let distance = (24. * (1. - progress) - 6. * hover) as f32;
+        let distance = (24. * (1. - progress)) as f32;
         let (x, y) = match edge {
             ScreenEdge::Left => (
                 -distance,
@@ -720,7 +705,19 @@ impl Ui {
                 distance,
             ),
         };
-        let transform = gtk::gsk::Transform::new().translate(&gtk::graphene::Point::new(x, y));
+        let (width, height) = (tab.width_request() as f32, tab.height_request() as f32);
+        let (cx, cy) = match edge {
+            ScreenEdge::Left => (0., height / 2.),
+            ScreenEdge::Right => (width, height / 2.),
+            ScreenEdge::Top => (width / 2., 0.),
+            ScreenEdge::Bottom => (width / 2., height),
+        };
+        let scale = (1. + 0.24 * hover) as f32;
+        let transform = gtk::gsk::Transform::new()
+            .translate(&gtk::graphene::Point::new(x, y))
+            .translate(&gtk::graphene::Point::new(cx, cy))
+            .scale(scale, scale)
+            .translate(&gtk::graphene::Point::new(-cx, -cy));
         fixed.set_child_transform(tab, Some(&transform));
         tab.set_opacity(progress);
     }
@@ -840,8 +837,8 @@ impl Ui {
                 child = tab.next_sibling();
                 let weak_tab = tab.downgrade();
                 let weak_fixed = fixed.downgrade();
-                // Apply the current progress before the first frame or delayed start.
                 let hover = self.edge.tab_hover.borrow().get(index).cloned();
+                // Apply the current progress before the first frame or delayed start.
                 Self::paint_tab(
                     &fixed,
                     &tab,
@@ -928,19 +925,13 @@ impl Ui {
                 motion.jump(progress);
                 if let Some(tab) = child {
                     child = tab.next_sibling();
-                    let hover = self
-                        .edge
-                        .tab_hover
-                        .borrow()
-                        .get(index)
-                        .map_or(0., |hover| hover.value());
                     Self::paint_tab(
                         &fixed,
                         &tab,
                         self.config.borrow().edge,
                         index,
                         progress,
-                        hover,
+                        self.edge.tab_hover.borrow()[index].value(),
                     );
                 }
             }
@@ -992,10 +983,6 @@ impl Ui {
         self.finish_strip_motion();
         self.finish_hover_motion();
         self.finish_panel_motion();
-        self.edge.peek_motion.jump(1.);
-        if let Some((_, peek)) = self.edge.peek.borrow().as_ref() {
-            peek.root.set_opacity(1.);
-        }
     }
     pub(super) fn configure_docked_editor(self: &Rc<Self>, editor: &Rc<editor::Editor>) {
         editor.set_docked_size(editor::WIDTH, editor::HEIGHT);
@@ -1328,14 +1315,6 @@ impl Ui {
             event,
             self.edge.policy(&self.config.borrow(), self.dnd.get()),
         );
-        if state != previous
-            && state != EdgeState::Tabs
-            && !state
-                .docked_id()
-                .is_some_and(|id| self.peek_dock_offset(id).is_some())
-        {
-            self.hide_peek_now();
-        }
         self.edge.state.set(state);
         if state != previous {
             self.prepare_motion(previous, state);
@@ -1373,7 +1352,6 @@ impl Ui {
             return;
         }
         self.edge.refresh_pending.set(false);
-        self.hide_peek_now();
         self.edge.tab_hover.borrow_mut().clear();
         while let Some(child) = self.edge.tabs.first_child() {
             self.edge.tabs.remove(&child);
@@ -1466,6 +1444,7 @@ impl Ui {
             } else {
                 &note.title
             };
+            tab.update_property(&[gtk::accessible::Property::Label(title)]);
             let label = gtk::Label::new(Some(&title.to_uppercase()));
             label.add_css_class("tab-title");
             label.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -1493,10 +1472,11 @@ impl Ui {
                 tab.set_child(Some(&text));
             }
             tab.set_size_request(tab_width, tab_height);
+            // Match paint_tab's resting inset before any hover frame arrives.
             let (x, y) = if horizontal {
-                (index as f64 * f64::from(tab_width + gap), 0.)
+                (16. + index as f64 * f64::from(tab_width + gap), 0.)
             } else {
-                (0., index as f64 * f64::from(tab_height + gap))
+                (0., 16. + index as f64 * f64::from(tab_height + gap))
             };
             fixed.put(&tab, x, y);
             self.edge
@@ -1527,7 +1507,7 @@ impl Ui {
             let motion = gtk::EventControllerMotion::new();
             let weak = Rc::downgrade(self);
             let weak_fixed = fixed.downgrade();
-            let ids: Vec<_> = notes.iter().map(|note| note.id).collect();
+            let count = notes.len();
             let update: Rc<dyn Fn(f64, f64)> = Rc::new(move |x, y| {
                 let (Some(ui), Some(fixed)) = (weak.upgrade(), weak_fixed.upgrade()) else {
                     return;
@@ -1538,7 +1518,7 @@ impl Ui {
                 let size = if horizontal { tab_width } else { tab_height };
                 let position = ((if horizontal { x } else { y }) - 16. - f64::from(size) / 2.)
                     / f64::from(size + TAB_GAP);
-                let index = (position.round().max(0.) as usize).min(ids.len().saturating_sub(1));
+                let index = (position.round().max(0.) as usize).min(count.saturating_sub(1));
                 if fixed
                     .downcast_ref::<TabLayout>()
                     .unwrap()
@@ -1558,9 +1538,6 @@ impl Ui {
                     }
                     fixed.queue_draw();
                 }
-                if let Some(id) = ids.get(index) {
-                    ui.show_peek(*id, index, size);
-                }
             });
             let enter = update.clone();
             motion.connect_enter(move |_, x, y| enter(x, y));
@@ -1575,12 +1552,12 @@ impl Ui {
                         .imp()
                         .pointer
                         .set(f64::NAN);
+                    fixed.queue_draw();
                 }
                 if let Some(ui) = weak.upgrade() {
-                    for i in 0..ui.edge.tab_hover.borrow().len() {
+                    for i in 0..count {
                         ui.animate_tab_hover(i, 0.);
                     }
-                    ui.schedule_peek_hide();
                 }
             });
             fixed.add_controller(motion);
@@ -1688,174 +1665,6 @@ impl Ui {
             self.refresh_edge_search();
         }
         self.place_edge();
-    }
-    fn show_peek(self: &Rc<Self>, id: NoteId, index: usize, tab_length: i32) {
-        if !matches!(self.edge.state(), EdgeState::Tabs | EdgeState::Docked(_)) {
-            return;
-        }
-        // A click can produce a fresh pointer-enter after the focus handoff.
-        // The active editor already displays this note; never cover it again.
-        if self.edge.state().docked_id() == Some(id) {
-            let showing = self.edge.peek.borrow().is_some();
-            if showing {
-                self.hide_peek_now();
-            }
-            return;
-        }
-        if let Some(timer) = self.edge.peek_hide.borrow_mut().take() {
-            timer.remove();
-        }
-        if self
-            .edge
-            .peek
-            .borrow()
-            .as_ref()
-            .is_some_and(|(current, _)| *current == id)
-        {
-            if self.edge.peek_target.get() != 1. {
-                self.animate_peek(1.);
-            }
-            return;
-        }
-        let Some(mut note) = self.deck.borrow().note(id).cloned() else {
-            return;
-        };
-        // A live editor may have unsaved text. Copy it without attaching a peek view.
-        let live = self.sessions.borrow().get(&id).and_then(Weak::upgrade);
-        let (style, spans) = if let Some(session) = live {
-            note.title = session.title.text().to_string();
-            let (start, end) = session.body.bounds();
-            note.body = session.body.text(&start, &end, true).to_string();
-            note.color = session.color();
-            (session.style(), crate::text_editing::spans(&session.body))
-        } else {
-            let Ok(style) = self.storage.load_note_style(id) else {
-                return;
-            };
-            let Ok(spans) = self.storage.load_formatting(id) else {
-                return;
-            };
-            (style, spans)
-        };
-        let replacing = self.edge.peek.borrow().is_some();
-        self.edge.peek_motion.cancel();
-        if let Some((_, old)) = self.edge.peek.borrow_mut().take() {
-            self.edge.root.remove_overlay(&old.root);
-        }
-        let config = self.config.borrow();
-        let peek = editor::NoteSheet::peek(&note, &style, &spans, &config);
-        self.edge.root.add_overlay(&peek.root);
-        let (screen_width, screen_height) = self.note_limits();
-        let width = 260.min(screen_width);
-        let height = peek.peek_height(width, screen_height).min(screen_height);
-        peek.root.set_size_request(width, height);
-        let (sx, sy, sw, sh) = self.edge.strip_bounds.get();
-        let horizontal = matches!(config.edge, ScreenEdge::Top | ScreenEdge::Bottom);
-        let origin = if horizontal { sx } else { sy }
-            + 16
-            + index as i32 * (tab_length + TAB_GAP)
-            + tab_length / 2;
-        let (x, y) = match config.edge {
-            ScreenEdge::Left => (sw + 10, origin - height / 2),
-            ScreenEdge::Right => (screen_width - sw - 10 - width, origin - height / 2),
-            ScreenEdge::Top => (origin - width / 2, sh + 10),
-            ScreenEdge::Bottom => (origin - width / 2, screen_height - sh - 10 - height),
-        };
-        let (x, y) = (
-            x.clamp(0, (screen_width - width).max(0)),
-            y.clamp(0, (screen_height - height).max(0)),
-        );
-        // Overlay's Start alignment uses natural width, even above the request.
-        // Fill the clamped rectangle so wrapping titles cannot exceed 260px.
-        peek.root.set_halign(gtk::Align::Fill);
-        peek.root.set_valign(gtk::Align::Fill);
-        peek.root.set_margin_start(x);
-        peek.root.set_margin_top(y);
-        peek.root.set_margin_end(screen_width - x - width);
-        peek.root.set_margin_bottom(screen_height - y - height);
-        self.edge.peek_bounds.set((x, y, width, height));
-        if replacing {
-            self.edge.peek_motion.jump(1.);
-        }
-        peek.root.set_opacity(self.edge.peek_motion.value());
-        self.edge.peek.replace(Some((id, peek)));
-        drop(config);
-        self.set_input();
-        self.animate_peek(1.);
-    }
-    fn animate_peek(self: &Rc<Self>, opacity: f64) {
-        self.edge.peek_target.set(opacity);
-        let weak = Rc::downgrade(self);
-        let done = Rc::downgrade(self);
-        self.edge.peek_motion.animate(
-            &self.edge.window,
-            opacity,
-            (motion::PANEL_MS, 0),
-            self.motion_enabled(),
-            move |value| {
-                if let Some(ui) = weak.upgrade()
-                    && let Some((_, peek)) = ui.edge.peek.borrow().as_ref()
-                {
-                    peek.root.set_opacity(value);
-                }
-            },
-            move || {
-                if opacity == 0.
-                    && let Some(ui) = done.upgrade()
-                {
-                    ui.hide_peek_now();
-                }
-            },
-        );
-    }
-    fn schedule_peek_hide(self: &Rc<Self>) {
-        if let Some(timer) = self.edge.peek_hide.borrow_mut().take() {
-            timer.remove();
-        }
-        let weak = Rc::downgrade(self);
-        self.edge
-            .peek_hide
-            .replace(Some(glib::timeout_add_local_once(
-                Duration::from_millis(150),
-                move || {
-                    if let Some(ui) = weak.upgrade() {
-                        ui.edge.peek_hide.borrow_mut().take();
-                        ui.animate_peek(0.);
-                    }
-                },
-            )));
-    }
-    pub(super) fn hide_peek_now(&self) {
-        if let Some(timer) = self.edge.peek_hide.borrow_mut().take() {
-            timer.remove();
-        }
-        self.edge.peek_motion.jump(0.);
-        self.edge.peek_target.set(0.);
-        let old = self.edge.peek.borrow_mut().take();
-        if let Some((_, peek)) = old {
-            self.edge.root.remove_overlay(&peek.root);
-        }
-        self.edge.root.queue_draw();
-        self.set_input();
-    }
-    pub(super) fn peek_dock_offset(&self, id: NoteId) -> Option<(ScreenEdge, i32)> {
-        self.edge
-            .peek
-            .borrow()
-            .as_ref()
-            .filter(|(current, _)| *current == id)
-            .map(|_| {
-                let edge = self.config.borrow().edge;
-                let (x, y, _, _) = self.edge.peek_bounds.get();
-                (
-                    edge,
-                    if matches!(edge, ScreenEdge::Top | ScreenEdge::Bottom) {
-                        x
-                    } else {
-                        y
-                    },
-                )
-            })
     }
     pub(super) fn remember_origin(&self, widget: &gtk::Widget) {
         if let Some(bounds) = widget.compute_bounds(&self.edge.strip_root) {
@@ -2334,10 +2143,11 @@ impl Ui {
             ));
         }
         if let Some(panel) = effects.panel {
+            let gap = 10;
             let (max_width, max_height) = if horizontal {
-                (screen_width, screen_height - th - 10)
+                (screen_width, screen_height - th - gap)
             } else {
-                (screen_width - tw - 10, screen_height)
+                (screen_width - tw - gap, screen_height)
             };
             let (width, height) = if let (EdgeState::Docked(_), Some(editor)) =
                 (self.edge.state(), docked.as_ref())
@@ -2380,10 +2190,10 @@ impl Ui {
                 self.edge.docked_offset.set(Some((config.edge, along)));
             }
             let (x, y) = match config.edge {
-                ScreenEdge::Left => (tw + 10, along),
-                ScreenEdge::Right => (screen_width - tw - 10 - width, along),
-                ScreenEdge::Top => (along, th + 10),
-                ScreenEdge::Bottom => (along, screen_height - th - 10 - height),
+                ScreenEdge::Left => (tw + gap, along),
+                ScreenEdge::Right => (screen_width - tw - gap - width, along),
+                ScreenEdge::Top => (along, th + gap),
+                ScreenEdge::Bottom => (along, screen_height - th - gap - height),
             };
             position(self.edge.stack.upcast_ref(), x, y);
             self.edge.panel_bounds.set((x, y, width, height));
@@ -2567,11 +2377,6 @@ impl Ui {
                 if let Some((x, y, width, height)) = bounds {
                     let _ =
                         region.union_rectangle(&gtk::cairo::RectangleInt::new(x, y, width, height));
-                }
-                if self.edge.peek.borrow().is_some() {
-                    let (x, y, width, height) = self.edge.peek_bounds.get();
-                    let _ = region
-                        .subtract_rectangle(&gtk::cairo::RectangleInt::new(x, y, width, height));
                 }
                 surface.set_input_region(Some(&region));
             }
@@ -3189,7 +2994,7 @@ mod tests {
     }
     #[test]
     #[ignore = "requires Wayland and disposable XDG directories"]
-    fn hover_pop_preserves_clicks_and_surface_geometry() {
+    fn hover_keeps_titles_attached_and_preserves_clicks() {
         for variable in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
             assert!(
                 std::path::PathBuf::from(std::env::var(variable).unwrap())
@@ -3259,7 +3064,7 @@ mod tests {
         settle(250);
         ui.reveal();
         settle(400);
-        let hover = |enter: bool| {
+        let hover_at = |index: Option<usize>, offset: f64| {
             let fixed = ui.edge.tabs.first_child().unwrap();
             let tab = fixed.first_child().unwrap();
             let horizontal = matches!(
@@ -3271,7 +3076,10 @@ mod tests {
             } else {
                 tab.height_request()
             };
-            let along = 16. + f64::from(size) / 2.;
+            let along = 16.
+                + index.unwrap_or(0) as f64 * f64::from(size + TAB_GAP)
+                + f64::from(size) / 2.
+                + offset;
             let (x, y) = if horizontal {
                 (along, 12.)
             } else {
@@ -3279,7 +3087,7 @@ mod tests {
             };
             for controller in fixed.observe_controllers().iter::<glib::Object>().flatten() {
                 if let Ok(motion) = controller.downcast::<gtk::EventControllerMotion>() {
-                    if enter {
+                    if index.is_some() {
                         motion.emit_by_name::<()>("motion", &[&x, &y]);
                     } else {
                         motion.emit_by_name::<()>("leave", &[]);
@@ -3287,21 +3095,65 @@ mod tests {
                 }
             }
         };
-        hover(true);
+        let hover = |index| hover_at(index, 0.);
+        hover(Some(0));
         settle(45);
         let progress = ui.edge.tab_hover.borrow()[0].value();
-        assert!(
-            progress > 0. && progress < 1.,
-            "hover must have intermediate progress: {progress}"
-        );
-        hover(false);
+        assert!(progress > 0. && progress < 1.);
+        hover_at(Some(0), 8.);
+        assert_eq!(ui.edge.tab_hover.borrow()[0].value(), progress);
         assert_eq!(
-            ui.edge.tab_hover.borrow()[0].value(),
-            progress,
-            "leave must reverse from current progress"
+            ui.edge
+                .tabs
+                .first_child()
+                .unwrap()
+                .downcast_ref::<TabLayout>()
+                .unwrap()
+                .imp()
+                .pointer
+                .get(),
+            0.,
+            "moving within a tab must not retarget the hover animation"
         );
         settle(180);
-        assert_eq!(ui.edge.tab_hover.borrow()[0].value(), 0.);
+        assert_eq!(ui.edge.tab_hover.borrow()[0].value(), 1.);
+        assert_eq!(ui.edge.tab_hover.borrow()[1].value(), 0.);
+        let progress = ui.edge.tab_hover.borrow()[0].value();
+        let fixed = ui
+            .edge
+            .tabs
+            .first_child()
+            .unwrap()
+            .downcast::<gtk::Fixed>()
+            .unwrap();
+        let tab = fixed.first_child().unwrap();
+        let origin = gtk::graphene::Point::new(0., 0.);
+        let before = fixed
+            .child_transform(&tab)
+            .unwrap()
+            .transform_point(&origin);
+        hover(Some(1));
+        assert_eq!(ui.edge.tab_hover.borrow()[0].value(), progress);
+        let after = fixed
+            .child_transform(&tab)
+            .unwrap()
+            .transform_point(&origin);
+        assert!(
+            (after.x() - before.x()).abs() < 0.01 && (after.y() - before.y()).abs() < 0.01,
+            "switching tabs must preserve the painted hover transform"
+        );
+        settle(45);
+        let progress = ui.edge.tab_hover.borrow()[1].value();
+        hover(None);
+        assert_eq!(ui.edge.tab_hover.borrow()[1].value(), progress);
+        settle(180);
+        assert!(
+            ui.edge
+                .tab_hover
+                .borrow()
+                .iter()
+                .all(|hover| hover.value() == 0.)
+        );
         let extent = (ui.edge.strip_root.width(), ui.edge.strip_root.height());
         for (theme, appearance, name) in [
             (config::Theme::Paper, config::Appearance::Light, "paper"),
@@ -3337,24 +3189,21 @@ mod tests {
                 let base = tab.compute_bounds(&ui.edge.strip_root).unwrap();
                 let input = ui.strip_input_bounds();
                 capture(&format!("{prefix}-normal"));
-                hover(true);
+                hover(Some(0));
                 settle(40);
+                let hovered = tab.compute_bounds(&ui.edge.strip_root).unwrap();
+                assert!((hovered.width() / base.width() - 1.24).abs() < 0.001);
+                assert!((hovered.height() / base.height() - 1.24).abs() < 0.001);
                 assert_eq!(ui.edge.tab_hover.borrow()[0].value(), 1.);
-                assert!(
-                    !ui.edge.tab_hover.borrow()[0].is_running(),
-                    "reduced motion must jump"
-                );
-                let nudged = tab.compute_bounds(&ui.edge.strip_root).unwrap();
-                assert!((nudged.width() - base.width()).abs() < 0.001);
-                assert!((nudged.height() - base.height()).abs() < 0.001);
-                let (dx, dy) = match edge {
-                    ScreenEdge::Left => (6., 0.),
-                    ScreenEdge::Right => (-6., 0.),
-                    ScreenEdge::Top => (0., 6.),
-                    ScreenEdge::Bottom => (0., -6.),
+                assert!(!ui.edge.tab_hover.borrow()[0].is_running());
+                let (screen_width, screen_height) = ui.note_limits();
+                let gap = match edge {
+                    ScreenEdge::Left => hovered.x(),
+                    ScreenEdge::Right => screen_width as f32 - hovered.x() - hovered.width(),
+                    ScreenEdge::Top => hovered.y(),
+                    ScreenEdge::Bottom => screen_height as f32 - hovered.y() - hovered.height(),
                 };
-                assert!((nudged.x() - base.x() - dx).abs() < 0.01);
-                assert!((nudged.y() - base.y() - dy).abs() < 0.01);
+                assert!(gap.abs() < 0.01, "hover left an edge gap: {edge:?}/{gap}");
                 assert_eq!(
                     (fixed.width(), fixed.height()),
                     (fixed.width_request(), fixed.height_request())
@@ -3364,9 +3213,9 @@ mod tests {
                     input,
                     "hover must not resize the input region per frame"
                 );
-                assert!(nudged.x() >= input.0 as f32 && nudged.y() >= input.1 as f32);
-                assert!(nudged.x() + nudged.width() <= (input.0 + input.2) as f32 + 0.01);
-                assert!(nudged.y() + nudged.height() <= (input.1 + input.3) as f32 + 0.01);
+                assert!(hovered.x() >= input.0 as f32 && hovered.y() >= input.1 as f32);
+                assert!(hovered.x() + hovered.width() <= (input.0 + input.2) as f32 + 0.01);
+                assert!(hovered.y() + hovered.height() <= (input.1 + input.3) as f32 + 0.01);
                 let (px, py) = match edge {
                     ScreenEdge::Left => {
                         (base.x() + base.width() + 0.5, base.y() + base.height() / 2.)
@@ -3384,7 +3233,7 @@ mod tests {
                     .unwrap();
                 assert!(
                     picked == tab || picked.is_ancestor(&tab),
-                    "nudged title must receive clicks"
+                    "edge title must receive clicks"
                 );
                 capture(&format!("{prefix}-hover"));
                 tab.clone()
@@ -3408,11 +3257,14 @@ mod tests {
         let mut config = ui.config.borrow().clone();
         config.reduced_motion = false;
         ui.change_settings(config).unwrap();
-        let settings = gtk::Settings::default().unwrap();
-        settings.set_gtk_enable_animations(true);
-        hover(true);
+        gtk::Settings::default()
+            .unwrap()
+            .set_gtk_enable_animations(true);
+        hover(Some(0));
         settle(35);
-        settings.set_gtk_enable_animations(false);
+        gtk::Settings::default()
+            .unwrap()
+            .set_gtk_enable_animations(false);
         assert_eq!(ui.edge.tab_hover.borrow()[0].value(), 1.);
         assert!(!ui.edge.tab_hover.borrow()[0].is_running());
         ui.begin_reposition().unwrap();
@@ -3526,7 +3378,16 @@ mod feedback_tests {
                 }
                 settle();
                 assert!((ui.edge.tab_hover.borrow()[1].value() - 1.).abs() < 0.001);
-                assert!(ui.edge.tab_hover.borrow()[0].value() > 0.);
+                assert_eq!(ui.edge.tab_hover.borrow()[0].value(), 0.);
+                assert_eq!(
+                    fixed
+                        .downcast_ref::<TabLayout>()
+                        .unwrap()
+                        .imp()
+                        .pointer
+                        .get(),
+                    1.
+                );
                 assert_eq!(ui.strip_input_bounds(), input);
                 for tab in &tabs {
                     let bounds = tab.compute_bounds(&ui.edge.strip_root).unwrap();
