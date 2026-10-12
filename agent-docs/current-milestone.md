@@ -2,6 +2,20 @@
 
 [SPEC.md](SPEC.md) is the current product truth derived from the code. [HISTORY.md](HISTORY.md) preserves the former milestone log unchanged. The active milestone remains final UI work and phase 5A/5B verification; [implementation.md](implementation.md) records later roadmap work.
 
+## October 13 draft visibility and All Notes defaults
+
+Owner-approved blank creation now opens a hidden draft from the strip, All Notes or the new-note action. The existing creation timestamp stores an unpublished marker, so schema 4 stays unchanged. List and strip queries exclude drafts before sorting and limiting. The first successful non-blank text/formatting save publishes the note atomically; failed saves retain hidden drafts and their editors. All Notes keeps its rows, list selection, filter and search while editing a draft, then selects the published row. Search-created titles and existing blank notes remain visible. Last-view blank cleanup retains the shared-view/save guards, and startup removes orphan drafts and their styles.
+
+New All Notes windows and default collection fallbacks use Active with an empty search. Existing windows retain their state. The All / Active / Archived order and scoped search are unchanged. No UI, settings or formatting encoding changes were added. SPEC records both behaviors.
+
+Verification passed: the four requested storage regressions and the updated last-view GTK regression in a disposable Wayland session. The GTK case also checks unchanged draft rows/selection, first-save publication with another note docked and failed-save guards in All Notes. The existing archived-preview test now explicitly chooses Archived after archiving, and the edge Search test now expects a newly created blank to be absent from the deck. Both were compiled but not executed. Formatting and strict Clippy with existing GTK deprecations allowed passed. Broader suites were not run. Work remains uncommitted for owner review.
+
+## October 12 edge peek cards
+
+Owner-approved section 4.4 replaces tab magnification and neighboring spread with one 6 px transform nudge. The hover card uses the individual editor's shared NoteSheet, with private read-only buffers, wrapped title, about five body lines, stored formatting and per-note pattern. Empty bodies show "Empty note". It stays within 260 px and screen bounds, swaps between tabs, fades over 120 ms and has a 150 ms leave grace. Reduced motion removes the fade. No tooltip, setting, second renderer, focus request, NoteSession, save path or note activity timer is added for peeks.
+
+The existing panel surface hosts the card, which is subtracted from both input regions. Clicking keeps the save guards, carries its edge position to the editor and replaces it at full opacity. The current docked note's own tab never reopens a card over that editor; other tabs can preview without changing it. Utilities and the reserved note footer are unchanged. Formatting and strict Clippy with GTK deprecations allowed passed. The existing hover geometry test now expects translation rather than magnification. Test execution was not requested and the suites were not run. The pointer recording, extracted frames and scoped report are in `/tmp/stickies-peek-check/review.md`. Work remains uncommitted and stops for owner review.
+
 ## October 12 undo grouping
 
 Owner-approved undo grouping keeps the note's shared custom title/body snapshots and formatting encoding. Typing/deletion groups until a one-second pause, typed newline, direction/field change, cursor movement or the 100-character cap. Paste/cut/drop, formatting and list/checkbox actions are isolated. Cursor restoration uses the actual changed range, including repeated text and partial formatting. Title shortcuts now use the same custom history; Enter in the single-line title also ends a group. The monotonic clock is injectable for deterministic pause tests. No UI or configuration key is added.

@@ -1,7 +1,7 @@
 use crate::{
-    app::{NoteColor, NoteId},
+    app::{Note, NoteColor, NoteId},
     appearance,
-    config::{Config, Theme},
+    config::{Config, NoteStyle, Theme},
     note_controls::{NoteControls, Surface},
     note_session::NoteSession,
     ui_assets,
@@ -18,6 +18,211 @@ pub const HEIGHT: i32 = 376;
 pub const MIN_WIDTH: i32 = 300;
 pub const MIN_HEIGHT: i32 = 280;
 
+/// The individual note sheet, shared by editing and read-only edge peeks.
+/// Peeks supply private buffers and never create a NoteSession.
+pub(super) struct NoteSheet {
+    pub root: gtk::Overlay,
+    title: gtk::Entry,
+    body: gtk::TextView,
+    paper: gtk::Overlay,
+    content: gtk::Box,
+    header: gtk::Box,
+    resolved: Rc<RefCell<Config>>,
+    font_provider: gtk::CssProvider,
+    background: gtk::DrawingArea,
+    color: Rc<Cell<NoteColor>>,
+}
+impl NoteSheet {
+    fn new(
+        id: NoteId,
+        title_buffer: &gtk::EntryBuffer,
+        body_buffer: &gtk::TextBuffer,
+        config: &Config,
+        note_color: NoteColor,
+        style: &NoteStyle,
+        readonly: bool,
+    ) -> Self {
+        let root = gtk::Overlay::new();
+        root.set_size_request(
+            if readonly { 260 } else { MIN_WIDTH },
+            if readonly { -1 } else { MIN_HEIGHT },
+        );
+        root.set_hexpand(!readonly);
+        root.set_vexpand(!readonly);
+        root.add_css_class("individual");
+        let color = Rc::new(Cell::new(note_color));
+        let resolved = Rc::new(RefCell::new(style.resolve(config)));
+        let background = appearance::paper_background(
+            resolved.clone(),
+            color.clone(),
+            Rc::new(Cell::new(id.value())),
+        );
+        let sheet = gtk::Overlay::new();
+        sheet.set_hexpand(true);
+        sheet.set_vexpand(true);
+        sheet.set_child(Some(&background));
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        content.add_css_class("editor-card");
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let title = gtk::Entry::new();
+        title.add_css_class("editor-title");
+        title.set_hexpand(true);
+        title.set_width_chars(1);
+        title.set_placeholder_text(Some("Untitled note"));
+        title.set_buffer(title_buffer);
+        let body = gtk::TextView::with_buffer(body_buffer);
+        body.add_css_class("editor-body");
+        body.set_wrap_mode(gtk::WrapMode::WordChar);
+        body.set_top_margin(6);
+        body.set_bottom_margin(8);
+        body.set_pixels_above_lines(4);
+        body.set_pixels_below_lines(4);
+        body.set_left_margin(0);
+        body.set_right_margin(4);
+        let scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vscrollbar_policy(if readonly {
+                gtk::PolicyType::Never
+            } else {
+                gtk::PolicyType::Automatic
+            })
+            .vexpand(true)
+            .child(&body)
+            .build();
+        let font_provider = gtk::CssProvider::new();
+        appearance::apply_note_font(&font_provider, &resolved.borrow(), style);
+        title
+            .style_context()
+            .add_provider(&font_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+        body.style_context()
+            .add_provider(&font_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+
+        if readonly {
+            root.add_css_class("peek");
+            root.set_can_target(false);
+            root.set_focusable(false);
+            title.set_editable(false);
+            title.set_focusable(false);
+            let title_text = title_buffer.text();
+            let heading = gtk::Label::new(Some(if title_text.trim().is_empty() {
+                "Untitled note"
+            } else {
+                title_text.as_str()
+            }));
+            heading.add_css_class("editor-title");
+            heading.set_xalign(0.);
+            heading.set_wrap(true);
+            heading.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+            heading.set_width_chars(1);
+            heading.set_hexpand(true);
+            heading
+                .style_context()
+                .add_provider(&font_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+            header.append(&heading);
+            body.set_editable(false);
+            body.set_cursor_visible(false);
+            body.set_focusable(false);
+            body.set_can_target(false);
+            crate::note_session::readonly_checklists(&body);
+        } else {
+            header.append(&title);
+        }
+        content.append(&header);
+        content.append(&scroll);
+        sheet.add_overlay(&content);
+        // Peek content cannot enlarge its clamped allocation, even for long titles.
+        sheet.set_measure_overlay(&content, !readonly);
+        sheet.set_clip_overlay(&content, readonly);
+        root.set_child(Some(&sheet));
+        let sheet = Self {
+            root,
+            title,
+            body,
+            paper: sheet,
+            content,
+            header,
+            resolved,
+            font_provider,
+            background,
+            color,
+        };
+        sheet.refresh(style, note_color, config);
+        sheet
+    }
+    pub(super) fn peek(
+        note: &Note,
+        style: &NoteStyle,
+        spans: &[crate::text_editing::Span],
+        config: &Config,
+    ) -> Self {
+        let title = gtk::EntryBuffer::new(Some(note.title.as_str()));
+        let body = gtk::TextBuffer::new(None::<&gtk::TextTagTable>);
+        body.set_enable_undo(false);
+        let excerpt = note.body.lines().take(5).collect::<Vec<_>>().join("\n");
+        body.set_text(if note.body.trim().is_empty() {
+            "Empty note"
+        } else {
+            &excerpt
+        });
+        if !note.body.trim().is_empty() {
+            crate::text_editing::apply(&body, spans);
+        }
+        Self::new(note.id, &title, &body, config, note.color, style, true)
+    }
+    pub(super) fn peek_height(&self, width: i32, screen_height: i32) -> i32 {
+        // Give the shared TextView its final width before asking GTK for display
+        // lines. Private peek buffers can be clipped without editing the note.
+        self.root.allocate(width, screen_height, -1, None);
+        let buffer = self.body.buffer();
+        let mut end = buffer.start_iter();
+        for _ in 0..5 {
+            if !self.body.forward_display_line(&mut end) {
+                end = buffer.end_iter();
+                break;
+            }
+        }
+        if !end.is_end() {
+            if end.starts_line() {
+                end.backward_char();
+            }
+            let mut tail = buffer.end_iter();
+            buffer.delete(&mut end, &mut tail);
+        }
+        let last = self.body.iter_location(&buffer.end_iter());
+        let (_, y) = self
+            .body
+            .buffer_to_window_coords(gtk::TextWindowType::Widget, 0, last.y());
+        if let Some(scroll) = self.content.last_child() {
+            scroll.set_size_request(-1, y + last.height() + self.body.bottom_margin());
+        }
+        self.content.measure(gtk::Orientation::Vertical, width).1
+    }
+    fn refresh(&self, style: &NoteStyle, color: NoteColor, config: &Config) {
+        self.resolved.replace(style.resolve(config));
+        appearance::apply_note_font(&self.font_provider, &self.resolved.borrow(), style);
+        crate::note_session::style_checklists(&self.body.buffer(), &self.resolved.borrow());
+        self.color.set(color);
+        self.background.queue_draw();
+        self.body.set_pixels_above_lines(1);
+        self.body.set_pixels_below_lines(3);
+        let config = self.resolved.borrow();
+        for (class, enabled) in [
+            ("minimal", config.theme == Theme::Minimal),
+            (
+                "minimal-dark",
+                config.theme == Theme::Minimal && appearance::dark(&config),
+            ),
+            ("playful", config.theme == Theme::Playful),
+        ] {
+            if enabled {
+                self.root.add_css_class(class);
+            } else {
+                self.root.remove_css_class(class);
+            }
+        }
+    }
+}
+
 pub struct Editor {
     pub root: gtk::Overlay,
     pub title: gtk::Entry,
@@ -32,10 +237,7 @@ pub struct Editor {
     session: Rc<NoteSession>,
     subscription: RefCell<Option<Rc<dyn Fn()>>>,
     config: Rc<RefCell<Config>>,
-    resolved: Rc<RefCell<Config>>,
-    font_provider: gtk::CssProvider,
-    background: gtk::DrawingArea,
-    color: Rc<Cell<NoteColor>>,
+    sheet: NoteSheet,
     toast: adw::ToastOverlay,
     last_error: RefCell<Option<String>>,
     error_toast: RefCell<Option<adw::Toast>>,
@@ -53,55 +255,27 @@ impl Editor {
         docked: bool,
         on_timeout: impl Fn() + 'static,
     ) -> Rc<Self> {
-        let root = gtk::Overlay::new();
-        root.set_size_request(MIN_WIDTH, MIN_HEIGHT);
-        root.set_hexpand(true);
-        root.set_vexpand(true);
-        root.add_css_class("individual");
-        let color = Rc::new(Cell::new(session.color()));
-        let style = session.style();
-        let resolved = Rc::new(RefCell::new(style.resolve(&config.borrow())));
-        let background = appearance::paper_background(
-            resolved.clone(),
-            color.clone(),
-            Rc::new(Cell::new(session.id().value())),
+        let sheet = NoteSheet::new(
+            session.id(),
+            &session.title,
+            &session.body,
+            &config.borrow(),
+            session.color(),
+            &session.style(),
+            false,
         );
-        let sheet = gtk::Overlay::new();
-        sheet.set_hexpand(true);
-        sheet.set_vexpand(true);
-        sheet.set_child(Some(&background));
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        content.add_css_class("editor-card");
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        let title = gtk::Entry::new();
-        title.add_css_class("editor-title");
-        title.set_hexpand(true);
-        title.set_width_chars(1);
-        title.set_placeholder_text(Some("Untitled note"));
-        title.set_buffer(&session.title);
+        let root = sheet.root.clone();
+        let title = sheet.title.clone();
+        let body = sheet.body.clone();
+        let content = sheet.content.clone();
+        let header = sheet.header.clone();
         session.attach_title(&title);
         let weak_session = Rc::downgrade(&session);
         crate::text_editing::bind_title_history(&title, move || weak_session.upgrade());
-        let close = ui_assets::icon("close", "Close note");
-        header.append(&title);
-        header.append(&close);
-        let body = gtk::TextView::with_buffer(&session.body);
-        body.add_css_class("editor-body");
-        connect_checklist_backspace(&body);
-        body.set_wrap_mode(gtk::WrapMode::WordChar);
-        body.set_top_margin(6);
-        body.set_bottom_margin(8);
-        body.set_pixels_above_lines(4);
-        body.set_pixels_below_lines(4);
-        body.set_left_margin(0);
-        body.set_right_margin(4);
         session.attach_view(&body);
-        let scroll = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vscrollbar_policy(gtk::PolicyType::Automatic)
-            .vexpand(true)
-            .child(&body)
-            .build();
+        connect_checklist_backspace(&body);
+        let close = ui_assets::icon("close", "Close note");
+        header.append(&close);
         let controls = NoteControls::new(if docked {
             Surface::Docked
         } else {
@@ -114,17 +288,16 @@ impl Editor {
         let numbered = controls.numbered.clone().unwrap();
         let separate = controls.separate.clone();
         let toast = adw::ToastOverlay::new();
-        toast.set_child(Some(&sheet));
+        root.set_child(None::<&gtk::Widget>);
+        toast.set_child(Some(&sheet.paper));
         root.set_child(Some(&toast));
+        content.remove(&header);
         let window_handle = gtk::WindowHandle::new();
         window_handle.set_child(Some(&header));
-        content.append(&window_handle);
+        content.prepend(&window_handle);
         let weak_session = Rc::downgrade(&session);
         crate::text_editing::bind_history(&body, move || weak_session.upgrade());
-        content.append(&scroll);
         content.append(&controls.root);
-        sheet.add_overlay(&content);
-        sheet.set_measure_overlay(&content, true);
         // Keep the native resize input unchanged; its grip is decorative.
         let resize = gtk::Box::new(gtk::Orientation::Vertical, 0);
         resize.set_size_request(16, 16);
@@ -164,7 +337,7 @@ impl Editor {
             let _ = cr.stroke();
         });
         resize.append(&mark);
-        sheet.add_overlay(&resize);
+        sheet.paper.add_overlay(&resize);
         let weak_session = Rc::downgrade(&session);
         let selection = crate::text_editing::SelectionTools::new(
             &body,
@@ -173,13 +346,6 @@ impl Editor {
             move || weak_session.upgrade(),
             &controls.popovers(),
         );
-        let font_provider = gtk::CssProvider::new();
-        appearance::apply_note_font(&font_provider, &resolved.borrow(), &style);
-        title
-            .style_context()
-            .add_provider(&font_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
-        body.style_context()
-            .add_provider(&font_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
         let editor = Rc::new(Self {
             root,
             title,
@@ -193,10 +359,7 @@ impl Editor {
             session: session.clone(),
             subscription: RefCell::new(None),
             config,
-            resolved,
-            font_provider,
-            background,
-            color,
+            sheet,
             toast,
             last_error: RefCell::new(None),
             error_toast: RefCell::new(None),
@@ -386,7 +549,7 @@ impl Editor {
             target.add_controller(motion);
         }
         let weak = Rc::downgrade(&editor);
-        editor.background.connect_resize(move |_, _, _| {
+        editor.sheet.background.connect_resize(move |_, _, _| {
             if let Some(editor) = weak.upgrade() {
                 editor.selection.refresh();
             }
@@ -400,7 +563,9 @@ impl Editor {
         self.session.id()
     }
     pub fn connect_size_changed(&self, callback: impl Fn() + 'static) {
-        self.background.connect_resize(move |_, _, _| callback());
+        self.sheet
+            .background
+            .connect_resize(move |_, _, _| callback());
     }
     pub fn docked_size(&self) -> (i32, i32) {
         self.docked_size.get()
@@ -475,34 +640,13 @@ impl Editor {
             .sync(&style, self.session.color(), self.config.borrow().theme);
         self.syncing_style.set(false);
         self.controls.sync_checklist(&self.body);
-        self.resolved.replace(style.resolve(&self.config.borrow()));
-        appearance::apply_note_font(&self.font_provider, &self.resolved.borrow(), &style);
-        crate::note_session::style_checklists(&self.body.buffer(), &self.resolved.borrow());
-        self.color.set(self.session.color());
-        self.background.queue_draw();
-        let config = self.resolved.borrow();
-        let (above, below) = match config.theme {
-            Theme::Paper => (1, 3),
-            Theme::Playful => (1, 3),
-            Theme::Minimal => (1, 3),
-        };
-        self.body.set_pixels_above_lines(above);
-        self.body.set_pixels_below_lines(below);
-        for (class, enabled) in [
-            ("minimal", config.theme == Theme::Minimal),
-            (
-                "minimal-dark",
-                config.theme == Theme::Minimal && appearance::dark(&config),
-            ),
-            ("playful", config.theme == Theme::Playful),
-        ] {
-            if enabled {
-                self.root.add_css_class(class);
-            } else {
-                self.root.remove_css_class(class);
-            }
-        }
-        ui_assets::refresh_icons(self.root.upcast_ref(), config.theme == Theme::Playful, true);
+        self.sheet
+            .refresh(&style, self.session.color(), &self.config.borrow());
+        ui_assets::refresh_icons(
+            self.root.upcast_ref(),
+            self.sheet.resolved.borrow().theme == Theme::Playful,
+            true,
+        );
         let error = self.session.error();
         if *self.last_error.borrow() != error {
             self.last_error.replace(error.clone());

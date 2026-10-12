@@ -21,7 +21,7 @@ pub struct NoteSession {
     style: RefCell<NoteStyle>,
     storage: Rc<Storage>,
     dirty: Cell<bool>,
-    new_blank: Cell<bool>,
+    draft: Cell<bool>,
     decorating: Cell<bool>,
     render_source: RefCell<Option<glib::SourceId>>,
     views: RefCell<Vec<glib::WeakRef<gtk::TextView>>>,
@@ -72,6 +72,7 @@ impl NoteSession {
             cursor: body.cursor_position(),
             selection: body.cursor_position(),
         };
+        let draft = storage.is_draft(note.id).unwrap_or(false);
         let session = Rc::new(Self {
             title,
             body,
@@ -81,7 +82,7 @@ impl NoteSession {
             style: RefCell::new(style),
             storage,
             dirty: Cell::new(false),
-            new_blank: Cell::new(false),
+            draft: Cell::new(draft),
             decorating: Cell::new(false),
             render_source: RefCell::new(None),
             views: RefCell::new(Vec::new()),
@@ -335,16 +336,12 @@ impl NoteSession {
         }
     }
 
-    pub fn mark_new_blank(&self) {
-        self.new_blank.set(self.is_blank());
-    }
-
     fn is_blank(&self) -> bool {
         let (start, end) = self.body.bounds();
         self.title.text().trim().is_empty() && self.body.text(&start, &end, true).trim().is_empty()
     }
 
-    // Release only this view. A new blank remains editable in any other window.
+    // Release only this view. A draft remains editable in any other window.
     pub fn release_view(&self, view: &gtk::TextView) -> bool {
         if !self.flush() {
             return false;
@@ -355,7 +352,7 @@ impl NoteSession {
             .iter()
             .filter_map(|v| v.upgrade())
             .any(|other| other != *view && other.buffer() == self.body);
-        if self.new_blank.get() && !other_view {
+        if self.draft.get() && !other_view {
             if self.is_blank() && self.storage.is_archived(self.id()).ok() == Some(false) {
                 if let Err(error) = self.storage.delete_note(self.id()) {
                     self.error.replace(Some(format!(
@@ -368,7 +365,7 @@ impl NoteSession {
                 let changed = self.on_saved.clone();
                 glib::idle_add_local_once(move || changed());
             }
-            self.new_blank.set(false);
+            self.draft.set(false);
         }
         self.views
             .borrow_mut()
@@ -609,7 +606,12 @@ impl NoteSession {
             Ok(()) => {
                 self.dirty.set(false);
                 self.error.borrow_mut().take();
-                (self.on_saved)();
+                if !self.is_blank() {
+                    self.draft.set(false);
+                }
+                if !self.draft.get() {
+                    (self.on_saved)();
+                }
                 self.notify();
                 true
             }

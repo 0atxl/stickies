@@ -2,6 +2,12 @@
 
 Run against the release build on the reference compositor. Record failures and pending checks, not a history of every run. Final UI approval belongs to the user.
 
+## October 12 edge peek review
+
+Review the pointer recording and extracted frames in [the peek report](/tmp/stickies-peek-check/review.md). Move across all four tabs, leave the tabs and click one. The hovered tab translates about 6 px without scaling or moving neighbors. The card uses the shared individual sheet renderer, wraps the title, shows about five body lines and preserves note font, formatting, checklist presentation and pattern. Empty bodies show "Empty note". Its width is at most 260 px and its position is centered along the hovered tab, clamped to the screen.
+
+The card fades over 120 ms and leaves after a 150 ms grace. Reduced motion removes the fade. It takes no focus, is excluded from the input regions and never starts note activity, marks text dirty or saves. Clicking a tab retains save guards and transfers the peek's edge position to an opaque editor in the same frame. Hover may preview another note while the current docked editor stays intact.
+
 ## October 12 undo grouping
 
 In each individual/All Notes title and body, type a phrase without pausing and undo it once. Pause for at least one second between phrases and undo them separately. Repeat with Enter, an insertion-to-backspace transition, arrow/mouse selection movement, paste, cut and drop. Keep formatting and list/checkbox commands as separate steps. Undo and redo must restore text/spans together, return to the changed range and preserve Unicode. Typing after undo must clear redo. The fake-clock unit tests exercise the pause rule without sleeping; the native regression also exercises GTK title/body input, clipboard, list and checkbox actions.

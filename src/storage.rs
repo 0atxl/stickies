@@ -10,6 +10,9 @@ use rusqlite::{Connection, OptionalExtension, functions::FunctionFlags, params};
 use crate::app::{Note, NoteColor, NoteId};
 
 const SCHEMA_VERSION: i64 = 4;
+// An unpublished note has no creation date yet. Normal notes, including old
+// blanks, retain their positive timestamp. Promotion writes a real date atomically.
+const DRAFT_CREATED_AT: i64 = -1;
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -65,9 +68,10 @@ pub struct Storage {
     connection: Connection,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum NoteCollection {
     All,
+    #[default]
     Active,
     Archived,
 }
@@ -96,6 +100,16 @@ impl Storage {
         )?;
         let mut storage = Self { connection };
         storage.migrate()?;
+        let transaction = storage.connection.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM note_styles WHERE note_id IN (SELECT id FROM notes WHERE created_at = ?1)",
+            [DRAFT_CREATED_AT],
+        )?;
+        transaction.execute(
+            "DELETE FROM notes WHERE created_at = ?1",
+            [DRAFT_CREATED_AT],
+        )?;
+        transaction.commit()?;
         Ok(storage)
     }
 
@@ -105,6 +119,28 @@ impl Storage {
         body: &str,
         color: NoteColor,
     ) -> Result<Note, StorageError> {
+        self.insert_note(title, body, color, false)
+    }
+
+    pub fn create_draft(&self, color: NoteColor) -> Result<Note, StorageError> {
+        self.insert_note("", "", color, true)
+    }
+
+    pub fn is_draft(&self, id: NoteId) -> Result<bool, StorageError> {
+        Ok(self.connection.query_row(
+            "SELECT created_at = ?2 FROM notes WHERE id = ?1",
+            params![note_id_to_i64(id)?, DRAFT_CREATED_AT],
+            |row| row.get(0),
+        )?)
+    }
+
+    fn insert_note(
+        &self,
+        title: &str,
+        body: &str,
+        color: NoteColor,
+        draft: bool,
+    ) -> Result<Note, StorageError> {
         let timestamp = unix_timestamp_millis();
         self.connection.execute(
             "INSERT INTO notes (
@@ -112,10 +148,10 @@ impl Storage {
                 created_at, updated_at, archived_at, deleted_at
              ) VALUES (
                 ?1, ?2, ?3, 0,
-                (SELECT COALESCE(MIN(sort_order), 1) - 1 FROM notes),
-                ?4, ?4, NULL, NULL
+                CASE WHEN ?5 = ?6 THEN 0 ELSE (SELECT COALESCE(MIN(sort_order), 1) - 1 FROM notes WHERE created_at != ?6) END,
+                ?5, ?4, NULL, NULL
              )",
-            params![title, body, color_name(color), timestamp],
+            params![title, body, color_name(color), timestamp, if draft { DRAFT_CREATED_AT } else { timestamp }, DRAFT_CREATED_AT],
         )?;
         let id = self.connection.last_insert_rowid();
         let id = u64::try_from(id).map_err(|_| StorageError::InvalidNoteId(id))?;
@@ -124,23 +160,7 @@ impl Storage {
 
     #[cfg(test)]
     pub fn update_note(&self, note: &Note) -> Result<(), StorageError> {
-        let updated = self.connection.execute(
-            "UPDATE notes
-             SET title = ?1, body = ?2, color = ?3, updated_at = ?4
-             WHERE id = ?5 AND archived_at IS NULL AND deleted_at IS NULL",
-            params![
-                note.title,
-                note.body,
-                color_name(note.color),
-                unix_timestamp_millis(),
-                note_id_to_i64(note.id)?,
-            ],
-        )?;
-        if updated == 0 {
-            Err(StorageError::MissingNote(note.id))
-        } else {
-            Ok(())
-        }
+        self.update_formatted_note(note, &self.load_formatting(note.id)?)
     }
 
     pub fn load_formatting(
@@ -162,8 +182,12 @@ impl Storage {
     ) -> Result<(), StorageError> {
         let formatting =
             serde_json::to_string(spans).map_err(|e| StorageError::InvalidStyle(e.to_string()))?;
-        let updated = self.connection.execute("UPDATE notes SET title = ?1, body = ?2, color = ?3, formatting = ?4, updated_at = ?5 WHERE id = ?6 AND archived_at IS NULL AND deleted_at IS NULL",
-            params![note.title, note.body, color_name(note.color), formatting, unix_timestamp_millis(), note_id_to_i64(note.id)?])?;
+        let written = !note.title.trim().is_empty() || !note.body.trim().is_empty();
+        let updated = self.connection.execute("UPDATE notes SET title = ?1, body = ?2, color = ?3, formatting = ?4, updated_at = ?5,
+            sort_order = CASE WHEN created_at = ?7 AND ?8 THEN (SELECT COALESCE(MIN(sort_order), 1) - 1 FROM notes WHERE created_at != ?7) ELSE sort_order END,
+            created_at = CASE WHEN created_at = ?7 AND ?8 THEN ?5 ELSE created_at END
+            WHERE id = ?6 AND archived_at IS NULL AND deleted_at IS NULL",
+            params![note.title, note.body, color_name(note.color), formatting, unix_timestamp_millis(), note_id_to_i64(note.id)?, DRAFT_CREATED_AT, written])?;
         if updated == 0 {
             Err(StorageError::MissingNote(note.id))
         } else {
@@ -197,7 +221,7 @@ impl Storage {
         let mut statement = self.connection.prepare(&format!(
             "SELECT id, title, body, color, pinned
              FROM notes
-             WHERE archived_at IS NULL AND deleted_at IS NULL
+             WHERE archived_at IS NULL AND deleted_at IS NULL AND created_at != {DRAFT_CREATED_AT}
              ORDER BY {order}
              LIMIT ?1"
         ))?;
@@ -277,6 +301,7 @@ impl Storage {
             "SELECT id, title, body, color, pinned
              FROM notes
              WHERE {collection_clause}
+               AND created_at != {DRAFT_CREATED_AT}
                AND deleted_at IS NULL
                AND (instr(stickies_casefold(title), ?1) > 0
                     OR instr(stickies_casefold(body), ?1) > 0)
@@ -448,6 +473,197 @@ fn note_order(collection: NoteCollection, sort: NoteSort) -> &'static str {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn draft_queries_preserve_visible_notes_until_first_nonblank_save() {
+        let storage = Storage::open(Path::new(":memory:")).unwrap();
+        let existing_blank = storage.create_note("", "", NoteColor::Blue).unwrap();
+        for title in ["One", "Two", "Three", "Four", "Five"] {
+            storage
+                .create_note(title, "Body", NoteColor::Yellow)
+                .unwrap();
+        }
+        let before = storage.load_deck_notes(4, NoteSort::Recent).unwrap();
+        let visible = storage
+            .search_notes(NoteCollection::All, "", NoteSort::Recent)
+            .unwrap();
+        let mut draft = storage.create_draft(NoteColor::Green).unwrap();
+        assert!(storage.is_draft(draft.id).unwrap());
+        draft.title = "\u{2003} ".into();
+        draft.body = "\n\t".into();
+        storage.update_note(&draft).unwrap();
+        storage
+            .save_note_style(draft.id, &crate::config::NoteStyle::default())
+            .unwrap();
+        storage.set_note_pinned(draft.id, true).unwrap();
+        assert_eq!(
+            storage.load_deck_notes(4, NoteSort::Recent).unwrap(),
+            before
+        );
+        assert_eq!(
+            storage
+                .search_notes(NoteCollection::All, "", NoteSort::Recent)
+                .unwrap(),
+            visible
+        );
+        for collection in [
+            NoteCollection::All,
+            NoteCollection::Active,
+            NoteCollection::Archived,
+        ] {
+            for sort in [NoteSort::Recent, NoteSort::Title] {
+                assert!(
+                    storage
+                        .search_notes(collection, "", sort)
+                        .unwrap()
+                        .iter()
+                        .all(|n| n.id != draft.id)
+                );
+            }
+        }
+        assert!(storage.is_draft(draft.id).unwrap());
+        draft.body = "Written 東京".into();
+        let spans = vec![crate::text_editing::Span {
+            start: 0,
+            end: 7,
+            mark: crate::text_editing::Mark::Bold,
+        }];
+        storage.update_formatted_note(&draft, &spans).unwrap();
+        assert!(!storage.is_draft(draft.id).unwrap());
+        assert!(storage.note_dates(draft.id).unwrap().0 > 0);
+        assert_eq!(
+            storage.load_deck_notes(4, NoteSort::Recent).unwrap()[0].id,
+            draft.id
+        );
+        assert_eq!(
+            storage
+                .search_notes(NoteCollection::Active, "東京", NoteSort::Recent)
+                .unwrap()[0]
+                .id,
+            draft.id
+        );
+        assert_eq!(storage.load_formatting(draft.id).unwrap(), spans);
+        // Once published, clearing the text never turns a note into a draft again.
+        draft.title.clear();
+        draft.body.clear();
+        storage.update_formatted_note(&draft, &[]).unwrap();
+        assert!(!storage.is_draft(draft.id).unwrap());
+        let notes = storage
+            .search_notes(NoteCollection::Active, "", NoteSort::Recent)
+            .unwrap();
+        assert!(notes.iter().any(|n| n.id == draft.id));
+        assert!(notes.iter().any(|n| n.id == existing_blank.id));
+    }
+
+    #[test]
+    fn draft_failed_save_stays_hidden_until_retry_succeeds() {
+        let storage = Storage::open(Path::new(":memory:")).unwrap();
+        let mut draft = storage.create_draft(NoteColor::Yellow).unwrap();
+        draft.title = "Ready to publish".into();
+        storage
+            .connection
+            .pragma_update(None, "query_only", true)
+            .unwrap();
+        assert!(storage.update_note(&draft).is_err());
+        assert!(storage.is_draft(draft.id).unwrap());
+        assert!(storage.load_note(draft.id).unwrap().title.is_empty());
+        assert!(
+            storage
+                .load_deck_notes(4, NoteSort::Recent)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            storage
+                .search_notes(NoteCollection::All, "", NoteSort::Recent)
+                .unwrap()
+                .is_empty()
+        );
+        storage
+            .connection
+            .pragma_update(None, "query_only", false)
+            .unwrap();
+        storage.update_note(&draft).unwrap();
+        assert_eq!(
+            storage
+                .search_notes(NoteCollection::Active, "Ready", NoteSort::Recent)
+                .unwrap(),
+            vec![draft]
+        );
+    }
+
+    #[test]
+    fn draft_startup_cleanup_preserves_existing_blanks_and_published_notes() {
+        let path = std::env::temp_dir().join(format!(
+            "stickies-drafts-{}-{}.db",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let (orphan, existing, published) = {
+            let storage = Storage::open(&path).unwrap();
+            let existing = storage.create_note("", "", NoteColor::Yellow).unwrap();
+            let mut orphan = storage.create_draft(NoteColor::Blue).unwrap();
+            orphan.body = " \n\u{2003}".into();
+            storage.update_note(&orphan).unwrap();
+            storage
+                .save_note_style(orphan.id, &crate::config::NoteStyle::default())
+                .unwrap();
+            let mut published = storage.create_draft(NoteColor::Green).unwrap();
+            published.body = "Saved before exit".into();
+            storage.update_note(&published).unwrap();
+            (orphan.id, existing.id, published.id)
+        };
+        let storage = Storage::open(&path).unwrap();
+        assert!(storage.load_note(orphan).is_err());
+        assert!(storage.load_note(existing).is_ok());
+        assert!(storage.load_note(published).is_ok());
+        assert_eq!(
+            storage
+                .search_notes(NoteCollection::All, "", NoteSort::Recent)
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            storage
+                .connection
+                .query_row("SELECT count(*) FROM note_styles", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            storage
+                .connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            SCHEMA_VERSION
+        );
+        drop(storage);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn search_created_title_is_visible_immediately_without_draft_save() {
+        let storage = Storage::open(Path::new(":memory:")).unwrap();
+        let note = storage
+            .create_note("Search-created title", "", NoteColor::Yellow)
+            .unwrap();
+        assert!(!storage.is_draft(note.id).unwrap());
+        assert_eq!(
+            storage
+                .search_notes(NoteCollection::Active, "Search-created", NoteSort::Recent)
+                .unwrap(),
+            vec![note.clone()]
+        );
+        assert_eq!(
+            storage.load_deck_notes(4, NoteSort::Recent).unwrap(),
+            vec![note]
+        );
+    }
 
     #[test]
     fn search_casefolds_unicode_titles_and_bodies_without_changing_literal_matching() {

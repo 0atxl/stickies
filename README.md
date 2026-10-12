@@ -35,7 +35,7 @@ Title and body edits use the note's shared, session-local undo history. Continuo
 
 Archive and Delete first save the shared note. A failed save retains its editor. Archive closes individual views without a toast. Delete closes them and shows one replaceable six-second "Note deleted" / Undo toast beside the current strip position, on the existing strip surface. The toast uses the docked-note Overlay/DND policy, accepts input only within its own bounds and fades over 120 ms unless motion is reduced. Undo restores the previous collection and pin state. All Notes keeps its existing deletion toast.
 
-The edge always uses stacked tabs and a bar marker. Title tooltips are removed; hover peek cards are not implemented yet.
+The edge always uses stacked tabs and a bar marker. Hovering a tab nudges it 6 px and shows a read-only, click-through peek with its title and about five body lines, using the same sheet renderer as the docked note. Cards stay within 260 px and screen bounds, fade over 120 ms and leave after a 150 ms grace. Reduced motion removes the fade. Clicking opens the editor at the peek's edge position. No tooltip or magnification is used.
 
 ## Remaining work
 

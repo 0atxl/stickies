@@ -54,6 +54,7 @@ struct ManagerUi {
     collection: Cell<NoteCollection>,
     sort: Cell<NoteSort>,
     selected: Cell<Option<NoteId>>,
+    draft_preview: Cell<Option<(NoteId, Option<NoteId>)>>,
     busy: Cell<bool>,
     notes: RefCell<Vec<Note>>,
     session: RefCell<Option<Rc<NoteSession>>>,
@@ -121,6 +122,19 @@ impl ManagerUi {
         if self.busy.replace(true) {
             return;
         }
+        // Keep a hidden draft in the preview without changing the list selection.
+        // Its first successful content save makes the usual creation selection.
+        let mut preferred = preferred;
+        if let Some((id, _)) = self.draft_preview.get()
+            && self.storage.is_draft(id).ok() == Some(false)
+        {
+            self.draft_preview.set(None);
+            if self.collection.get() == NoteCollection::Archived {
+                self.collection.set(NoteCollection::default());
+            }
+            self.search.set_text("");
+            preferred = Some(id);
+        }
         for (button, collection) in &self.filters {
             if self.collection.get() == *collection {
                 button.add_css_class("selected");
@@ -142,9 +156,11 @@ impl ManagerUi {
                     return;
                 }
             };
-        let target = preferred
-            .or(previous)
-            .filter(|id| notes.iter().any(|n| n.id == *id));
+        let target = self.draft_preview.get().map(|(id, _)| id).or_else(|| {
+            preferred
+                .or(previous)
+                .filter(|id| notes.iter().any(|n| n.id == *id))
+        });
         if target != previous && !self.release_editor() {
             self.busy.set(false);
             return;
@@ -164,14 +180,21 @@ impl ManagerUi {
         }
         self.notes.replace(notes);
         if let Some(id) = target {
-            let index = self.notes.borrow().iter().position(|n| n.id == id).unwrap();
-            self.list
-                .select_row(self.list.row_at_index(index as i32).as_ref());
+            let row_id = self.draft_preview.get().map_or(Some(id), |(_, row)| row);
+            self.select_list_note(row_id);
             self.show_note(id);
         } else {
             self.clear_editor();
         }
         self.busy.set(false);
+    }
+    fn select_list_note(&self, id: Option<NoteId>) {
+        let index = id.and_then(|id| self.notes.borrow().iter().position(|n| n.id == id));
+        self.list.select_row(
+            index
+                .and_then(|i| self.list.row_at_index(i as i32))
+                .as_ref(),
+        );
     }
     fn select(self: &Rc<Self>, row: Option<&gtk::ListBoxRow>) {
         if self.busy.replace(true) {
@@ -185,12 +208,12 @@ impl ManagerUi {
                 } else {
                     self.clear_editor();
                 }
-            } else if let Some(old) = self.selected.get() {
-                let index = self.notes.borrow().iter().position(|n| n.id == old);
-                if let Some(i) = index {
-                    self.list
-                        .select_row(self.list.row_at_index(i as i32).as_ref());
-                }
+            } else {
+                let old = self
+                    .draft_preview
+                    .get()
+                    .map_or(self.selected.get(), |(_, row)| row);
+                self.select_list_note(old);
             }
         }
         self.busy.set(false);
@@ -210,7 +233,11 @@ impl ManagerUi {
                 .iter()
                 .find(|n| n.id == id)
                 .cloned()
-                .unwrap();
+                .or_else(|| self.storage.load_note(id).ok());
+            let Some(note) = note else {
+                self.message("Could not load note");
+                return;
+            };
             self.subscription.borrow_mut().take();
             self.session.borrow_mut().take();
             if !archived {
@@ -241,6 +268,13 @@ impl ManagerUi {
                 crate::note_session::readonly_checklists(&self.body);
             }
         }
+        if self
+            .draft_preview
+            .get()
+            .is_some_and(|(draft, _)| draft != id)
+        {
+            self.draft_preview.set(None);
+        }
         self.selected.set(Some(id));
         self.title.set_editable(!archived);
         self.body.set_editable(!archived);
@@ -254,6 +288,7 @@ impl ManagerUi {
         self.sync_editor();
     }
     fn clear_editor(&self) {
+        self.draft_preview.set(None);
         self.selected.set(None);
         self.last_error.borrow_mut().take();
         if let Some(toast) = self.error_toast.borrow_mut().take() {
@@ -474,18 +509,19 @@ impl ManagerUi {
         if !self.release_editor() {
             return;
         }
-        match self.storage.create_note("", "", NoteColor::Yellow) {
+        match self.storage.create_draft(NoteColor::Yellow) {
             Ok(note) => {
-                if self.collection.get() == NoteCollection::Archived {
-                    self.collection.set(NoteCollection::Active);
-                }
-                self.search.set_text("");
-                self.refresh(Some(note.id));
+                let row_id = self.list.selected_row().and_then(|row| {
+                    self.notes
+                        .borrow()
+                        .get(row.index() as usize)
+                        .map(|note| note.id)
+                });
+                self.draft_preview.set(Some((note.id, row_id)));
+                self.busy.set(true);
+                self.show_note(note.id);
+                self.busy.set(false);
                 self.title.grab_focus();
-                if let Some(session) = self.session.borrow().as_ref() {
-                    session.mark_new_blank();
-                }
-                (self.callbacks.changed)(note.id, ManagerChange::Create);
             }
             Err(e) => {
                 if let Some(session) = self.session.borrow().as_ref() {
@@ -523,6 +559,7 @@ impl ManagerUi {
             return;
         }
         if matches!(change, ManagerChange::Archive | ManagerChange::Delete) {
+            self.draft_preview.set(None);
             self.subscription.borrow_mut().take();
             self.session.borrow_mut().take();
             self.selected.set(None);
@@ -540,6 +577,8 @@ impl ManagerUi {
                 if let Some(ui) = weak.upgrade() {
                     match ui.storage.undo_delete(id) {
                         Ok(()) => {
+                            ui.collection.set(NoteCollection::default());
+                            ui.search.set_text("");
                             (ui.callbacks.changed)(id, ManagerChange::Restore);
                             ui.refresh(Some(id));
                         }
@@ -842,9 +881,10 @@ pub fn build_window(
         storage,
         callbacks,
         config,
-        collection: Cell::new(NoteCollection::All),
+        collection: Cell::new(NoteCollection::default()),
         sort: Cell::new(sort),
         selected: Cell::new(None),
+        draft_preview: Cell::new(None),
         busy: Cell::new(false),
         notes: RefCell::new(Vec::new()),
         session: RefCell::new(None),
@@ -895,6 +935,15 @@ pub fn build_window(
     ui.list.connect_row_selected(move |_, row| {
         if let Some(ui) = weak.upgrade() {
             ui.select(row);
+        }
+    });
+    let weak = Rc::downgrade(&ui);
+    ui.list.set_activate_on_single_click(true);
+    ui.list.connect_row_activated(move |_, row| {
+        if let Some(ui) = weak.upgrade()
+            && ui.draft_preview.get().is_some()
+        {
+            ui.select(Some(row));
         }
     });
     let weak = Rc::downgrade(&ui);
@@ -1072,7 +1121,7 @@ pub fn build_window(
                 ui.search.set_text("");
                 ui.refresh(None);
             } else if ui.collection.get() == NoteCollection::Archived {
-                ui.collection.set(NoteCollection::Active);
+                ui.collection.set(NoteCollection::default());
                 ui.refresh(None);
             } else {
                 ui.create();
@@ -1332,6 +1381,13 @@ mod feedback_tests {
         }
         let id = manager.selected.get().unwrap();
         manager.archive.emit_clicked();
+        manager
+            .filters
+            .iter()
+            .find(|(_, collection)| *collection == NoteCollection::Archived)
+            .unwrap()
+            .0
+            .emit_clicked();
         manager
             .list
             .select_row(manager.list.row_at_index(0).as_ref());

@@ -136,16 +136,17 @@ impl Ui {
         if !self.close_docked() {
             return;
         }
-        match self.storage.create_note(title, "", NoteColor::Yellow) {
+        let draft = title.trim().is_empty();
+        let created = if draft {
+            self.storage.create_draft(NoteColor::Yellow)
+        } else {
+            self.storage.create_note(title, "", NoteColor::Yellow)
+        };
+        match created {
             Ok(note) => {
-                let session = self.note_session(note.id);
-                if let Some(session) = session.as_ref() {
-                    session.mark_new_blank();
+                if !draft {
+                    self.refresh();
                 }
-                self.deck
-                    .borrow_mut()
-                    .dispatch(Action::AddNote(note.clone()));
-                self.refresh();
                 self.open_docked(note.id);
                 if let Some(editor) = self.edge.docked.borrow().as_ref() {
                     editor.title.grab_focus();
@@ -166,8 +167,14 @@ impl Ui {
             }
         };
         let saved = Rc::downgrade(self);
+        let draft = Cell::new(self.storage.is_draft(id).unwrap_or(false));
         let session = note_session::NoteSession::new(note, self.storage.clone(), move || {
             if let Some(ui) = saved.upgrade() {
+                if draft.get() && ui.storage.is_draft(id).ok() == Some(false) {
+                    draft.set(false);
+                    // Publication must reach the strip even with another note docked.
+                    ui.deck.borrow_mut().dispatch(Action::CollapseDeck);
+                }
                 ui.refresh();
             }
         });
@@ -233,8 +240,10 @@ impl Ui {
     fn open_docked(self: &Rc<Self>, id: NoteId) {
         self.finish_reposition(false).ok();
         if self.edge.state() == EdgeState::Docked(id) {
+            self.hide_peek_now();
             return;
         }
+        let peek_offset = self.peek_dock_offset(id);
         let origin = self.edge.pointer_origin.get();
         if !self.close_docked() {
             return;
@@ -242,6 +251,7 @@ impl Ui {
         self.edge.pointer_origin.set(origin);
         if let Some(note) = self.separate.borrow().get(&id) {
             self.close_edge_search();
+            self.hide_peek_now();
             note.window.present();
             return;
         }
@@ -251,6 +261,7 @@ impl Ui {
         };
         // Search can open an active note outside the four visible slots.
         if self.deck.borrow().note(id).is_none()
+            && self.storage.is_draft(id).ok() == Some(false)
             && let Ok(note) = self.storage.load_note(id)
         {
             self.deck.borrow_mut().dispatch(Action::AddNote(note));
@@ -260,9 +271,13 @@ impl Ui {
         self.edge.stack.add_named(&editor.root, Some("editor"));
         self.edge.docked.replace(Some(editor.clone()));
         self.transition_edge(EdgeEvent::Dock(id));
+        if peek_offset.is_some() {
+            self.finish_panel_motion();
+        }
         self.edge.pointer.queue_draw();
-        self.edge.docked_offset.set(None);
+        self.edge.docked_offset.set(peek_offset);
         self.place_edge();
+        self.hide_peek_now();
         self.update_visibility();
         self.set_input();
         self.transition_edge(EdgeEvent::FocusWindow);
@@ -1040,12 +1055,24 @@ mod edge_tests {
             ("A title", "", true),
             ("", "Body only", true),
         ] {
+            let before = storage.load_deck_notes(4, NoteSort::Recent).unwrap();
             ui.create_note();
             let editor = ui.edge.docked.borrow().clone().unwrap();
             let id = editor.id();
             assert!(storage.load_note(id).is_ok());
+            assert!(storage.is_draft(id).unwrap());
+            assert_eq!(
+                storage.load_deck_notes(4, NoteSort::Recent).unwrap(),
+                before
+            );
+            assert_eq!(ui.deck.borrow().notes(), before.as_slice());
             editor.title.set_text(title);
             editor.body.buffer().set_text(body);
+            if keep {
+                assert!(editor.flush());
+                assert!(!storage.is_draft(id).unwrap());
+                assert!(ui.deck.borrow().note(id).is_some());
+            }
             assert!(ui.close_docked());
             assert_eq!(storage.load_note(id).is_ok(), keep);
         }
@@ -1082,6 +1109,14 @@ mod edge_tests {
         editor.body.buffer().set_text("Keep unsaved text");
         connection.execute_batch("CREATE TRIGGER reject_new_save BEFORE UPDATE ON notes BEGIN SELECT RAISE(FAIL, 'save failure'); END;").unwrap();
         assert!(!ui.close_docked());
+        assert!(storage.is_draft(id).unwrap());
+        assert!(
+            storage
+                .search_notes(NoteCollection::All, "", NoteSort::Recent)
+                .unwrap()
+                .iter()
+                .all(|note| note.id != id)
+        );
         assert_eq!(
             editor.body.buffer().text(
                 &editor.body.buffer().start_iter(),
@@ -1097,6 +1132,14 @@ mod edge_tests {
         assert_eq!(storage.load_note(id).unwrap().body, "Keep unsaved text");
         ui.create_note_with_title("Search-created title");
         let id = ui.edge.docked.borrow().as_ref().unwrap().id();
+        assert!(!storage.is_draft(id).unwrap());
+        assert!(
+            storage
+                .search_notes(NoteCollection::Active, "Search-created", NoteSort::Recent)
+                .unwrap()
+                .iter()
+                .any(|note| note.id == id)
+        );
         assert!(ui.close_docked());
         assert_eq!(storage.load_note(id).unwrap().title, "Search-created title");
         ui.show_manager();
@@ -1116,6 +1159,7 @@ mod edge_tests {
             .unwrap()
             .downcast::<gtk::Stack>()
             .unwrap();
+        assert!(button(root, "Active").has_css_class("selected"));
         assert!(
             list.selected_row().is_none(),
             "opening All Notes must not select a note"
@@ -1148,14 +1192,51 @@ mod edge_tests {
             "refresh must retain a deliberate selection"
         );
         let newest = || {
-            storage
-                .search_notes(NoteCollection::Active, "", NoteSort::Recent)
-                .unwrap()
-                .into_iter()
-                .max_by_key(|n| n.id.value())
-                .unwrap()
-                .id
+            NoteId::new(
+                connection
+                    .query_row("SELECT MAX(id) FROM notes", [], |row| row.get::<_, i64>(0))
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            )
         };
+        let row_count = storage
+            .search_notes(NoteCollection::Active, "", NoteSort::Recent)
+            .unwrap()
+            .len();
+        let previous_row = list.selected_row().unwrap().index();
+        ui.open_docked(existing);
+        settle();
+        button(root, "New note").emit_clicked();
+        assert_eq!(list.selected_row().unwrap().index(), previous_row);
+        assert_eq!(pages.visible_child_name().as_deref(), Some("editor"));
+        assert!(title.text().is_empty());
+        assert!(list.row_at_index(row_count as i32).is_none());
+        ui.refresh();
+        assert!(
+            title.text().is_empty(),
+            "refresh must retain the draft preview"
+        );
+        assert_eq!(list.selected_row().unwrap().index(), previous_row);
+        let published = newest();
+        title.set_text("Published preview");
+        connection.execute_batch("CREATE TRIGGER reject_preview_save BEFORE UPDATE ON notes BEGIN SELECT RAISE(FAIL, 'save failure'); END;").unwrap();
+        assert!(!manager.close_editor());
+        assert!(storage.is_draft(published).unwrap());
+        assert!(list.row_at_index(row_count as i32).is_none());
+        assert_eq!(list.selected_row().unwrap().index(), previous_row);
+        assert_eq!(title.text(), "Published preview");
+        connection
+            .execute_batch("DROP TRIGGER reject_preview_save;")
+            .unwrap();
+        assert!(ui.note_session(published).unwrap().flush());
+        assert!(!storage.is_draft(published).unwrap());
+        settle();
+        assert!(ui.deck.borrow().note(published).is_some());
+        assert_eq!(ui.edge.docked.borrow().as_ref().unwrap().id(), existing);
+        assert!(list.row_at_index(row_count as i32).is_some());
+        assert_eq!(title.text(), "Published preview");
+        assert_eq!(list.selected_row().unwrap().index(), 0);
         button(root, "New note").emit_clicked();
         let shared = newest();
         ui.open_docked(shared);
@@ -1176,11 +1257,8 @@ mod edge_tests {
             row = row.parent().unwrap();
         }
         let row = row.downcast::<gtk::ListBoxRow>().unwrap();
-        row.parent()
-            .unwrap()
-            .downcast::<gtk::ListBox>()
-            .unwrap()
-            .select_row(Some(&row));
+        // The existing row remains selected while the draft is in the preview.
+        list.emit_by_name::<()>("row-activated", &[&row]);
         settle();
         assert!(storage.load_note(selected).is_err());
         assert!(storage.load_note(existing).is_ok());
@@ -2047,7 +2125,8 @@ mod edge_tests {
         ui.close_docked();
         ui.create_note();
         let blank = ui.edge.docked.borrow().as_ref().unwrap().id();
-        assert!(ui.deck.borrow().notes().iter().any(|note| note.id == blank));
+        assert!(ui.storage.is_draft(blank).unwrap());
+        assert!(ui.deck.borrow().notes().iter().all(|note| note.id != blank));
         ui.close_docked();
         for note in ui
             .storage

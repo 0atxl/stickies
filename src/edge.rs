@@ -291,6 +291,11 @@ pub(super) struct Strip {
     pub(super) pointer_origin: Cell<Option<i32>>,
     pub(super) docked: RefCell<Option<Rc<editor::Editor>>>,
     pub(super) docked_offset: Cell<Option<(ScreenEdge, i32)>>,
+    peek: RefCell<Option<(NoteId, editor::NoteSheet)>>,
+    peek_bounds: Cell<(i32, i32, i32, i32)>,
+    peek_hide: RefCell<Option<glib::SourceId>>,
+    peek_motion: motion::Motion,
+    peek_target: Cell<f64>,
     delete_toast: gtk::Box,
     undo_delete: gtk::Button,
     toast_note: Cell<Option<NoteId>>,
@@ -462,6 +467,11 @@ impl Strip {
             pointer_origin: Cell::new(None),
             docked: RefCell::new(None),
             docked_offset: Cell::new(None),
+            peek: RefCell::new(None),
+            peek_bounds: Cell::new((0, 0, 0, 0)),
+            peek_hide: RefCell::new(None),
+            peek_motion: motion::Motion::new(0.),
+            peek_target: Cell::new(0.),
             delete_toast,
             undo_delete,
             toast_note: Cell::new(None),
@@ -636,7 +646,12 @@ impl Ui {
             self.edge.outgoing_origin.set(None);
         } else {
             self.finish_panel_motion();
-            if matches!(state, EdgeState::Docked(_) | EdgeState::Search) && enabled {
+            if matches!(state, EdgeState::Docked(_) | EdgeState::Search)
+                && enabled
+                && !state
+                    .docked_id()
+                    .is_some_and(|id| self.peek_dock_offset(id).is_some())
+            {
                 self.edge.panel_motion.jump(0.);
                 self.edge.stack.set_opacity(0.);
                 self.edge.pointer.set_opacity(0.);
@@ -686,46 +701,26 @@ impl Ui {
     ) {
         let gap = TAB_GAP;
         let inset = 16.;
-        let center = fixed
-            .downcast_ref::<TabLayout>()
-            .map_or(index as f64, |tabs| tabs.imp().pointer.get());
-        let spread = if center.is_finite() {
-            ((index as f64 - center) * hover * 16.) as f32
-        } else {
-            0.
-        };
-        let distance = (24. * (1. - progress)) as f32;
+        let distance = (24. * (1. - progress) - 6. * hover) as f32;
         let (x, y) = match edge {
             ScreenEdge::Left => (
                 -distance,
-                inset + spread + index as f32 * (tab.height_request() + gap) as f32,
+                inset + index as f32 * (tab.height_request() + gap) as f32,
             ),
             ScreenEdge::Right => (
                 distance,
-                inset + spread + index as f32 * (tab.height_request() + gap) as f32,
+                inset + index as f32 * (tab.height_request() + gap) as f32,
             ),
             ScreenEdge::Top => (
-                inset + spread + index as f32 * (tab.width_request() + gap) as f32,
+                inset + index as f32 * (tab.width_request() + gap) as f32,
                 -distance,
             ),
             ScreenEdge::Bottom => (
-                inset + spread + index as f32 * (tab.width_request() + gap) as f32,
+                inset + index as f32 * (tab.width_request() + gap) as f32,
                 distance,
             ),
         };
-        let (width, height) = (tab.width_request() as f32, tab.height_request() as f32);
-        let (cx, cy) = match edge {
-            ScreenEdge::Left => (0., height / 2.),
-            ScreenEdge::Right => (width, height / 2.),
-            ScreenEdge::Top => (width / 2., 0.),
-            ScreenEdge::Bottom => (width / 2., height),
-        };
-        let scale = (1. + 0.24 * hover) as f32;
-        let transform = gtk::gsk::Transform::new()
-            .translate(&gtk::graphene::Point::new(x, y))
-            .translate(&gtk::graphene::Point::new(cx, cy))
-            .scale(scale, scale)
-            .translate(&gtk::graphene::Point::new(-cx, -cy));
+        let transform = gtk::gsk::Transform::new().translate(&gtk::graphene::Point::new(x, y));
         fixed.set_child_transform(tab, Some(&transform));
         tab.set_opacity(progress);
     }
@@ -789,7 +784,11 @@ impl Ui {
                     && !self.edge.state().is_repositioning()
                     && position.is_finite()
                 {
-                    (1. - (index as f64 - position).abs() / 2.).max(0.).powi(2)
+                    if index == position.round().max(0.) as usize {
+                        1.
+                    } else {
+                        0.
+                    }
                 } else {
                     0.
                 };
@@ -993,6 +992,10 @@ impl Ui {
         self.finish_strip_motion();
         self.finish_hover_motion();
         self.finish_panel_motion();
+        self.edge.peek_motion.jump(1.);
+        if let Some((_, peek)) = self.edge.peek.borrow().as_ref() {
+            peek.root.set_opacity(1.);
+        }
     }
     pub(super) fn configure_docked_editor(self: &Rc<Self>, editor: &Rc<editor::Editor>) {
         editor.set_docked_size(editor::WIDTH, editor::HEIGHT);
@@ -1325,6 +1328,14 @@ impl Ui {
             event,
             self.edge.policy(&self.config.borrow(), self.dnd.get()),
         );
+        if state != previous
+            && state != EdgeState::Tabs
+            && !state
+                .docked_id()
+                .is_some_and(|id| self.peek_dock_offset(id).is_some())
+        {
+            self.hide_peek_now();
+        }
         self.edge.state.set(state);
         if state != previous {
             self.prepare_motion(previous, state);
@@ -1362,6 +1373,7 @@ impl Ui {
             return;
         }
         self.edge.refresh_pending.set(false);
+        self.hide_peek_now();
         self.edge.tab_hover.borrow_mut().clear();
         while let Some(child) = self.edge.tabs.first_child() {
             self.edge.tabs.remove(&child);
@@ -1515,11 +1527,9 @@ impl Ui {
             let motion = gtk::EventControllerMotion::new();
             let weak = Rc::downgrade(self);
             let weak_fixed = fixed.downgrade();
-            motion.connect_motion(move |_, x, y| {
-                let Some(ui) = weak.upgrade() else {
-                    return;
-                };
-                let Some(fixed) = weak_fixed.upgrade() else {
+            let ids: Vec<_> = notes.iter().map(|note| note.id).collect();
+            let update: Rc<dyn Fn(f64, f64)> = Rc::new(move |x, y| {
+                let (Some(ui), Some(fixed)) = (weak.upgrade(), weak_fixed.upgrade()) else {
                     return;
                 };
                 if !ui.edge.state().is_revealed() || ui.edge.state().is_repositioning() {
@@ -1527,19 +1537,34 @@ impl Ui {
                 }
                 let size = if horizontal { tab_width } else { tab_height };
                 let position = ((if horizontal { x } else { y }) - 16. - f64::from(size) / 2.)
-                    / f64::from(size - 8);
-                fixed
+                    / f64::from(size + TAB_GAP);
+                let index = (position.round().max(0.) as usize).min(ids.len().saturating_sub(1));
+                if fixed
                     .downcast_ref::<TabLayout>()
                     .unwrap()
                     .imp()
                     .pointer
-                    .set(position);
-                for i in 0..ui.edge.tab_hover.borrow().len() {
-                    let distance = (i as f64 - position).abs();
-                    ui.animate_tab_hover(i, (1. - distance / 2.).max(0.).powi(2));
+                    .get()
+                    != index as f64
+                {
+                    fixed
+                        .downcast_ref::<TabLayout>()
+                        .unwrap()
+                        .imp()
+                        .pointer
+                        .set(index as f64);
+                    for i in 0..ui.edge.tab_hover.borrow().len() {
+                        ui.animate_tab_hover(i, if i == index { 1. } else { 0. });
+                    }
+                    fixed.queue_draw();
                 }
-                fixed.queue_draw();
+                if let Some(id) = ids.get(index) {
+                    ui.show_peek(*id, index, size);
+                }
             });
+            let enter = update.clone();
+            motion.connect_enter(move |_, x, y| enter(x, y));
+            motion.connect_motion(move |_, x, y| update(x, y));
             let weak = Rc::downgrade(self);
             let weak_fixed = fixed.downgrade();
             motion.connect_leave(move |_| {
@@ -1555,6 +1580,7 @@ impl Ui {
                     for i in 0..ui.edge.tab_hover.borrow().len() {
                         ui.animate_tab_hover(i, 0.);
                     }
+                    ui.schedule_peek_hide();
                 }
             });
             fixed.add_controller(motion);
@@ -1662,6 +1688,174 @@ impl Ui {
             self.refresh_edge_search();
         }
         self.place_edge();
+    }
+    fn show_peek(self: &Rc<Self>, id: NoteId, index: usize, tab_length: i32) {
+        if !matches!(self.edge.state(), EdgeState::Tabs | EdgeState::Docked(_)) {
+            return;
+        }
+        // A click can produce a fresh pointer-enter after the focus handoff.
+        // The active editor already displays this note; never cover it again.
+        if self.edge.state().docked_id() == Some(id) {
+            let showing = self.edge.peek.borrow().is_some();
+            if showing {
+                self.hide_peek_now();
+            }
+            return;
+        }
+        if let Some(timer) = self.edge.peek_hide.borrow_mut().take() {
+            timer.remove();
+        }
+        if self
+            .edge
+            .peek
+            .borrow()
+            .as_ref()
+            .is_some_and(|(current, _)| *current == id)
+        {
+            if self.edge.peek_target.get() != 1. {
+                self.animate_peek(1.);
+            }
+            return;
+        }
+        let Some(mut note) = self.deck.borrow().note(id).cloned() else {
+            return;
+        };
+        // A live editor may have unsaved text. Copy it without attaching a peek view.
+        let live = self.sessions.borrow().get(&id).and_then(Weak::upgrade);
+        let (style, spans) = if let Some(session) = live {
+            note.title = session.title.text().to_string();
+            let (start, end) = session.body.bounds();
+            note.body = session.body.text(&start, &end, true).to_string();
+            note.color = session.color();
+            (session.style(), crate::text_editing::spans(&session.body))
+        } else {
+            let Ok(style) = self.storage.load_note_style(id) else {
+                return;
+            };
+            let Ok(spans) = self.storage.load_formatting(id) else {
+                return;
+            };
+            (style, spans)
+        };
+        let replacing = self.edge.peek.borrow().is_some();
+        self.edge.peek_motion.cancel();
+        if let Some((_, old)) = self.edge.peek.borrow_mut().take() {
+            self.edge.root.remove_overlay(&old.root);
+        }
+        let config = self.config.borrow();
+        let peek = editor::NoteSheet::peek(&note, &style, &spans, &config);
+        self.edge.root.add_overlay(&peek.root);
+        let (screen_width, screen_height) = self.note_limits();
+        let width = 260.min(screen_width);
+        let height = peek.peek_height(width, screen_height).min(screen_height);
+        peek.root.set_size_request(width, height);
+        let (sx, sy, sw, sh) = self.edge.strip_bounds.get();
+        let horizontal = matches!(config.edge, ScreenEdge::Top | ScreenEdge::Bottom);
+        let origin = if horizontal { sx } else { sy }
+            + 16
+            + index as i32 * (tab_length + TAB_GAP)
+            + tab_length / 2;
+        let (x, y) = match config.edge {
+            ScreenEdge::Left => (sw + 10, origin - height / 2),
+            ScreenEdge::Right => (screen_width - sw - 10 - width, origin - height / 2),
+            ScreenEdge::Top => (origin - width / 2, sh + 10),
+            ScreenEdge::Bottom => (origin - width / 2, screen_height - sh - 10 - height),
+        };
+        let (x, y) = (
+            x.clamp(0, (screen_width - width).max(0)),
+            y.clamp(0, (screen_height - height).max(0)),
+        );
+        // Overlay's Start alignment uses natural width, even above the request.
+        // Fill the clamped rectangle so wrapping titles cannot exceed 260px.
+        peek.root.set_halign(gtk::Align::Fill);
+        peek.root.set_valign(gtk::Align::Fill);
+        peek.root.set_margin_start(x);
+        peek.root.set_margin_top(y);
+        peek.root.set_margin_end(screen_width - x - width);
+        peek.root.set_margin_bottom(screen_height - y - height);
+        self.edge.peek_bounds.set((x, y, width, height));
+        if replacing {
+            self.edge.peek_motion.jump(1.);
+        }
+        peek.root.set_opacity(self.edge.peek_motion.value());
+        self.edge.peek.replace(Some((id, peek)));
+        drop(config);
+        self.set_input();
+        self.animate_peek(1.);
+    }
+    fn animate_peek(self: &Rc<Self>, opacity: f64) {
+        self.edge.peek_target.set(opacity);
+        let weak = Rc::downgrade(self);
+        let done = Rc::downgrade(self);
+        self.edge.peek_motion.animate(
+            &self.edge.window,
+            opacity,
+            (motion::PANEL_MS, 0),
+            self.motion_enabled(),
+            move |value| {
+                if let Some(ui) = weak.upgrade()
+                    && let Some((_, peek)) = ui.edge.peek.borrow().as_ref()
+                {
+                    peek.root.set_opacity(value);
+                }
+            },
+            move || {
+                if opacity == 0.
+                    && let Some(ui) = done.upgrade()
+                {
+                    ui.hide_peek_now();
+                }
+            },
+        );
+    }
+    fn schedule_peek_hide(self: &Rc<Self>) {
+        if let Some(timer) = self.edge.peek_hide.borrow_mut().take() {
+            timer.remove();
+        }
+        let weak = Rc::downgrade(self);
+        self.edge
+            .peek_hide
+            .replace(Some(glib::timeout_add_local_once(
+                Duration::from_millis(150),
+                move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.edge.peek_hide.borrow_mut().take();
+                        ui.animate_peek(0.);
+                    }
+                },
+            )));
+    }
+    pub(super) fn hide_peek_now(&self) {
+        if let Some(timer) = self.edge.peek_hide.borrow_mut().take() {
+            timer.remove();
+        }
+        self.edge.peek_motion.jump(0.);
+        self.edge.peek_target.set(0.);
+        let old = self.edge.peek.borrow_mut().take();
+        if let Some((_, peek)) = old {
+            self.edge.root.remove_overlay(&peek.root);
+        }
+        self.edge.root.queue_draw();
+        self.set_input();
+    }
+    pub(super) fn peek_dock_offset(&self, id: NoteId) -> Option<(ScreenEdge, i32)> {
+        self.edge
+            .peek
+            .borrow()
+            .as_ref()
+            .filter(|(current, _)| *current == id)
+            .map(|_| {
+                let edge = self.config.borrow().edge;
+                let (x, y, _, _) = self.edge.peek_bounds.get();
+                (
+                    edge,
+                    if matches!(edge, ScreenEdge::Top | ScreenEdge::Bottom) {
+                        x
+                    } else {
+                        y
+                    },
+                )
+            })
     }
     pub(super) fn remember_origin(&self, widget: &gtk::Widget) {
         if let Some(bounds) = widget.compute_bounds(&self.edge.strip_root) {
@@ -2373,6 +2567,11 @@ impl Ui {
                 if let Some((x, y, width, height)) = bounds {
                     let _ =
                         region.union_rectangle(&gtk::cairo::RectangleInt::new(x, y, width, height));
+                }
+                if self.edge.peek.borrow().is_some() {
+                    let (x, y, width, height) = self.edge.peek_bounds.get();
+                    let _ = region
+                        .subtract_rectangle(&gtk::cairo::RectangleInt::new(x, y, width, height));
                 }
                 surface.set_input_region(Some(&region));
             }
@@ -3145,19 +3344,17 @@ mod tests {
                     !ui.edge.tab_hover.borrow()[0].is_running(),
                     "reduced motion must jump"
                 );
-                let grown = tab.compute_bounds(&ui.edge.strip_root).unwrap();
-                assert!((grown.width() / base.width() - 1.24).abs() < 0.001);
-                assert!((grown.height() / base.height() - 1.24).abs() < 0.001);
-                let (anchor_before, anchor_after) = match edge {
-                    ScreenEdge::Left => (base.x(), grown.x()),
-                    ScreenEdge::Right => (base.x() + base.width(), grown.x() + grown.width()),
-                    ScreenEdge::Top => (base.y(), grown.y()),
-                    ScreenEdge::Bottom => (base.y() + base.height(), grown.y() + grown.height()),
+                let nudged = tab.compute_bounds(&ui.edge.strip_root).unwrap();
+                assert!((nudged.width() - base.width()).abs() < 0.001);
+                assert!((nudged.height() - base.height()).abs() < 0.001);
+                let (dx, dy) = match edge {
+                    ScreenEdge::Left => (6., 0.),
+                    ScreenEdge::Right => (-6., 0.),
+                    ScreenEdge::Top => (0., 6.),
+                    ScreenEdge::Bottom => (0., -6.),
                 };
-                assert!(
-                    (anchor_before - anchor_after).abs() < 0.01,
-                    "stacked hover must stay attached to {edge:?}"
-                );
+                assert!((nudged.x() - base.x() - dx).abs() < 0.01);
+                assert!((nudged.y() - base.y() - dy).abs() < 0.01);
                 assert_eq!(
                     (fixed.width(), fixed.height()),
                     (fixed.width_request(), fixed.height_request())
@@ -3167,9 +3364,9 @@ mod tests {
                     input,
                     "hover must not resize the input region per frame"
                 );
-                assert!(grown.x() >= input.0 as f32 && grown.y() >= input.1 as f32);
-                assert!(grown.x() + grown.width() <= (input.0 + input.2) as f32 + 0.01);
-                assert!(grown.y() + grown.height() <= (input.1 + input.3) as f32 + 0.01);
+                assert!(nudged.x() >= input.0 as f32 && nudged.y() >= input.1 as f32);
+                assert!(nudged.x() + nudged.width() <= (input.0 + input.2) as f32 + 0.01);
+                assert!(nudged.y() + nudged.height() <= (input.1 + input.3) as f32 + 0.01);
                 let (px, py) = match edge {
                     ScreenEdge::Left => {
                         (base.x() + base.width() + 0.5, base.y() + base.height() / 2.)
@@ -3187,7 +3384,7 @@ mod tests {
                     .unwrap();
                 assert!(
                     picked == tab || picked.is_ancestor(&tab),
-                    "enlarged title must receive clicks"
+                    "nudged title must receive clicks"
                 );
                 capture(&format!("{prefix}-hover"));
                 tab.clone()
