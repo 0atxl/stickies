@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-pub const WIDTH: i32 = 352;
+pub const WIDTH: i32 = 320;
 pub const HEIGHT: i32 = 376;
 pub const MIN_WIDTH: i32 = 300;
 pub const MIN_HEIGHT: i32 = 280;

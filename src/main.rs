@@ -243,9 +243,31 @@ impl Ui {
             return;
         }
         let origin = self.edge.pointer_origin.get();
-        if !self.close_docked() {
-            return;
-        }
+        let replacing = self
+            .edge
+            .docked
+            .borrow()
+            .clone()
+            .filter(|_| !self.separate.borrow().contains_key(&id));
+        // Load the destination before releasing the current view. Keeping this
+        // session alive also lets new_editor reuse it without a second load.
+        let incoming_session = if let Some(previous) = &replacing {
+            if !previous.flush() {
+                return;
+            }
+            let Some(session) = self.note_session(id) else {
+                return;
+            };
+            if !previous.stop() {
+                return;
+            }
+            Some(session)
+        } else {
+            if !self.close_docked() {
+                return;
+            }
+            None
+        };
         self.edge.pointer_origin.set(origin);
         if let Some(note) = self.separate.borrow().get(&id) {
             self.close_edge_search();
@@ -256,7 +278,8 @@ impl Ui {
         let Some(editor) = self.new_editor(id, false) else {
             return;
         };
-        // Search can open an active note outside the four visible slots.
+        drop(incoming_session);
+        // Search can open an active note outside the visible slots.
         if self.deck.borrow().note(id).is_none()
             && self.storage.is_draft(id).ok() == Some(false)
             && let Ok(note) = self.storage.load_note(id)
@@ -264,12 +287,20 @@ impl Ui {
             self.deck.borrow_mut().dispatch(Action::AddNote(note));
         }
         self.deck.borrow_mut().dispatch(Action::OpenNote(id));
-        self.finish_panel_motion();
+        if let Some(previous) = &replacing {
+            let (width, height) = previous.docked_size();
+            editor.set_docked_size(width, height);
+            self.begin_note_switch(previous.root.upcast_ref());
+        } else {
+            self.finish_panel_motion();
+        }
         self.edge.stack.add_named(&editor.root, Some("editor"));
         self.edge.docked.replace(Some(editor.clone()));
         self.transition_edge(EdgeEvent::Dock(id));
         self.edge.pointer.queue_draw();
-        self.edge.docked_offset.set(None);
+        if replacing.is_none() {
+            self.edge.docked_offset.set(None);
+        }
         self.place_edge();
         self.update_visibility();
         self.set_input();
@@ -285,6 +316,7 @@ impl Ui {
             if !editor.stop() {
                 return false;
             }
+            self.finish_note_switch();
             self.edge.docked.borrow_mut().take();
             self.edge.docked_offset.set(None);
             self.deck.borrow_mut().dispatch(Action::CollapseDeck);

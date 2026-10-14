@@ -195,6 +195,7 @@ impl AppState {
         }
     }
 
+    #[cfg(test)]
     pub fn notes(&self) -> &[Note] {
         &self.notes
     }

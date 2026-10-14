@@ -24,6 +24,7 @@ mod stacked_tabs {
     #[derive(Default)]
     pub struct TabLayout {
         pub pointer: std::cell::Cell<f64>,
+        pub front: std::cell::Cell<Option<usize>>,
     }
     #[glib::object_subclass]
     impl ObjectSubclass for TabLayout {
@@ -44,14 +45,9 @@ mod stacked_tabs {
                 child = tab.next_sibling();
                 children.push(tab);
             }
-            let index = self.pointer.get().round().max(0.) as usize;
-            for (i, tab) in children.iter().enumerate() {
-                if i != index {
-                    widget.snapshot_child(tab, snapshot);
-                }
-            }
-            if let Some(tab) = children.get(index) {
-                widget.snapshot_child(tab, snapshot);
+            let front = self.front.get();
+            for index in super::tab_draw_order(children.len(), front) {
+                widget.snapshot_child(&children[index], snapshot);
             }
         }
     }
@@ -115,6 +111,27 @@ glib::wrapper! {
 const WIDTH: i32 = 420;
 const HEIGHT: i32 = 500;
 const TAB_GAP: i32 = -8;
+// Covers the largest horizontal wave at either end, including its shadow.
+const TAB_INSET: i32 = 24;
+const TAB_MAGNIFICATION: f64 = 0.24;
+
+// Draw toward the hovered tab from either end. A neighbor must not be trapped
+// behind both the hovered tab and a more distant tab. Clicks use the reverse.
+fn tab_draw_order(count: usize, front: Option<usize>) -> Vec<usize> {
+    let mut order: Vec<_> = (0..count).collect();
+    if let Some(front) = front {
+        order.sort_by_key(|index| std::cmp::Reverse(index.abs_diff(front)));
+    }
+    order
+}
+
+fn tab_hover_target(index: usize, position: f64) -> f64 {
+    if !position.is_finite() {
+        return 0.;
+    }
+    let distance = ((index as f64 - position).abs() / 1.5).min(1.);
+    (1. + (distance * std::f64::consts::PI).cos()) / 2.
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum EdgeState {
@@ -202,7 +219,9 @@ fn transition(state: EdgeState, event: EdgeEvent, policy: Policy) -> (EdgeState,
         (State::Dormant | State::Tabs, Event::Collapse) => State::Dormant,
         (State::Dormant | State::Tabs | State::Search, Event::Search) => State::Search,
         (State::Search, Event::CloseSearch) | (State::Docked(_), Event::CloseDocked) => State::Tabs,
-        (State::Dormant | State::Tabs | State::Search, Event::Dock(id)) => State::Docked(id),
+        (State::Dormant | State::Tabs | State::Search | State::Docked(_), Event::Dock(id)) => {
+            State::Docked(id)
+        }
         (State::Dormant | State::Tabs, Event::Reposition) => State::Reposition,
         (State::Reposition, Event::FinishReposition) => State::Dormant,
         _ => state,
@@ -308,10 +327,8 @@ pub(super) struct Strip {
     deferred_hide: Cell<Option<u64>>,
     refresh_pending: Cell<bool>,
     marker_bounds: Cell<(i32, i32, i32, i32)>,
-    tab_motion: RefCell<Vec<motion::Motion>>,
     tab_hover: RefCell<Vec<Rc<motion::Motion>>>,
-    marker_motion: motion::Motion,
-    utilities_motion: motion::Motion,
+    strip_motion: motion::Motion,
     panel_motion: motion::Motion,
     outgoing_panel: RefCell<Option<gtk::Widget>>,
     outgoing_origin: Cell<Option<i32>>,
@@ -479,10 +496,8 @@ impl Strip {
             deferred_hide: Cell::new(None),
             refresh_pending: Cell::new(false),
             marker_bounds: Cell::new((0, 0, 0, 0)),
-            tab_motion: RefCell::new(Vec::new()),
             tab_hover: RefCell::new(Vec::new()),
-            marker_motion: motion::Motion::new(1.),
-            utilities_motion: motion::Motion::new(0.),
+            strip_motion: motion::Motion::new(0.),
             panel_motion: motion::Motion::new(0.),
             outgoing_panel: RefCell::new(None),
             outgoing_origin: Cell::new(None),
@@ -589,6 +604,22 @@ impl Ui {
         !self.config.borrow().reduced_motion
             && gtk::Settings::default().is_some_and(|settings| settings.is_gtk_enable_animations())
     }
+    fn note_switching(&self) -> bool {
+        self.edge.stack.child_by_name("outgoing-editor").is_some()
+    }
+    pub(super) fn begin_note_switch(&self, outgoing: &gtk::Widget) {
+        self.finish_panel_motion();
+        self.edge.stack.page(outgoing).set_name("outgoing-editor");
+        self.edge.outgoing_panel.replace(Some(outgoing.clone()));
+        // The old view has passed its save/release guards. It remains only for
+        // the stack's crossfade and must not accept input while retiring.
+        outgoing.set_can_target(false);
+    }
+    pub(super) fn finish_note_switch(&self) {
+        if self.note_switching() {
+            self.finish_panel_motion();
+        }
+    }
     fn prepare_motion(self: &Rc<Self>, previous: EdgeState, state: EdgeState) {
         let enabled = self.motion_enabled();
         match (previous, state) {
@@ -600,7 +631,25 @@ impl Ui {
             }
             _ => self.finish_strip_motion(),
         }
-        if matches!(previous, EdgeState::Docked(_) | EdgeState::Search) && state == EdgeState::Tabs
+        if matches!(
+            (previous, state),
+            (EdgeState::Docked(_), EdgeState::Docked(_))
+        ) && self.note_switching()
+        {
+            // Keep the sheet opaque and stationary while GtkStack blends its
+            // two children. The common panel clock fades the new arrow and
+            // releases the outgoing child when the transition finishes.
+            self.edge.panel_motion.jump(0.);
+            self.edge.stack.set_opacity(1.);
+            self.edge.pointer.set_opacity(if enabled { 0. } else { 1. });
+            self.edge.stack.set_transition_duration(motion::PANEL_MS);
+            self.edge.stack.set_transition_type(if enabled {
+                gtk::StackTransitionType::Crossfade
+            } else {
+                gtk::StackTransitionType::None
+            });
+        } else if matches!(previous, EdgeState::Docked(_) | EdgeState::Search)
+            && state == EdgeState::Tabs
         {
             self.edge.panel_motion.cancel();
             self.edge
@@ -660,11 +709,13 @@ impl Ui {
             self.edge.panel_motion.animate(
                 &self.edge.window,
                 to,
-                (motion::PANEL_MS, 0),
+                motion::PANEL_MS,
                 self.motion_enabled(),
                 move |value| {
                     if let Some(ui) = update.upgrade() {
-                        ui.edge.stack.set_opacity(value);
+                        if !ui.note_switching() {
+                            ui.edge.stack.set_opacity(value);
+                        }
                         ui.edge.pointer.set_opacity(value);
                     }
                 },
@@ -682,10 +733,29 @@ impl Ui {
         edge: ScreenEdge,
         index: usize,
         progress: f64,
-        hover: f64,
+        hovers: &[Rc<motion::Motion>],
     ) {
         let gap = TAB_GAP;
-        let inset = 16.;
+        let length = if matches!(edge, ScreenEdge::Top | ScreenEdge::Bottom) {
+            tab.width_request()
+        } else {
+            tab.height_request()
+        };
+        // Derive spacing from painted sizes, never from the raw pointer. The
+        // stack keeps its overlap while growing around its fixed center.
+        let spread: f64 = hovers
+            .iter()
+            .enumerate()
+            .map(|(i, hover)| {
+                let direction = match i.cmp(&index) {
+                    std::cmp::Ordering::Less => 1.,
+                    std::cmp::Ordering::Equal => 0.,
+                    std::cmp::Ordering::Greater => -1.,
+                };
+                direction * hover.value() * TAB_MAGNIFICATION * f64::from(length) / 2.
+            })
+            .sum();
+        let inset = TAB_INSET as f32 + spread as f32;
         let distance = (24. * (1. - progress)) as f32;
         let (x, y) = match edge {
             ScreenEdge::Left => (
@@ -712,7 +782,8 @@ impl Ui {
             ScreenEdge::Top => (width / 2., 0.),
             ScreenEdge::Bottom => (width / 2., height),
         };
-        let scale = (1. + 0.24 * hover) as f32;
+        let hover = hovers.get(index).map_or(0., |hover| hover.value());
+        let scale = (1. + TAB_MAGNIFICATION * hover) as f32;
         let transform = gtk::gsk::Transform::new()
             .translate(&gtk::graphene::Point::new(x, y))
             .translate(&gtk::graphene::Point::new(cx, cy))
@@ -722,191 +793,86 @@ impl Ui {
         tab.set_opacity(progress);
     }
     fn animate_tab_hover(self: &Rc<Self>, index: usize, target: f64) {
-        let Some(fixed) = self.edge.tabs.first_child().and_downcast::<gtk::Fixed>() else {
-            return;
-        };
-        let mut child = fixed.first_child();
-        for _ in 0..index {
-            child = child.and_then(|tab| tab.next_sibling());
-        }
-        let Some(tab) = child else {
-            return;
-        };
         let Some(hover) = self.edge.tab_hover.borrow().get(index).cloned() else {
             return;
         };
         let enabled = self.motion_enabled() && !self.edge.state().is_repositioning();
         let weak = Rc::downgrade(self);
-        let fixed = fixed.downgrade();
-        let tab = tab.downgrade();
-        hover.animate(
-            &self.edge.strip_window,
-            target,
-            (motion::HOVER_MS, 0),
-            enabled,
-            move |value| {
-                if let Some(ui) = weak.upgrade()
-                    && let Some(fixed) = fixed.upgrade()
-                    && let Some(tab) = tab.upgrade()
-                    && let Some(reveal) = ui.edge.tab_motion.borrow().get(index)
-                {
-                    Self::paint_tab(
-                        &fixed,
-                        &tab,
-                        ui.config.borrow().edge,
-                        index,
-                        reveal.value(),
-                        value,
-                    );
-                }
-            },
-            || {},
-        );
+        hover.follow(&self.edge.strip_window, target, enabled, move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.paint_hover_tabs();
+            }
+        });
+    }
+    fn paint_hover_tabs(&self) {
+        let Some(fixed) = self.edge.tabs.first_child().and_downcast::<gtk::Fixed>() else {
+            return;
+        };
+        let hovers = self.edge.tab_hover.borrow();
+        let layout = fixed.downcast_ref::<TabLayout>().unwrap().imp();
+        if !layout.pointer.get().is_finite() && hovers.iter().all(|hover| hover.value() == 0.) {
+            layout.front.set(None);
+            fixed.queue_draw();
+        }
+        let mut child = fixed.first_child();
+        for index in 0..hovers.len() {
+            let Some(tab) = child else { break };
+            child = tab.next_sibling();
+            Self::paint_tab(
+                &fixed,
+                &tab,
+                self.config.borrow().edge,
+                index,
+                self.edge.strip_motion.value(),
+                &hovers,
+            );
+        }
     }
     fn finish_hover_motion(self: &Rc<Self>) {
-        if let Some(fixed) = self.edge.tabs.first_child().and_downcast::<gtk::Fixed>() {
-            let mut child = fixed.first_child();
-            for (index, hover) in self.edge.tab_hover.borrow().iter().enumerate() {
-                let Some(tab) = child else {
-                    break;
-                };
-                child = tab.next_sibling();
-                let position = fixed
-                    .downcast_ref::<TabLayout>()
-                    .unwrap()
-                    .imp()
-                    .pointer
-                    .get();
-                let value = if self.edge.state().is_revealed()
-                    && !self.edge.state().is_repositioning()
-                    && position.is_finite()
-                {
-                    if index == position.round().max(0.) as usize {
-                        1.
-                    } else {
-                        0.
-                    }
+        if let Some(fixed) = self.edge.tabs.first_child().and_downcast::<TabLayout>() {
+            let position =
+                if self.edge.state().is_revealed() && !self.edge.state().is_repositioning() {
+                    fixed.imp().pointer.get()
                 } else {
-                    0.
+                    fixed.imp().pointer.set(f64::NAN);
+                    f64::NAN
                 };
-                hover.jump(value);
-                if let Some(reveal) = self.edge.tab_motion.borrow().get(index) {
-                    Self::paint_tab(
-                        &fixed,
-                        &tab,
-                        self.config.borrow().edge,
-                        index,
-                        reveal.value(),
-                        value,
-                    );
-                }
+            for (index, hover) in self.edge.tab_hover.borrow().iter().enumerate() {
+                hover.jump(tab_hover_target(index, position));
             }
+            self.paint_hover_tabs();
+        }
+    }
+    fn paint_strip(&self, progress: f64) {
+        self.paint_hover_tabs();
+        self.edge.marker.set_opacity(1. - progress);
+        if let Some(utilities) = self.edge.tabs.last_child() {
+            utilities.set_opacity(progress);
         }
     }
     fn animate_strip(self: &Rc<Self>) {
         let revealing = self.edge.strip_phase.get() == StripPhase::Revealing;
-        let to = if revealing { 1. } else { 0. };
-        let duration = if revealing {
-            motion::REVEAL_MS
-        } else {
-            motion::COLLAPSE_MS
-        };
-        let motions = self.edge.tab_motion.borrow();
-        // A reversed collapse resumes every tab at its painted value immediately.
-        let reversing = revealing && motions.iter().any(|motion| motion.value() > 0.);
-        let remaining = Rc::new(Cell::new(motions.len() + 2));
-        let complete = |ui: &Rc<Self>| {
-            let weak = Rc::downgrade(ui);
-            let remaining = remaining.clone();
+        let update = Rc::downgrade(self);
+        let done = Rc::downgrade(self);
+        self.edge.strip_motion.animate(
+            &self.edge.strip_window,
+            if revealing { 1. } else { 0. },
+            if revealing {
+                motion::REVEAL_MS
+            } else {
+                motion::COLLAPSE_MS
+            },
+            self.motion_enabled(),
+            move |progress| {
+                if let Some(ui) = update.upgrade() {
+                    ui.paint_strip(progress);
+                }
+            },
             move || {
-                remaining.set(remaining.get() - 1);
-                if remaining.get() == 0
-                    && let Some(ui) = weak.upgrade()
-                {
+                if let Some(ui) = done.upgrade() {
                     ui.finish_strip_motion();
                 }
-            }
-        };
-        let edge = self.config.borrow().edge;
-        if let Some(fixed) = self.edge.tabs.first_child().and_downcast::<gtk::Fixed>() {
-            let mut child = fixed.first_child();
-            for (index, motion) in motions.iter().enumerate() {
-                let Some(tab) = child else {
-                    break;
-                };
-                child = tab.next_sibling();
-                let weak_tab = tab.downgrade();
-                let weak_fixed = fixed.downgrade();
-                let hover = self.edge.tab_hover.borrow().get(index).cloned();
-                // Apply the current progress before the first frame or delayed start.
-                Self::paint_tab(
-                    &fixed,
-                    &tab,
-                    edge,
-                    index,
-                    motion.value(),
-                    hover.as_ref().map_or(0., |hover| hover.value()),
-                );
-                let order = if revealing {
-                    index
-                } else {
-                    motions.len() - 1 - index
-                };
-                motion.animate(
-                    &self.edge.strip_window,
-                    to,
-                    (
-                        duration,
-                        if reversing {
-                            0
-                        } else {
-                            order as u32 * motion::STAGGER_MS
-                        },
-                    ),
-                    self.motion_enabled(),
-                    move |value| {
-                        if let Some(tab) = weak_tab.upgrade()
-                            && let Some(fixed) = weak_fixed.upgrade()
-                        {
-                            Self::paint_tab(
-                                &fixed,
-                                &tab,
-                                edge,
-                                index,
-                                value,
-                                hover.as_ref().map_or(0., |hover| hover.value()),
-                            );
-                        }
-                    },
-                    complete(self),
-                );
-            }
-        }
-        let marker = self.edge.marker.downgrade();
-        self.edge.marker_motion.animate(
-            &self.edge.strip_window,
-            1. - to,
-            (duration, 0),
-            self.motion_enabled(),
-            move |value| {
-                if let Some(marker) = marker.upgrade() {
-                    marker.set_opacity(value);
-                }
             },
-            complete(self),
-        );
-        let utilities = self.edge.tabs.last_child().map(|widget| widget.downgrade());
-        self.edge.utilities_motion.animate(
-            &self.edge.strip_window,
-            to,
-            (duration, 0),
-            self.motion_enabled(),
-            move |value| {
-                if let Some(utilities) = utilities.as_ref().and_then(|weak| weak.upgrade()) {
-                    utilities.set_opacity(value);
-                }
-            },
-            complete(self),
         );
     }
     fn finish_strip_motion(self: &Rc<Self>) {
@@ -917,31 +883,14 @@ impl Ui {
             for hover in self.edge.tab_hover.borrow().iter() {
                 hover.jump(0.);
             }
-        }
-        let motions = self.edge.tab_motion.borrow();
-        if let Some(fixed) = self.edge.tabs.first_child().and_downcast::<gtk::Fixed>() {
-            let mut child = fixed.first_child();
-            for (index, motion) in motions.iter().enumerate() {
-                motion.jump(progress);
-                if let Some(tab) = child {
-                    child = tab.next_sibling();
-                    Self::paint_tab(
-                        &fixed,
-                        &tab,
-                        self.config.borrow().edge,
-                        index,
-                        progress,
-                        self.edge.tab_hover.borrow()[index].value(),
-                    );
-                }
+            if let Some(fixed) = self.edge.tabs.first_child().and_downcast::<TabLayout>() {
+                fixed.imp().pointer.set(f64::NAN);
+                fixed.imp().front.set(None);
+                fixed.queue_draw();
             }
         }
-        self.edge.marker_motion.jump(1. - progress);
-        self.edge.utilities_motion.jump(progress);
-        self.edge.marker.set_opacity(1. - progress);
-        if let Some(utilities) = self.edge.tabs.last_child() {
-            utilities.set_opacity(progress);
-        }
+        self.edge.strip_motion.jump(progress);
+        self.paint_strip(progress);
         self.edge.marker.set_visible(!revealed);
         self.edge.tabs.set_visible(revealed);
         if !revealed {
@@ -949,7 +898,6 @@ impl Ui {
             self.edge.strip_offset.set(None);
         }
         self.set_input();
-        drop(motions);
         if self.edge.refresh_pending.get() {
             self.refresh_tabs();
         }
@@ -962,8 +910,13 @@ impl Ui {
     }
     pub(super) fn finish_panel_motion(&self) {
         self.edge.panel_motion.cancel();
-        if let Some(outgoing) = self.edge.outgoing_panel.borrow_mut().take()
-            && self.edge.stack.child_by_name("editor").as_ref() == Some(&outgoing)
+        let outgoing = self.edge.outgoing_panel.borrow_mut().take();
+        self.edge
+            .stack
+            .set_transition_type(gtk::StackTransitionType::None);
+        if let Some(outgoing) = outgoing
+            && (self.edge.stack.child_by_name("editor").as_ref() == Some(&outgoing)
+                || self.edge.stack.child_by_name("outgoing-editor").as_ref() == Some(&outgoing))
         {
             self.edge.stack.remove(&outgoing);
         }
@@ -1360,15 +1313,19 @@ impl Ui {
             self.edge.marker.remove(&child);
         }
         let config = self.config.borrow().clone();
-        let notes = match self.storage.load_deck_notes(4, self.edge_sort.get()) {
+        let notes = match self
+            .storage
+            .load_deck_notes(config.visible_notes, self.edge_sort.get())
+        {
             Ok(notes) => notes,
             Err(error) => {
                 self.error(&format!("Could not load edge notes: {error}"));
                 return;
             }
         };
-        self.deck.borrow_mut().replace_notes(notes);
-        let notes: Vec<_> = self.deck.borrow().notes().iter().take(4).cloned().collect();
+        // The deck retains the open note during editing. Render the saved query
+        // directly so changing the slot count also works with a note docked.
+        self.deck.borrow_mut().replace_notes(notes.clone());
         let horizontal = matches!(config.edge, ScreenEdge::Top | ScreenEdge::Bottom);
         let orientation = if horizontal {
             gtk::Orientation::Horizontal
@@ -1395,13 +1352,18 @@ impl Ui {
                 .max()
                 .unwrap_or(0);
             let (screen_width, _) = self.note_limits();
-            let reserved = 3 * TAB_GAP + self.edge.tabs.spacing() + 3 * 24 + 2 * motion::HOVER_PAD;
-            let available = ((screen_width - reserved) / 4).max(24);
+            let count = config.visible_notes as i32;
+            let reserved = (count - 1) * TAB_GAP
+                + 2 * TAB_INSET
+                + self.edge.tabs.spacing()
+                + 3 * 24
+                + 2 * motion::HOVER_PAD;
+            let available = ((screen_width - reserved) / count).max(24);
             let width =
                 if self.edge.state().is_revealed() && self.edge.horizontal_tab_width.get() > 0 {
                     self.edge.horizontal_tab_width.get()
                 } else {
-                    (title_width + 16).clamp(80, 112)
+                    (title_width + 20).clamp(80, 112)
                 }
                 .min(available);
             self.edge.horizontal_tab_width.set(width);
@@ -1419,7 +1381,7 @@ impl Ui {
             .pointer
             .set(f64::NAN);
         let gap = TAB_GAP;
-        let inset = 32;
+        let inset = 2 * TAB_INSET;
 
         fixed.set_overflow(gtk::Overflow::Visible);
         fixed.set_size_request(
@@ -1449,23 +1411,26 @@ impl Ui {
             label.add_css_class("tab-title");
             label.set_ellipsize(gtk::pango::EllipsizeMode::End);
             label.set_width_chars(1);
-            label.set_max_width_chars(10);
+            // Let the tab's allocation determine ellipsis, including the fixed
+            // 60 px rotated label. Natural text width must not escape its inset.
+            label.set_max_width_chars(1);
             label.set_xalign(0.5);
             if horizontal {
-                label.set_max_width_chars(1);
+                label.set_margin_start(9);
+                label.set_margin_end(9);
                 tab.set_child(Some(&label));
             } else {
-                label.set_size_request(72, 16);
+                label.set_size_request(60, 16);
                 let text = gtk::Fixed::new();
                 text.set_size_request(22, 78);
                 text.put(&label, 0., 0.);
                 let transform = if config.edge == ScreenEdge::Right {
                     gtk::gsk::Transform::new()
-                        .translate(&gtk::graphene::Point::new(19., 3.))
+                        .translate(&gtk::graphene::Point::new(19., 9.))
                         .rotate(90.)
                 } else {
                     gtk::gsk::Transform::new()
-                        .translate(&gtk::graphene::Point::new(3., 75.))
+                        .translate(&gtk::graphene::Point::new(3., 69.))
                         .rotate(-90.)
                 };
                 text.set_child_transform(&label, Some(&transform));
@@ -1474,9 +1439,15 @@ impl Ui {
             tab.set_size_request(tab_width, tab_height);
             // Match paint_tab's resting inset before any hover frame arrives.
             let (x, y) = if horizontal {
-                (16. + index as f64 * f64::from(tab_width + gap), 0.)
+                (
+                    f64::from(TAB_INSET) + index as f64 * f64::from(tab_width + gap),
+                    0.,
+                )
             } else {
-                (0., 16. + index as f64 * f64::from(tab_height + gap))
+                (
+                    0.,
+                    f64::from(TAB_INSET) + index as f64 * f64::from(tab_height + gap),
+                )
             };
             fixed.put(&tab, x, y);
             self.edge
@@ -1499,8 +1470,8 @@ impl Ui {
         let line = gtk::Box::new(orientation, 0);
         line.add_css_class("marker-line");
         line.set_size_request(
-            if horizontal { 28 } else { 3 },
-            if horizontal { 3 } else { 28 },
+            if horizontal { 40 } else { 4 },
+            if horizontal { 4 } else { 40 },
         );
         self.edge.marker.append(&line);
         {
@@ -1516,27 +1487,21 @@ impl Ui {
                     return;
                 }
                 let size = if horizontal { tab_width } else { tab_height };
-                let position = ((if horizontal { x } else { y }) - 16. - f64::from(size) / 2.)
-                    / f64::from(size + TAB_GAP);
-                let index = (position.round().max(0.) as usize).min(count.saturating_sub(1));
-                if fixed
-                    .downcast_ref::<TabLayout>()
-                    .unwrap()
-                    .imp()
-                    .pointer
-                    .get()
-                    != index as f64
-                {
-                    fixed
-                        .downcast_ref::<TabLayout>()
-                        .unwrap()
-                        .imp()
-                        .pointer
-                        .set(index as f64);
-                    for i in 0..ui.edge.tab_hover.borrow().len() {
-                        ui.animate_tab_hover(i, if i == index { 1. } else { 0. });
-                    }
+                // Use resting centers so the growing tabs cannot move their own
+                // hover thresholds and oscillate under a stationary pointer.
+                let position = (((if horizontal { x } else { y })
+                    - f64::from(TAB_INSET)
+                    - f64::from(size) / 2.)
+                    / f64::from(size + TAB_GAP))
+                .clamp(0., count.saturating_sub(1) as f64);
+                let layout = fixed.downcast_ref::<TabLayout>().unwrap().imp();
+                layout.pointer.set(position);
+                let front = Some(position.round() as usize);
+                if layout.front.replace(front) != front {
                     fixed.queue_draw();
+                }
+                for i in 0..count {
+                    ui.animate_tab_hover(i, tab_hover_target(i, position));
                 }
             });
             let enter = update.clone();
@@ -1570,23 +1535,14 @@ impl Ui {
                 let Some(fixed) = weak_fixed.upgrade() else {
                     return;
                 };
-                let front = fixed
-                    .downcast_ref::<TabLayout>()
-                    .unwrap()
-                    .imp()
-                    .pointer
-                    .get()
-                    .round()
-                    .max(0.) as usize;
+                let front = fixed.downcast_ref::<TabLayout>().unwrap().imp().front.get();
                 let mut tabs = Vec::new();
                 let mut child = fixed.first_child();
                 while let Some(tab) = child {
                     child = tab.next_sibling();
                     tabs.push(tab);
                 }
-                let order =
-                    std::iter::once(front).chain((0..tabs.len()).rev().filter(|i| *i != front));
-                for i in order {
+                for i in tab_draw_order(tabs.len(), front).into_iter().rev() {
                     if let Some(tab) = tabs.get(i)
                         && tab.compute_bounds(&fixed).is_some_and(|bounds| {
                             bounds.contains_point(&gtk::graphene::Point::new(x as f32, y as f32))
@@ -1649,18 +1605,14 @@ impl Ui {
             config.theme == config::Theme::Playful,
             false,
         );
-        self.edge.tab_motion.replace(
-            notes
-                .iter()
-                .map(|_| {
-                    motion::Motion::new(if self.edge.state().is_revealed() {
-                        1.
-                    } else {
-                        0.
-                    })
-                })
-                .collect(),
-        );
+        self.edge
+            .strip_motion
+            .jump(if self.edge.state().is_revealed() {
+                1.
+            } else {
+                0.
+            });
+        self.paint_strip(self.edge.strip_motion.value());
         if self.edge.state().is_searching() {
             self.refresh_edge_search();
         }
@@ -2126,9 +2078,9 @@ impl Ui {
                     } else {
                         tab.height_request()
                     };
-                    self.edge
-                        .pointer_origin
-                        .set(Some(offset + 16 + index * (length + TAB_GAP) + length / 2));
+                    self.edge.pointer_origin.set(Some(
+                        offset + TAB_INSET + index * (length + TAB_GAP) + length / 2,
+                    ));
                     break;
                 }
                 index += 1;
@@ -2198,35 +2150,6 @@ impl Ui {
             position(self.edge.stack.upcast_ref(), x, y);
             self.edge.panel_bounds.set((x, y, width, height));
         }
-        let active = self
-            .edge
-            .state()
-            .docked_id()
-            .map(|id| format!("note-{id:?}"));
-        if let Some(group) = self.edge.tabs.first_child() {
-            let mut child = group.first_child();
-            while let Some(tab) = child {
-                if active.as_deref() == Some(tab.widget_name().as_str()) {
-                    tab.add_css_class("edge-active");
-                } else {
-                    tab.remove_css_class("edge-active");
-                }
-                child = tab.next_sibling();
-            }
-        }
-        if let Some(search) = self
-            .edge
-            .tabs
-            .last_child()
-            .and_then(|group| group.first_child())
-            .and_then(|first| first.next_sibling())
-        {
-            if self.edge.state().is_searching() {
-                search.add_css_class("edge-active");
-            } else {
-                search.remove_css_class("edge-active");
-            }
-        }
         if self.edge.toast_note.get().is_some() {
             let (width, height) = measure(self.edge.delete_toast.upcast_ref());
             let (sx, sy, sw, sh) = self.edge.strip_bounds.get();
@@ -2267,7 +2190,7 @@ impl Ui {
         self.edge.toast_motion.animate(
             &self.edge.strip_window,
             1.,
-            (motion::PANEL_MS, 0),
+            motion::PANEL_MS,
             self.motion_enabled(),
             move |value| {
                 if let Some(ui) = weak.upgrade() {
@@ -2301,7 +2224,7 @@ impl Ui {
         self.edge.toast_motion.animate(
             &self.edge.strip_window,
             0.,
-            (motion::PANEL_MS, 0),
+            motion::PANEL_MS,
             self.motion_enabled(),
             move |value| {
                 if let Some(ui) = weak.upgrade() {
@@ -2419,7 +2342,7 @@ impl Ui {
         } else {
             self.edge.window.margin(Edge::Top)
         };
-        let origin = if self.edge.outgoing_panel.borrow().is_some() {
+        let origin = if self.edge.outgoing_panel.borrow().is_some() && !self.note_switching() {
             self.edge.outgoing_origin.get()
         } else {
             self.edge.pointer_origin.get()
@@ -2571,6 +2494,12 @@ mod tests {
         assert_eq!(effects.window_keyboard, KeyboardMode::OnDemand);
         assert_eq!(effects.strip_keyboard, KeyboardMode::None);
         assert_eq!(effects.window_layer, Layer::Overlay);
+        // A saved note can switch directly without a hidden Tabs-only frame.
+        let next = NoteId::new(2);
+        let (state, effects) = transition(state, EdgeEvent::Dock(next), policy());
+        assert_eq!(state, EdgeState::Docked(next));
+        assert_eq!(effects.panel, Some("editor"));
+        assert!(effects.panel_input && effects.pointer_visible);
         // Closing keeps the tabs open until the leave grace expires.
         let (state, effects) = transition(state, EdgeEvent::CloseDocked, policy());
         assert_eq!(state, EdgeState::Tabs);
@@ -2762,7 +2691,7 @@ mod tests {
         // Sample the first reveal, including GTK's first tab allocations.
         let extent = (ui.edge.root.width(), ui.edge.root.height());
         let expanded = ui.edge.strip_bounds.get();
-        let progress = intermediate("reveal", &|| ui.edge.tab_motion.borrow()[0].value());
+        let progress = intermediate("reveal", &|| ui.edge.strip_motion.value());
         let fixed = ui.edge.tabs.first_child().unwrap();
         assert_eq!(
             (fixed.width(), fixed.height()),
@@ -2776,7 +2705,7 @@ mod tests {
         let session = ui.note_session(ui.deck.borrow().notes()[0].id).unwrap();
         session.body.set_text("Saved during reveal");
         assert!(session.flush());
-        assert_eq!(ui.edge.tab_motion.borrow()[0].value(), progress);
+        assert_eq!(ui.edge.strip_motion.value(), progress);
         assert_eq!(ui.edge.strip_phase.get(), StripPhase::Revealing);
         assert!(ui.edge.refresh_pending.get());
         assert_eq!(ui.edge.strip_bounds.get(), expanded);
@@ -2801,21 +2730,21 @@ mod tests {
         ui.schedule_reveal();
         ui.dormant();
         assert_eq!(ui.edge.strip_bounds.get(), expanded);
-        let before = intermediate("collapse", &|| ui.edge.tab_motion.borrow()[3].value());
+        let before = intermediate("collapse", &|| ui.edge.strip_motion.value());
         assert!(
             before > 0. && before < 1.,
             "collapse must have intermediate frames: {before}"
         );
         session.body.set_text("Saved during collapse");
         assert!(session.flush());
-        assert_eq!(ui.edge.tab_motion.borrow()[3].value(), before);
+        assert_eq!(ui.edge.strip_motion.value(), before);
         assert_eq!(ui.edge.strip_phase.get(), StripPhase::Collapsing);
         assert_eq!(ui.edge.strip_bounds.get(), expanded);
         assert!(ui.edge.refresh_pending.get());
         ui.schedule_reveal();
         assert_eq!(ui.edge.state(), EdgeState::Tabs);
         assert_eq!(
-            ui.edge.tab_motion.borrow()[3].value(),
+            ui.edge.strip_motion.value(),
             before,
             "re-entry must not restart progress"
         );
@@ -2829,11 +2758,11 @@ mod tests {
         ui.schedule_reveal();
         settle(185);
         assert_eq!(ui.edge.strip_phase.get(), StripPhase::Revealing);
-        let before = ui.edge.tab_motion.borrow()[0].value();
+        let before = ui.edge.strip_motion.value();
         ui.schedule_hide();
         settle(15);
         ui.schedule_reveal();
-        assert!(ui.edge.tab_motion.borrow()[0].value() >= before);
+        assert!(ui.edge.strip_motion.value() >= before);
         assert!(ui.edge.deferred_hide.get().is_none());
         settle(500);
         assert_eq!(ui.edge.state(), EdgeState::Tabs);
@@ -2965,13 +2894,7 @@ mod tests {
         settings.set_gtk_enable_animations(false);
         ui.reveal();
         assert_eq!(ui.edge.strip_phase.get(), StripPhase::Settled);
-        assert!(
-            ui.edge
-                .tab_motion
-                .borrow()
-                .iter()
-                .all(|motion| motion.value() == 1.)
-        );
+        assert_eq!(ui.edge.strip_motion.value(), 1.);
         assert_eq!((ui.edge.root.width(), ui.edge.root.height()), extent);
         // Cancel a queued start before its first tick, then unmap during another.
         settings.set_gtk_enable_animations(true);
@@ -2982,13 +2905,7 @@ mod tests {
         ui.reveal();
         ui.edge.strip_window.set_visible(false);
         assert_eq!(ui.edge.strip_phase.get(), StripPhase::Settled);
-        assert!(
-            ui.edge
-                .tab_motion
-                .borrow()
-                .iter()
-                .all(|motion| !motion.is_running())
-        );
+        assert!(!ui.edge.strip_motion.is_running());
         ui.edge.window.close();
         ui.edge.strip_window.close();
     }
@@ -3076,7 +2993,7 @@ mod tests {
             } else {
                 tab.height_request()
             };
-            let along = 16.
+            let along = f64::from(TAB_INSET)
                 + index.unwrap_or(0) as f64 * f64::from(size + TAB_GAP)
                 + f64::from(size) / 2.
                 + offset;
@@ -3102,7 +3019,7 @@ mod tests {
         assert!(progress > 0. && progress < 1.);
         hover_at(Some(0), 8.);
         assert_eq!(ui.edge.tab_hover.borrow()[0].value(), progress);
-        assert_eq!(
+        assert!(
             ui.edge
                 .tabs
                 .first_child()
@@ -3111,13 +3028,18 @@ mod tests {
                 .unwrap()
                 .imp()
                 .pointer
-                .get(),
-            0.,
-            "moving within a tab must not retarget the hover animation"
+                .get()
+                > 0.,
+            "the hover destination must follow movement within a tab"
         );
-        settle(180);
+        settle(240);
+        assert!(ui.edge.tab_hover.borrow()[0].value() > 0.9);
+        assert!(ui.edge.tab_hover.borrow()[0].value() < 1.);
+        assert!(ui.edge.tab_hover.borrow()[1].value() > 0.25);
+        hover(Some(0));
+        settle(240);
         assert_eq!(ui.edge.tab_hover.borrow()[0].value(), 1.);
-        assert_eq!(ui.edge.tab_hover.borrow()[1].value(), 0.);
+        assert!((ui.edge.tab_hover.borrow()[1].value() - 0.25).abs() < 0.001);
         let progress = ui.edge.tab_hover.borrow()[0].value();
         let fixed = ui
             .edge
@@ -3146,7 +3068,7 @@ mod tests {
         let progress = ui.edge.tab_hover.borrow()[1].value();
         hover(None);
         assert_eq!(ui.edge.tab_hover.borrow()[1].value(), progress);
-        settle(180);
+        settle(240);
         assert!(
             ui.edge
                 .tab_hover
@@ -3364,7 +3286,7 @@ mod feedback_tests {
                 } else {
                     tabs[0].height_request()
                 };
-                let along = 16. + f64::from(size - 8) + f64::from(size) / 2.;
+                let along = f64::from(TAB_INSET) + f64::from(size + TAB_GAP) + f64::from(size) / 2.;
                 let (x, y) = if horizontal {
                     (along, 12.)
                 } else {
@@ -3378,7 +3300,7 @@ mod feedback_tests {
                 }
                 settle();
                 assert!((ui.edge.tab_hover.borrow()[1].value() - 1.).abs() < 0.001);
-                assert_eq!(ui.edge.tab_hover.borrow()[0].value(), 0.);
+                assert!((ui.edge.tab_hover.borrow()[0].value() - 0.25).abs() < 0.001);
                 assert_eq!(
                     fixed
                         .downcast_ref::<TabLayout>()

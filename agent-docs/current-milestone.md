@@ -2,6 +2,28 @@
 
 [SPEC.md](SPEC.md) is the current product truth derived from the code. [HISTORY.md](HISTORY.md) preserves the former milestone log unchanged. The active milestone remains final UI work and phase 5A/5B verification; [implementation.md](implementation.md) records later roadmap work.
 
+## October 15 chrome and visible-note count
+
+The owner requested removal of decorative interaction outlines/highlights, a more visible dormant bar, a fresh Settings audit and bottom-menu suggestions only. Tab selection accents and their class-management code are removed. App buttons no longer gain decorative hover/pressed fills or focus rings; color/theme checks, switch positions, selected value fills, collection filters and selected rows remain readable. Static paper/control boundaries and shadows remain. The accepted hover wave and note transitions are unchanged. The dormant bar grows from 3 × 28 to 4 × 40 px with a subtle shadow.
+
+The owner explicitly approved Visible notes 4/5. Settings now saves the existing key, restores the accepted value on rejection, and applies it to the query and horizontal strip sizing. Rendering uses the saved-note query even while the deck retains an open note. Hover to reveal now sits under Edge strip. Current source still includes screen edge, position and Reposition below Appearance in the scrolling drawer. Historical removals were deliberate: White paper, tab/marker layout choices and both hide-policy controls; shortcut examples moved to README. Shape has stored data but no picker. True strip enablement and default note color have no implemented Settings controls or keys. No other controls were added.
+
+Formatting, strict all-target Clippy with existing GTK deprecations allowed, the locked offline build and diff checks passed. The build retains 24 existing GTK deprecation warnings. Tests and app sessions were not run, as requested; visual review remains with the owner. Bottom-menu layout remains unchanged, with recommendations reported separately. The owner's `implementation.md` edit is untouched. No commit or push was requested.
+
+## October 14 title clearance and note transitions
+
+The owner accepted the hover wave and requested title clearance, bar-to-strip and note-switch transitions, and narrower individual notes. The hover response remains unchanged. Drawing now proceeds from the farthest neighbor toward the hovered title; overlap clicks use the same order. Labels reserve 10 px at either end, beyond the 8 px overlap. One shared reveal clock replaces separate tab/marker/utility clocks and their stagger, keeping 160 ms entry and 110 ms exit.
+
+Docked note switches keep the current position and dimensions and crossfade editor children through the existing GtkStack over 120 ms. The existing motion helper controls completion and the new arrow fade. Save/release guards remain, the destination session loads before releasing the current view, outgoing input is disabled, and completion/closure/replacement removes the retired child. Reduced/system motion settles immediately. New docked and separate notes start at 320 × 376 px, with the existing 300 × 280 minimum. No controls or settings were added.
+
+Existing strip regressions now observe the common clock, and the state-transition regression includes a direct docked-note switch. The obsolete stagger-only unit test was removed with the retired stagger code. Tests and native app sessions were not run, as requested. Formatting, strict all-target Clippy with existing GTK deprecations allowed, the locked offline build and diff checks passed. The build retains 24 existing deprecation warnings. The owner's `implementation.md` edit remains untouched. This pass remains uncommitted pending manual review.
+
+## October 14 stacked title hover
+
+The owner requested the competitor clip's stacked motion with Dock-style hover, title-only, polished for all four edges. The existing 160/110 ms reveal/collapse and 20 ms stagger remain. Hover now has a continuous proximity wave, peaking at 24% growth with 6% growth in the immediate neighbors when centered on a title. Spacing follows painted sizes and retains the 8 px overlap. Screen-facing pivots keep all tabs attached; 24 px end reserves cover the horizontal and vertical wave. Resting centers prevent hover feedback, and outgoing front order persists until the wave settles.
+
+The existing motion helper now follows changing pointer targets on one frame callback per moving tab, rather than restarting timed animations on every event. It closes 99% of the distance in 120 ms, handles reversal/unmap/cancellation, and settles immediately under reduced or disabled system motion. No previews, controls, settings, dependencies or surfaces were added. Existing edge regressions were updated for continuous tracking and neighbor growth. The owner's `implementation.md` edit remains untouched. Tests and app sessions are explicitly forbidden for this pass and were not run; visual acceptance belongs to the owner. Formatting, strict all-target Clippy with existing GTK deprecations allowed, the locked offline build and diff checks passed. The build retains 24 existing deprecation warnings. This pass remains uncommitted.
+
 ## October 13 edge titles and restored hover
 
 The preceding peek and draft/default-filter work is committed locally as `b9b45dd`, excluding the owner's `implementation.md` edit. No push was requested.

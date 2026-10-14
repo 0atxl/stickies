@@ -7,12 +7,12 @@ use std::{
 pub const REVEAL_MS: u32 = 160;
 pub const COLLAPSE_MS: u32 = 110;
 pub const PANEL_MS: u32 = 120;
-pub const STAGGER_MS: u32 = 20;
 pub const HOVER_MS: u32 = 120;
 pub const HOVER_PAD: i32 = 4;
 
 struct Running {
     value: Cell<f64>,
+    follow_target: Cell<Option<f64>>,
     generation: Cell<u64>,
     animation: RefCell<Option<adw::TimedAnimation>>,
     start: RefCell<
@@ -36,34 +36,24 @@ impl Running {
     }
 }
 
-// The stagger uses the same frame clock as the animation, rather than delayed
-// GLib timers that can bunch up when the first frame is expensive to render.
-fn staggered_progress(eased: f64, duration: u32, delay: u32) -> f64 {
-    if delay == 0 {
-        return eased;
-    }
-    let linear = 1. - (1. - eased).cbrt();
-    let local = ((linear * f64::from(duration + delay) - f64::from(delay)) / f64::from(duration))
-        .clamp(0., 1.);
-    1. - (1. - local).powi(3)
-}
-
 impl Motion {
     pub fn new(value: f64) -> Self {
         Self(Rc::new(Running {
             value: Cell::new(value),
+            follow_target: Cell::new(None),
             generation: Cell::new(0),
             animation: RefCell::new(None),
             start: RefCell::new(None),
         }))
     }
     pub fn is_running(&self) -> bool {
-        self.0.animation.borrow().is_some()
+        self.0.animation.borrow().is_some() || self.0.follow_target.get().is_some()
     }
     pub fn value(&self) -> f64 {
         self.0.value.get()
     }
     pub fn cancel(&self) {
+        self.0.follow_target.set(None);
         self.0
             .generation
             .set(self.0.generation.get().wrapping_add(1));
@@ -78,17 +68,88 @@ impl Motion {
         self.cancel();
         self.0.value.set(value);
     }
+    // Pointer tracking keeps one frame callback alive. New positions change its
+    // destination without cancelling a frame or restarting an easing timeline.
+    pub fn follow(
+        &self,
+        widget: &impl IsA<gtk::Widget>,
+        to: f64,
+        enabled: bool,
+        update: impl Fn(f64) + 'static,
+    ) {
+        if enabled && widget.is_mapped() && self.0.follow_target.get().is_some() {
+            self.0.follow_target.set(Some(to));
+            return;
+        }
+        if !self.is_running() && self.value() == to {
+            return;
+        }
+        self.cancel();
+        if !enabled || !widget.is_mapped() || self.value() == to {
+            self.0.value.set(to);
+            update(to);
+            return;
+        }
+        self.0.follow_target.set(Some(to));
+        let update = Rc::new(update);
+        let on_unmap = update.clone();
+        let weak = Rc::downgrade(&self.0);
+        let unmap = widget.connect_unmap(move |_| {
+            if let Some(running) = weak.upgrade()
+                && let Some(target) = running.follow_target.take()
+            {
+                running.cancel_start();
+                running.value.set(target);
+                on_unmap(target);
+            }
+        });
+        // An idle frame clock can still contain an old timestamp. Start at the
+        // pointer event, otherwise the first frame consumes most of the hover.
+        let previous = Cell::new(glib::monotonic_time());
+        let weak = Rc::downgrade(&self.0);
+        let tick = widget.add_tick_callback(move |widget, clock| {
+            let Some(running) = weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            let Some(target) = running.follow_target.get() else {
+                return glib::ControlFlow::Break;
+            };
+            let elapsed = (clock.frame_time() - previous.replace(clock.frame_time()))
+                .clamp(0, 50_000) as f64
+                / 1_000.;
+            // Frame-rate independent response: 99% of the distance in HOVER_MS.
+            let remaining = (-elapsed * std::f64::consts::LN_10 * 2. / f64::from(HOVER_MS)).exp();
+            let value = target + (running.value.get() - target) * remaining;
+            let settled = (value - target).abs() < 0.001;
+            running.value.set(if settled { target } else { value });
+            if settled {
+                running.follow_target.set(None);
+                if let Some((_, _, unmap)) = running.start.borrow_mut().take() {
+                    widget.disconnect(unmap);
+                }
+            }
+            update(running.value.get());
+            if settled {
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+        self.0
+            .start
+            .replace(Some((tick, widget.as_ref().downgrade(), unmap)));
+    }
     pub fn animate(
         &self,
         widget: &impl IsA<gtk::Widget>,
         to: f64,
-        timing: (u32, u32),
+        duration: u32,
         enabled: bool,
         update: impl Fn(f64) + 'static,
         done: impl Fn() + 'static,
     ) {
         self.cancel();
-        let (duration, delay) = if enabled { timing } else { (0, 0) };
+        let duration = if enabled { duration } else { 0 };
         let from = self.value();
         if duration == 0 || from == to || !widget.is_mapped() {
             self.0.value.set(to);
@@ -103,12 +164,12 @@ impl Motion {
             if let Some(running) = weak.upgrade()
                 && running.generation.get() == generation
             {
-                let value = from + (to - from) * staggered_progress(eased, duration, delay);
+                let value = from + (to - from) * eased;
                 running.value.set(value);
                 update(value);
             }
         });
-        let animation = adw::TimedAnimation::new(widget, 0., 1., duration + delay, target);
+        let animation = adw::TimedAnimation::new(widget, 0., 1., duration, target);
         animation.set_easing(adw::Easing::EaseOutCubic);
         let weak = Rc::downgrade(&self.0);
         animation.connect_done(move |_| {
@@ -153,22 +214,5 @@ impl Motion {
 impl Drop for Motion {
     fn drop(&mut self) {
         self.cancel();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn stagger_preserves_the_delay_and_ease_out_duration() {
-        for delay in [0, 20, 40, 60] {
-            let at = |ms: u32| {
-                let linear = f64::from(ms) / f64::from(REVEAL_MS + delay);
-                staggered_progress(1. - (1. - linear).powi(3), REVEAL_MS, delay)
-            };
-            assert!(at(delay).abs() < 1e-12);
-            assert!((at(delay + 80) - 0.875).abs() < 1e-12);
-            assert_eq!(at(delay + REVEAL_MS), 1.);
-        }
     }
 }

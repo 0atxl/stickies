@@ -76,6 +76,7 @@ struct PositionControls {
     root: gtk::Box,
     edges: Vec<gtk::ToggleButton>,
     presets: Vec<gtk::ToggleButton>,
+    counts: Vec<gtk::ToggleButton>,
     error: gtk::Label,
     current: Rc<RefCell<Config>>,
     syncing: Cell<bool>,
@@ -101,6 +102,9 @@ impl PositionControls {
             button.set_label(labels[index]);
             button.set_active((config.marker_offset - index as f64 / 2.).abs() < 0.000001);
         }
+        for (button, count) in self.counts.iter().zip([4, 5]) {
+            button.set_active(config.visible_notes == count);
+        }
         self.syncing.set(false);
     }
     fn result(&self, result: Result<(), String>) {
@@ -122,6 +126,8 @@ impl PositionControls {
         let presets = choices(&["Top", "Center", "Bottom"], 1);
         section(&root, "Screen edge", &edges.0);
         section(&root, "Position", &presets.0);
+        let counts = choices(&["4", "5"], 0);
+        section(&root, "Visible notes", &counts.0);
 
         let move_button = gtk::Button::with_label("Reposition");
         move_button.set_tooltip_text(Some("Reposition"));
@@ -136,6 +142,7 @@ impl PositionControls {
             root,
             edges: edges.1,
             presets: presets.1,
+            counts: counts.1,
             error,
             current,
             syncing: Cell::new(false),
@@ -170,6 +177,20 @@ impl PositionControls {
                 {
                     let mut config = controls.current.borrow().clone();
                     config.marker_offset = index as f64 / 2.;
+                    controls.result(change(config));
+                }
+            });
+        }
+        for (index, button) in controls.counts.iter().enumerate() {
+            let weak = Rc::downgrade(&controls);
+            let change = change.clone();
+            button.connect_toggled(move |button| {
+                if let Some(controls) = weak.upgrade()
+                    && !controls.syncing.get()
+                    && button.is_active()
+                {
+                    let mut config = controls.current.borrow().clone();
+                    config.visible_notes = [4, 5][index];
                     controls.result(change(config));
                 }
             });
@@ -534,7 +555,11 @@ pub fn build(
         switch.set_active(read(&current.borrow()));
         row.append(&text);
         row.append(&switch);
-        root.append(&row);
+        if label == "Hover to reveal" {
+            position.root.append(&row);
+        } else {
+            root.append(&row);
+        }
         let current = current.clone();
         let update = update.clone();
         let guard = Rc::new(Cell::new(false));

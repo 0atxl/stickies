@@ -6,16 +6,12 @@
 }
 .management .main-header { min-height: 64px; padding: 0 20px; border-bottom: 1px solid var(--hairline); }
 .management .search-field { min-height: 34px; padding: 0 10px; border: 1px solid var(--hairline); background: transparent; color: var(--ink); box-shadow: none; border-radius: 6px; }
-.management .search-field:focus-within { outline: none; }
 .management .panel-title { font-size: 23px; font-weight: 800; }
 .management searchentry { min-height: 34px; padding: 0 10px; background: transparent; color: var(--ink); border: 1px solid var(--hairline); border-radius: 6px; box-shadow: none; }
 .management searchentry text { background: transparent; color: var(--ink); }
-.management searchentry:focus-within { outline: none; }
-.management .search-field:focus-visible { outline: 1px solid var(--muted); outline-offset: 1px; }
 .management .note-list { background: transparent; padding: 10px 10px; }
 .management .list-column { border-right: 1px solid var(--hairline); }
 .management .note-list row { padding: 0; margin: 0 0 4px; border-radius: 8px; background: transparent; color: var(--ink); }
-.management .note-list row:hover { background: alpha(var(--selected), .55); }
 .management .note-list row:selected { background: var(--selected); }
 .management .row-content { min-height: 60px; padding: 0 14px 0 0; }
 .management .row-title { font-size: 14px; font-weight: 700; }
@@ -25,7 +21,6 @@
 .management .inline-content { padding: 26px 26px 28px 30px; }
 .management .inline-title { background: transparent; color: var(--ink); border: none; border-radius: 3px; box-shadow: none; padding: 0; min-height: 32px; font-size: 23px; font-weight: 400; }
 .management .inline-body, .management .inline-body text { background: transparent; color: var(--ink); font-size: 21px; caret-color: var(--ink); }
-.management .inline-title:focus-within { outline: none; }
 .management .metadata { color: var(--muted); font-size: 11px; }
 .management .save-state { color: var(--muted); font-size: 11px; min-height: 16px; }
 .management .save-state.error { color: #b54343; }
@@ -34,13 +29,9 @@
   background: transparent; color: var(--ink); box-shadow: none; border-radius: 6px;
 }
 .management menubutton.icon-control { padding: 0; }
-.management .icon-control:hover, .management .icon-control > button:hover { background: alpha(var(--ink), .06); }
-.management .icon-control:checked { background: var(--selected); color: var(--focus); }
-.management button:focus-visible, .management row:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .management button:disabled { opacity: .4; }
 .management popover > contents { background: var(--app-bg); color: var(--ink); border: 1px solid var(--hairline); }
 .management popover button { box-shadow: none; background: transparent; color: var(--ink); padding: 4px 8px; min-height: 24px; font-size: 12px; border: none; }
-.management popover button:hover { background: var(--selected); }
 .management .appearance-panel { background: var(--app-bg); padding: 16px 14px; }
 .management button { font-weight: 400; }
 .management .appearance-panel { color: var(--ink); }
@@ -49,24 +40,21 @@
 .management .setting-label { font-size: 13px; font-weight: 500; }
 .management .theme-choice { background: transparent; color: var(--ink); border: none; box-shadow: none; padding: 0; }
 .management .theme-sample { border: 1px solid var(--hairline); border-radius: 8px; padding: 2px; }
-.management .theme-choice:checked .theme-sample { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus); }
 .management .theme-caption { font-size: 12px; margin-top: 6px; }
 .management .selection-badge { background: #302e29; color: white; border-radius: 50%; min-width: 18px; min-height: 18px; margin: 5px; }
 .management .segments { border: 1px solid var(--hairline); border-radius: 6px; }
 .management .segments button { padding: 8px 2px; border: 1px solid transparent; box-shadow: none; background: transparent; color: var(--ink); border-radius: 5px; font-size: 12px; }
-.management .segments button:checked { border-color: var(--ink); }
+.management .segments button:checked { background: var(--selected); }
 .management .pattern-choice { border: 1px solid var(--hairline); background: transparent; color: var(--ink); box-shadow: none; padding: 9px 2px; border-radius: 6px; font-size: 12px; }
-.management .pattern-choice:checked { border-color: var(--ink); }
+.management .pattern-choice:checked { background: var(--selected); }
 .management switch { min-width: 38px; min-height: 20px; background: #d0cdc5; border: none; }
 .management switch:checked { background: var(--focus); }
 .management switch slider { background: #fffefa; min-width: 18px; min-height: 18px; box-shadow: 0 1px 2px alpha(black,.1); }
 .management .empty-title { font-size: 19px; font-weight: 500; }
 .management .empty-action { padding: 9px 16px; border: 1px solid var(--hairline); background: var(--selected); color: var(--ink); border-radius: 6px; box-shadow: none; }
 
-.management menubutton.icon-control:hover { background: transparent; }
 .management .collection-filters { padding: 8px 18px; border-bottom: 1px solid var(--hairline); }
 .management .collection-filters button { min-height: 26px; padding: 2px 8px; font-size: 12px; border: none; box-shadow: none; background: transparent; color: var(--muted); border-radius: 5px; }
-.management .collection-filters button:hover { background: alpha(var(--selected), .5); }
 .management .collection-filters button.selected { background: var(--focus); color: white; }
 .management .save-indicator { min-height: 16px; color: var(--muted); font-size: 12px; }
 .management .save-dot { opacity: .35; }
@@ -88,7 +76,7 @@
 .management.playful .note-list row:selected { background: var(--selected); border-left-color: transparent; }
 
 .management.playful .appearance-panel { background: #faf9fc; }
-.management.playful .segments button:checked, .management.playful .pattern-choice:checked { border-color: #e24c86; }
+.management.playful .segments button:checked, .management.playful .pattern-choice:checked { background: var(--selected); }
 
 /* Minimal uses opaque light and dark surfaces. */
 .management.minimal {
@@ -115,7 +103,7 @@
 .management.minimal .note-list row:selected { border-left-color: transparent; }
 .management.minimal .segments button:checked, .management.minimal .pattern-choice:checked,
 .management.playful .segments button:checked, .management.playful .pattern-choice:checked {
-  background: var(--selected); border-color: var(--focus);
+  background: var(--selected);
 }
 .management.minimal .theme-choice:checked .theme-sample,
 .management.playful .theme-choice:checked .theme-sample { background: var(--selected); }
@@ -137,9 +125,7 @@
 .management .note-controls label { font-family: Inter, sans-serif; font-size: 11px; }
 
 .management .note-controls .color-swatch { min-width: 22px; min-height: 22px; padding: 0; border-radius: 50%; border: 1px solid alpha(var(--ink), .18); }
-.management .note-controls .color-swatch:checked { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-.management .note-controls .text-controls button:checked { box-shadow: inset 0 0 0 1px alpha(var(--focus), .35); }
 .management popover > contents { border-radius: 16px; }
 .management .search-field, .management searchentry { border-radius: 18px; }
 .management .collection-filters button { border-radius: 16px; }
@@ -157,9 +143,7 @@
   border: none; border-bottom: 1px solid var(--hairline); border-radius: 0;
   padding-bottom: 5px; margin-bottom: 5px;
 }
-.management:not(.minimal):not(.playful) .note-list row:hover,
 .management:not(.minimal):not(.playful) .note-list row:selected { background: transparent; }
-.management:not(.minimal):not(.playful) .note-list row:hover .row-content { background: alpha(var(--selected), .55); }
 .management:not(.minimal):not(.playful) .note-list row:selected .row-content { background: var(--selected); }
 .management:not(.minimal):not(.playful) .tag-bar { margin-left: 7px; margin-right: 10px; }
 .management:not(.minimal):not(.playful) .row-snippet { font-size: 11px; }
@@ -190,16 +174,13 @@
   border: none; border-bottom: 1px solid var(--hairline); border-radius: 0;
   padding-bottom: 5px; margin-bottom: 5px;
 }
-.management.playful .note-list row:hover,
 .management.playful .note-list row:selected { background: transparent; }
-.management.playful .note-list row:hover .row-content { background: alpha(var(--selected), .55); }
 .management.playful .note-list row:selected .row-content { background: var(--selected); }
 .management.playful .tag-bar { min-width: 11px; min-height: 11px; margin: 22px 10px; }
 .management.playful .row-snippet { font-size: 11px; }
 .management.playful .editor-region { padding: 10px 18px 8px; }
 .management.playful .inline-content { padding: 26px 26px 24px; }
 .management.playful .metadata { font-size: 10px; }
-.management.playful .note-controls .text-controls button:checked { box-shadow: inset 0 0 0 1px var(--focus); }
 
 /* Minimal Light review: white notes, restrained blue chrome and separate row dividers. */
 .management.minimal:not(.minimal-dark) {
@@ -219,18 +200,15 @@
   border: none; border-bottom: 1px solid var(--hairline); border-radius: 0;
   padding-bottom: 5px; margin-bottom: 5px;
 }
-.management.minimal:not(.minimal-dark) .note-list row:hover,
 .management.minimal:not(.minimal-dark) .note-list row:selected { background: transparent; }
-.management.minimal:not(.minimal-dark) .note-list row:hover .row-content { background: alpha(var(--selected), .55); }
 .management.minimal:not(.minimal-dark) .note-list row:selected .row-content { background: var(--selected); }
 .management.minimal:not(.minimal-dark) .tag-bar { margin: 12px 10px 12px 7px; }
 .management.minimal:not(.minimal-dark) .row-snippet { font-size: 11px; }
 .management.minimal:not(.minimal-dark) .editor-region { padding: 10px 18px 8px; }
 .management.minimal:not(.minimal-dark) .inline-content { padding: 26px 26px 24px; }
 .management.minimal:not(.minimal-dark) .metadata { font-size: 10px; }
-.management.minimal:not(.minimal-dark) .note-controls .text-controls button:checked { box-shadow: inset 0 0 0 1px #8ebeff; }
 
-/* Minimal Dark review: charcoal notes and distinct selection, hover and focus states. */
+/* Minimal Dark: charcoal notes and readable selected values. */
 .management.minimal-dark {
   --app-bg: #20242a; --ink: #edf0f4; --muted: #abb4c0;
   --hairline: #414953; --selected: #34465e; --focus: #66adff; --panel-bg: #272c32;
@@ -248,22 +226,16 @@
   border: none; border-bottom: 1px solid var(--hairline); border-radius: 0;
   padding-bottom: 5px; margin-bottom: 5px;
 }
-.management.minimal-dark .note-list row:hover,
 .management.minimal-dark .note-list row:selected { background: transparent; }
-.management.minimal-dark .note-list row:hover .row-content { background: #2c3541; }
 .management.minimal-dark .note-list row:selected .row-content { background: var(--selected); }
 .management.minimal-dark .tag-bar { margin: 12px 10px 12px 7px; }
 .management.minimal-dark .row-snippet { font-size: 11px; }
 .management.minimal-dark .editor-region { padding: 10px 18px 8px; }
 .management.minimal-dark .inline-content { padding: 26px 26px 24px; }
 .management.minimal-dark .metadata { font-size: 10px; }
-.management.minimal-dark .note-controls .text-controls button:checked { box-shadow: inset 0 0 0 1px var(--focus); }
 
 .management.minimal-dark .collection-filters button.selected { background: var(--focus); color: #17212d; }
-.management.minimal-dark .note-controls .text-controls button:hover { background: #2c3541; }
 .management.minimal-dark .note-controls .text-controls button:checked { background: var(--selected); }
-.management.minimal-dark .search-field:focus-within,
-.management.minimal-dark searchentry:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 /* Requested consistency correction; keep theme palettes and note silhouettes separate. */
 .management { border-radius: 12px; }
