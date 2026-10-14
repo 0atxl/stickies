@@ -1,7 +1,7 @@
 use crate::{
     app::NoteColor,
     appearance,
-    config::{NoteStyle, NoteTextSize, NoteTextWeight, Paper, Theme},
+    config::{Font, NoteStyle, NoteTextSize, Paper, ScreenEdge, Theme},
     ui_assets,
 };
 use gtk::prelude::*;
@@ -16,32 +16,36 @@ pub enum Surface {
 // Shared footer presentation; the owning editor wires the existing handlers.
 pub struct NoteControls {
     pub root: gtk::Box,
-    pub color: gtk::MenuButton,
-    pub text: gtk::MenuButton,
+    pub pages: gtk::Stack,
+    normal: gtk::Box,
+    pub color: Option<gtk::MenuButton>,
+    pub text: Option<gtk::MenuButton>,
     pub checklist: gtk::ToggleButton,
     pub pin: gtk::ToggleButton,
     pub popout: Option<gtk::Button>,
     pub more: gtk::MenuButton,
-    pub color_popover: gtk::Popover,
-    pub text_popover: gtk::Popover,
+    pub color_popover: Option<gtk::Popover>,
+    pub text_popover: Option<gtk::Popover>,
     pub more_popover: gtk::Popover,
     pub sizes: Vec<(gtk::ToggleButton, NoteTextSize)>,
-    pub weights: Vec<(gtk::ToggleButton, NoteTextWeight)>,
     pub colors: Vec<(gtk::ToggleButton, NoteColor)>,
     pub patterns: Vec<(gtk::ToggleButton, Option<Paper>)>,
     pub bullet: Option<gtk::Button>,
     pub numbered: Option<gtk::Button>,
     pub separate: Option<gtk::Button>,
     pub copy: gtk::Button,
-    pub archive: gtk::Button,
-    pub restore: gtk::Button,
+    pub archive: Option<gtk::Button>,
+    pub restore: Option<gtk::Button>,
     pub delete: gtk::Button,
-    color_dot: gtk::Box,
+    color_dot: Option<gtk::Box>,
+    surface: Surface,
+    pub fonts: Vec<(gtk::ToggleButton, Font)>,
 }
 
 fn popup(button: &gtk::MenuButton, child: &impl IsA<gtk::Widget>) -> gtk::Popover {
     let popup = gtk::Popover::new();
     popup.add_css_class("note-popover");
+    popup.set_autohide(false);
     popup.set_position(gtk::PositionType::Top);
     popup.set_child(Some(child));
     button.set_popover(Some(&popup));
@@ -64,15 +68,28 @@ impl NoteControls {
         root.set_widget_name("note-footer");
         root.set_height_request(44);
         root.set_halign(gtk::Align::Center);
-        let color = menu("Color");
-        let color_dot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        color_dot.add_css_class("current-color-dot");
-        color_dot.set_size_request(12, 12);
-        color_dot.set_halign(gtk::Align::Center);
-        color_dot.set_valign(gtk::Align::Center);
-        color.set_child(Some(&color_dot));
-        let text = menu("Text");
-        text.set_label("Aa");
+        let pages = gtk::Stack::new();
+        pages.set_transition_type(gtk::StackTransitionType::None);
+        pages.set_hhomogeneous(true);
+        pages.set_vhomogeneous(true);
+        let normal = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        pages.add_named(&normal, Some("settings"));
+        root.append(&pages);
+        let color = Some(menu("Color"));
+        let color_dot = color.as_ref().map(|color| {
+            let dot = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            dot.add_css_class("current-color-dot");
+            dot.set_size_request(12, 12);
+            dot.set_halign(gtk::Align::Center);
+            dot.set_valign(gtk::Align::Center);
+            color.set_child(Some(&dot));
+            dot
+        });
+        let text = Some({
+            let button = menu("Font");
+            button.set_label("Aa");
+            button
+        });
         let checklist = appearance::toggle("checkbox-checked-symbolic", "Checklist");
         checklist.set_child(Some(&ui_assets::image("checklist")));
         checklist.set_focus_on_click(false);
@@ -88,129 +105,176 @@ impl NoteControls {
         let more = menu("More");
         more.set_child(Some(&ui_assets::image("more")));
         let popout = (surface == Surface::Preview).then(|| ui_assets::icon("popout", "Pop out"));
-        for widget in [
-            color.upcast_ref::<gtk::Widget>(),
-            text.upcast_ref(),
-            checklist.upcast_ref(),
-            pin.upcast_ref(),
-        ] {
-            root.append(widget);
+        for button in [&color, &text].into_iter().flatten() {
+            normal.append(button);
         }
+        normal.append(&checklist);
+        normal.append(&pin);
         if let Some(popout) = &popout {
-            root.append(popout);
+            normal.append(popout);
         }
-        root.append(&more);
+        normal.append(&more);
 
-        let typography = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        typography.add_css_class("note-controls");
-        let size_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        size_row.add_css_class("text-controls");
-        size_row.set_homogeneous(true);
-        let mut sizes: Vec<(gtk::ToggleButton, NoteTextSize)> = Vec::new();
-        for (size, label, tooltip) in [
-            (NoteTextSize::Small, "S", "Small text"),
-            (NoteTextSize::Medium, "M", "Medium text"),
-            (NoteTextSize::Large, "L", "Large text"),
-        ] {
-            let button = gtk::ToggleButton::with_label(label);
-            button.set_tooltip_text(Some(tooltip));
-            if let Some((first, _)) = sizes.first() {
-                button.set_group(Some(first));
+        let mut sizes = Vec::new();
+        let mut fonts = Vec::new();
+        let text_popover = text.as_ref().map(|text| {
+            let typography = gtk::Box::new(gtk::Orientation::Vertical, 8);
+            typography.add_css_class("note-controls");
+            let size_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            size_row.add_css_class("text-controls");
+            size_row.set_homogeneous(true);
+            for (size, label, tooltip) in [
+                (NoteTextSize::Small, "S", "Small text"),
+                (NoteTextSize::Medium, "M", "Medium text"),
+                (NoteTextSize::Large, "L", "Large text"),
+            ] {
+                let button = gtk::ToggleButton::with_label(label);
+                button.set_tooltip_text(Some(tooltip));
+                if let Some((first, _)) = sizes.first() {
+                    button.set_group(Some(first));
+                }
+                size_row.append(&button);
+                sizes.push((button, size));
             }
-            size_row.append(&button);
-            sizes.push((button, size));
-        }
-        typography.append(&size_row);
-        let weight_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        weight_row.add_css_class("text-controls");
-        weight_row.set_homogeneous(true);
-        let mut weights: Vec<(gtk::ToggleButton, NoteTextWeight)> = Vec::new();
-        for (weight, label) in [
-            (NoteTextWeight::Regular, "Regular"),
-            (NoteTextWeight::Bold, "Bold"),
-        ] {
-            let button = gtk::ToggleButton::with_label(label);
-            if let Some((first, _)) = weights.first() {
-                button.set_group(Some(first));
+            typography.append(&size_row);
+            let families = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+            families.add_css_class("font-choices");
+            for (font, name) in [
+                (Font::Handwritten, "Virgil"),
+                (Font::Grotesk, "Inter"),
+                (Font::Mono, "JetBrains Mono"),
+                (Font::Kalam, "Kalam"),
+            ] {
+                let button = gtk::ToggleButton::with_label("Aa");
+                button.set_tooltip_text(Some(name));
+                button.update_property(&[gtk::accessible::Property::Label(name)]);
+                let mut description =
+                    gtk::pango::FontDescription::from_string(if font == Font::Handwritten {
+                        "Virgil 3 YOFF"
+                    } else {
+                        name
+                    });
+                description.set_absolute_size(19. * gtk::pango::SCALE as f64);
+                let attributes = gtk::pango::AttrList::new();
+                attributes.insert(gtk::pango::AttrFontDesc::new(&description));
+                if let Some(label) = button.child().and_downcast::<gtk::Label>() {
+                    label.set_attributes(Some(&attributes));
+                }
+                if let Some((first, _)) = fonts.first() {
+                    button.set_group(Some(first));
+                }
+                families.append(&button);
+                fonts.push((button, font));
             }
-            weight_row.append(&button);
-            weights.push((button, weight));
-        }
-        typography.append(&weight_row);
-        let text_popover = popup(&text, &typography);
-
-        let grid = gtk::Grid::new();
-        grid.add_css_class("note-controls");
-        grid.set_row_spacing(7);
-        grid.set_column_spacing(7);
+            typography.prepend(&families);
+            popup(text, &typography)
+        });
         let mut colors = Vec::new();
-        for (index, color) in NoteColor::ALL.into_iter().enumerate() {
-            let button = gtk::ToggleButton::new();
-            button.add_css_class("color-swatch");
-            button.add_css_class(&appearance::color_class(color));
-            button.set_tooltip_text(Some(color.label()));
-            grid.attach(&button, index as i32 % 4, index as i32 / 4, 1, 1);
-            colors.push((button, color));
-        }
-        let color_popover = popup(&color, &grid);
-        let commands = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        let color_popover = color.as_ref().map(|color| {
+            let grid = gtk::Grid::new();
+            grid.add_css_class("note-controls");
+            grid.set_row_spacing(7);
+            grid.set_column_spacing(7);
+            for (index, color) in NoteColor::ALL.into_iter().enumerate() {
+                let button = gtk::ToggleButton::new();
+                button.add_css_class("color-swatch");
+                button.add_css_class(&appearance::color_class(color));
+                button.set_tooltip_text(Some(color.label()));
+                grid.attach(&button, index as i32 % 8, index as i32 / 8, 1, 1);
+                colors.push((button, color));
+            }
+            popup(color, &grid)
+        });
+        let commands = gtk::Box::new(gtk::Orientation::Vertical, 0);
         commands.add_css_class("note-more");
         let mut patterns: Vec<(gtk::ToggleButton, Option<Paper>)> = Vec::new();
         let mut bullet = None;
         let mut numbered = None;
         let mut separate = None;
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        row.add_css_class("pattern-choices");
+        for (paper, name) in [
+            (Paper::Plain, "Plain"),
+            (Paper::Dots, "Dots"),
+            (Paper::Grid, "Grid"),
+            (Paper::Ruled, "Ruled"),
+        ] {
+            let button = gtk::ToggleButton::new();
+            button.set_tooltip_text(Some(name));
+            button.update_property(&[gtk::accessible::Property::Label(name)]);
+            button.set_child(Some(&pattern_sample(paper)));
+            if let Some((first, _)) = patterns.first() {
+                button.set_group(Some(first));
+            }
+            row.append(&button);
+            patterns.push((button, Some(paper)));
+        }
+        commands.append(&row);
         if surface != Surface::Preview {
-            let bullets = gtk::Button::with_label("Bullet list");
-            let numbers = gtk::Button::with_label("Numbered list");
-            commands.append(&bullets);
-            commands.append(&numbers);
+            let lists = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+            lists.add_css_class("list-choices");
+            lists.set_homogeneous(true);
+            let bullets = ui_assets::icon("bullets", "Bullet list");
+            let numbers = ui_assets::icon("numbering", "Numbered list");
+            bullets.remove_css_class("icon-control");
+            numbers.remove_css_class("icon-control");
+            lists.append(&bullets);
+            lists.append(&numbers);
+            commands.append(&lists);
             bullet = Some(bullets);
             numbered = Some(numbers);
-            let label = gtk::Label::new(Some("Pattern"));
-            label.set_xalign(0.);
-            commands.append(&label);
-            let row = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-            row.add_css_class("pattern-choices");
-            for (paper, label) in [
-                (None, "Default"),
-                (Some(Paper::Plain), "Plain"),
-                (Some(Paper::Dots), "Dots"),
-                (Some(Paper::Grid), "Grid"),
-                (Some(Paper::Ruled), "Ruled"),
-            ] {
-                let button = gtk::ToggleButton::with_label(label);
-                if let Some((first, _)) = patterns.first() {
-                    button.set_group(Some(first));
-                }
-                row.append(&button);
-                patterns.push((button, paper));
+        }
+        let command = |icon, label, accessible| {
+            if surface == Surface::Preview {
+                let button = ui_assets::icon(icon, accessible);
+                button.remove_css_class("icon-control");
+                button
+            } else {
+                action(icon, label, accessible)
             }
+        };
+        let copy = command("copy", "Copy", "Copy text");
+        let archive =
+            (surface == Surface::Preview).then(|| command("archive", "Archive", "Archive note"));
+        let restore =
+            (surface == Surface::Preview).then(|| command("restore", "Restore", "Restore note"));
+        let delete = command("delete", "Delete", "Delete note");
+        delete.add_css_class("delete-action");
+        let actions = if surface == Surface::Preview {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+            row.add_css_class("list-choices");
+            row.set_homogeneous(true);
             commands.append(&row);
+            row
+        } else {
+            commands.clone()
+        };
+        actions.append(&copy);
+        if let Some(button) = &archive {
+            actions.append(button);
         }
-        let copy = gtk::Button::with_label("Copy text");
-        let archive = gtk::Button::with_label("Archive");
-        let restore = gtk::Button::with_label("Restore");
-        let delete = gtk::Button::with_label("Delete");
-        for button in [&copy, &archive] {
-            commands.append(button);
+        if let Some(button) = &restore {
+            actions.append(button);
+            button.set_visible(false);
         }
-        if surface == Surface::Preview {
-            commands.append(&restore);
-        }
-        commands.append(&delete);
-        restore.set_visible(false);
         if surface == Surface::Docked {
-            let button = gtk::Button::with_label("Open away from edge");
+            let button = action("popout", "Open away", "Open away from edge");
             commands.append(&button);
             separate = Some(button);
         }
+        if surface != Surface::Preview {
+            commands.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        }
+        actions.append(&delete);
         let more_popover = popup(&more, &commands);
-        for panel in [&color_popover, &text_popover, &more_popover] {
-            let others = [
-                color_popover.downgrade(),
-                text_popover.downgrade(),
-                more_popover.downgrade(),
-            ];
+        let panels: Vec<_> = color_popover
+            .iter()
+            .chain(text_popover.iter())
+            .chain(std::iter::once(&more_popover))
+            .cloned()
+            .collect();
+        for panel in &panels {
+            let others: Vec<_> = panels.iter().map(|p| p.downgrade()).collect();
             panel.connect_visible_notify(move |panel| {
                 if panel.is_visible() {
                     for other in &others {
@@ -223,8 +287,10 @@ impl NoteControls {
                 }
             });
         }
-        for button in [&copy, &archive, &restore, &delete]
+        for button in [&copy, &delete]
             .into_iter()
+            .chain(archive.iter())
+            .chain(restore.iter())
             .chain(bullet.iter())
             .chain(numbered.iter())
             .chain(separate.iter())
@@ -238,6 +304,8 @@ impl NoteControls {
         }
         Self {
             root,
+            pages,
+            normal,
             color,
             text,
             checklist,
@@ -248,7 +316,6 @@ impl NoteControls {
             text_popover,
             more_popover,
             sizes,
-            weights,
             colors,
             patterns,
             bullet,
@@ -259,14 +326,67 @@ impl NoteControls {
             restore,
             delete,
             color_dot,
+            surface,
+            fonts,
         }
     }
-    pub fn popovers(&self) -> [gtk::Popover; 3] {
-        [
-            self.color_popover.clone(),
-            self.text_popover.clone(),
-            self.more_popover.clone(),
-        ]
+    pub fn popovers(&self) -> Vec<gtk::Popover> {
+        self.color_popover
+            .iter()
+            .chain(self.text_popover.iter())
+            .chain(std::iter::once(&self.more_popover))
+            .cloned()
+            .collect()
+    }
+    pub fn position_more(&self, edge: ScreenEdge) {
+        if self.surface == Surface::Preview {
+            return;
+        }
+        let left = edge == ScreenEdge::Right || self.surface == Surface::Detached;
+        if left {
+            self.normal
+                .reorder_child_after(&self.more, None::<&gtk::Widget>);
+        } else {
+            self.normal.reorder_child_after(&self.more, Some(&self.pin));
+        }
+        self.more_popover
+            .set_position(if self.surface == Surface::Detached {
+                gtk::PositionType::Left
+            } else {
+                match edge {
+                    ScreenEdge::Right => gtk::PositionType::Left,
+                    ScreenEdge::Left => gtk::PositionType::Right,
+                    ScreenEdge::Top => gtk::PositionType::Bottom,
+                    ScreenEdge::Bottom => gtk::PositionType::Top,
+                }
+            });
+    }
+    // Nonmodal popovers let another footer control handle its first click.
+    pub fn bind_dismissal(&self, host: &impl IsA<gtk::Widget>) {
+        let click = gtk::GestureClick::new();
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = host.as_ref().downgrade();
+        let panels: Vec<_> = self.popovers().iter().map(|p| p.downgrade()).collect();
+        click.connect_pressed(move |_, _, x, y| {
+            let Some(host) = weak.upgrade() else {
+                return;
+            };
+            if let Some(target) = host.pick(x, y, gtk::PickFlags::DEFAULT) {
+                let mut at = Some(target);
+                while let Some(widget) = at {
+                    if widget.has_css_class("note-footer") || widget.is::<gtk::Popover>() {
+                        return;
+                    }
+                    at = widget.parent();
+                }
+            }
+            for panel in &panels {
+                if let Some(panel) = panel.upgrade() {
+                    panel.popdown();
+                }
+            }
+        });
+        host.as_ref().add_controller(click);
     }
     pub fn dismiss(&self) -> bool {
         let opened = self.popovers().iter().any(|p| p.is_visible());
@@ -275,12 +395,9 @@ impl NoteControls {
         }
         opened
     }
-    pub fn sync(&self, style: &NoteStyle, color: NoteColor, _theme: Theme) {
+    pub fn sync(&self, style: &NoteStyle, color: NoteColor, theme: Theme) {
         for (button, size) in &self.sizes {
             button.set_active(style.text_size == *size);
-        }
-        for (button, weight) in &self.weights {
-            button.set_active(style.text_weight == *weight);
         }
         for (button, value) in &self.colors {
             let selected = *value == color;
@@ -288,9 +405,19 @@ impl NoteControls {
             button.set_label(if selected { "✓" } else { "" });
         }
         for (button, paper) in &self.patterns {
-            button.set_active(style.paper == *paper);
+            button.set_active(Some(style.paper.unwrap_or(Paper::Plain)) == *paper);
         }
-        appearance::set_color(&self.color_dot, color);
+        let font = match style.font.unwrap_or(Font::Theme) {
+            Font::Theme if theme == Theme::Minimal => Font::Grotesk,
+            Font::Theme => Font::Handwritten,
+            font => font,
+        };
+        for (button, value) in &self.fonts {
+            button.set_active(font == *value);
+        }
+        if let Some(dot) = &self.color_dot {
+            appearance::set_color(dot, color);
+        }
     }
     pub fn sync_checklist(&self, body: &gtk::TextView) {
         sync_checklist_button(&self.checklist, body);
@@ -321,9 +448,7 @@ impl NoteControls {
     }
     pub fn set_editable(&self, editable: bool) {
         for widget in [
-            self.color.upcast_ref::<gtk::Widget>(),
-            self.text.upcast_ref(),
-            self.checklist.upcast_ref(),
+            self.checklist.upcast_ref::<gtk::Widget>(),
             self.pin.upcast_ref(),
             self.delete.upcast_ref(),
         ] {
@@ -332,8 +457,18 @@ impl NoteControls {
         if let Some(popout) = &self.popout {
             popout.set_sensitive(editable);
         }
-        self.archive.set_visible(editable);
-        self.restore.set_visible(!editable);
+        for button in [&self.color, &self.text].into_iter().flatten() {
+            button.set_sensitive(editable);
+        }
+        for (button, _) in &self.patterns {
+            button.set_sensitive(editable);
+        }
+        if let Some(button) = &self.archive {
+            button.set_visible(editable);
+        }
+        if let Some(button) = &self.restore {
+            button.set_visible(!editable);
+        }
     }
 }
 
@@ -345,4 +480,61 @@ fn sync_checklist_button(button: &gtk::ToggleButton, body: &gtk::TextView) {
     end.forward_to_line_end();
     let line = buffer.text(&start, &end, true);
     button.set_active(line.starts_with("- [ ] ") || line.starts_with("- [x] "));
+}
+
+fn action(icon: &str, label: &str, accessible: &str) -> gtk::Button {
+    let button = gtk::Button::new();
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    row.append(&ui_assets::image(icon));
+    let text = gtk::Label::new(Some(label));
+    text.set_xalign(0.);
+    row.append(&text);
+    button.set_child(Some(&row));
+    button.update_property(&[gtk::accessible::Property::Label(accessible)]);
+    button.set_tooltip_text(Some(accessible));
+    button
+}
+
+fn pattern_sample(paper: Paper) -> gtk::DrawingArea {
+    let sample = gtk::DrawingArea::new();
+    sample.set_content_width(28);
+    sample.set_content_height(22);
+    sample.set_draw_func(move |area, cr, width, height| {
+        let ink = area.color();
+        cr.set_source_rgba(
+            ink.red().into(),
+            ink.green().into(),
+            ink.blue().into(),
+            0.55,
+        );
+        cr.set_line_width(1.);
+        match paper {
+            Paper::Plain => {
+                cr.rectangle(2.5, 2.5, (width - 5) as f64, (height - 5) as f64);
+            }
+            Paper::Dots => {
+                for x in (4..width).step_by(7) {
+                    for y in (4..height).step_by(7) {
+                        cr.new_sub_path();
+                        cr.arc(x as f64, y as f64, 1., 0., std::f64::consts::TAU);
+                    }
+                }
+                let _ = cr.fill();
+            }
+            Paper::Grid | Paper::Ruled => {
+                for y in (4..height).step_by(7) {
+                    cr.move_to(2., y as f64 + 0.5);
+                    cr.line_to((width - 2) as f64, y as f64 + 0.5);
+                }
+                if paper == Paper::Grid {
+                    for x in (4..width).step_by(7) {
+                        cr.move_to(x as f64 + 0.5, 2.);
+                        cr.line_to(x as f64 + 0.5, (height - 2) as f64);
+                    }
+                }
+            }
+        }
+        let _ = cr.stroke();
+    });
+    sample
 }

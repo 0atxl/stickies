@@ -10,6 +10,7 @@ mod manager;
 mod motion;
 mod note_controls;
 mod note_session;
+mod note_text;
 mod platform;
 mod settings;
 mod storage;
@@ -187,8 +188,10 @@ impl Ui {
         let session = self.note_session(id)?;
         let timeout = Rc::downgrade(self);
         let editor = editor::Editor::new(session, self.config.clone(), !detached, move || {
-            if let Some(ui) = timeout.upgrade() {
-                ui.close_docked();
+            if let Some(ui) = timeout.upgrade()
+                && ui.close_docked()
+            {
+                ui.dormant();
             }
         });
         let weak = Rc::downgrade(self);
@@ -211,10 +214,9 @@ impl Ui {
                 }
             });
         }
-        for (button, change) in [
-            (&editor.controls.archive, manager::ManagerChange::Archive),
-            (&editor.controls.delete, manager::ManagerChange::Delete),
-        ] {
+        {
+            let button = &editor.controls.delete;
+            let change = manager::ManagerChange::Delete;
             let weak = Rc::downgrade(self);
             let weak_editor = Rc::downgrade(&editor);
             button.connect_clicked(move |_| {
@@ -226,9 +228,7 @@ impl Ui {
                         return;
                     }
                     ui.finish_change(id, change);
-                    if change == manager::ManagerChange::Delete {
-                        ui.show_delete_toast(id);
-                    }
+                    ui.show_delete_toast(id);
                 }
             });
         }
@@ -691,13 +691,36 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
             return None;
         }
     };
-    let (config, valid) = match Config::load(&config::config_path()) {
+    let (mut config, valid) = match Config::load(&config::config_path()) {
         Ok(config) => (config, true),
         Err(error) => {
             eprintln!("Stickies ignored invalid configuration: {error}");
             (Config::default(), false)
         }
     };
+    if valid
+        && config
+            .legacy_note_defaults
+            .into_iter()
+            .any(|present| present)
+    {
+        if let Err(error) = storage.migrate_note_defaults(
+            config.legacy_note_defaults[0].then_some(config.font),
+            config.legacy_note_defaults[1].then_some(config.paper),
+        ) {
+            eprintln!("Stickies could not preserve per-note appearance: {error}");
+            return None;
+        }
+        config.font = config::Font::Theme;
+        config.paper = config::Paper::Plain;
+        config.legacy_note_defaults = [false; 2];
+        if let Err(error) = config.save(&config::config_path()) {
+            eprintln!(
+                "Stickies preserved note styles but could not retire global defaults: {error}"
+            );
+            return None;
+        }
+    }
     if valid
         && let Err(error) =
             autostart::reconcile(&autostart::autostart_path(), config.launch_at_login)
@@ -879,7 +902,10 @@ mod edge_tests {
                 .is_some_and(|label| label.text() == name)
         })
         .unwrap();
-        let row = label.parent().unwrap().last_child().unwrap();
+        let row = find_widget(&label.parent().unwrap(), &|widget| {
+            widget.has_css_class("segments")
+        })
+        .unwrap();
         let mut buttons = Vec::new();
         let mut child = row.first_child();
         while let Some(widget) = child {
@@ -1347,9 +1373,9 @@ mod edge_tests {
         settle();
         let manager = ui.manager.borrow().clone().unwrap();
         let root = manager.window().upcast_ref::<gtk::Widget>();
-        let edges = position_group(root, "Screen edge");
+        let edges = position_group(root, "Edge");
         let presets = position_group(root, "Position");
-        let timeouts = position_group(root, "Docked note timeout");
+        let timeouts = position_group(root, "Auto-close");
         assert!(timeouts[2].is_active());
         for (button, seconds) in timeouts.iter().zip([0, 60, 120, 300]) {
             button.set_active(true);
@@ -1495,8 +1521,6 @@ mod edge_tests {
             settle();
             for removed in [
                 "White paper",
-                "Tabs",
-                "Marker",
                 "Hide in fullscreen",
                 "Hide in Do Not Disturb",
             ] {
@@ -1520,7 +1544,7 @@ mod edge_tests {
             let scroll = parent.downcast::<gtk::ScrolledWindow>().unwrap();
             scroll.vadjustment().set_value(scroll.vadjustment().upper());
             settle();
-            for (width, height, size) in [(720, 540, "default"), (680, 520, "minimum")] {
+            for (width, height, size) in [(720, 500, "default"), (680, 480, "minimum")] {
                 manager.window().set_visible(false);
                 manager.window().set_resizable(false);
                 gtk::prelude::WidgetExt::unrealize(manager.window());
@@ -1556,7 +1580,7 @@ mod edge_tests {
             manager.window().set_visible(false);
             gtk::prelude::WidgetExt::unrealize(manager.window());
             manager.window().set_resizable(true);
-            manager.window().set_default_size(720, 540);
+            manager.window().set_default_size(720, 500);
             manager.window().present();
             settle();
             button(root, "Settings").emit_clicked();
@@ -2274,8 +2298,8 @@ mod edge_tests {
             assert!(body_before.intersection(&footer).is_none());
             crate::text_editing::capture_native(&format!("{name}-individual-resting"));
             for (label, button) in [
-                ("color", &editor.controls.color),
-                ("text", &editor.controls.text),
+                ("color", editor.controls.color.as_ref().unwrap()),
+                ("text", editor.controls.text.as_ref().unwrap()),
                 ("more", &editor.controls.more),
             ] {
                 button.popup();
@@ -2303,9 +2327,9 @@ mod edge_tests {
                 &crate::text_editing::iter(&buffer, 13),
             );
             settle();
-            assert!(editor.selection.popover.is_mapped());
+            assert!(editor.selection.row.is_mapped());
             crate::text_editing::capture_native(&format!("{name}-individual-selected"));
-            let bold = find_widget(editor.selection.popover.upcast_ref(), &|w| {
+            let bold = find_widget(editor.selection.row.upcast_ref(), &|w| {
                 w.downcast_ref::<gtk::Button>()
                     .is_some_and(|b| b.label().as_deref() == Some("B"))
             })
@@ -2322,7 +2346,7 @@ mod edge_tests {
             assert!(crate::text_editing::spans(&buffer).is_empty());
             buffer.place_cursor(&buffer.end_iter());
             editor.selection.dismiss();
-            editor.controls.patterns[3].0.set_active(true);
+            editor.controls.patterns[2].0.set_active(true);
             assert_eq!(
                 storage.load_note_style(id).unwrap().paper,
                 Some(config::Paper::Grid)

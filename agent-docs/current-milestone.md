@@ -2,6 +2,68 @@
 
 [SPEC.md](SPEC.md) is the current product truth derived from the code. [HISTORY.md](HISTORY.md) preserves the former milestone log unchanged. The active milestone remains final UI work and phase 5A/5B verification; [implementation.md](implementation.md) records later roadmap work.
 
+## October 15 final menu and timeout corrections
+
+The owner requested a local commit of the accumulated stage. All Notes More now has one icon row for Copy, Archive/Restore and Delete beneath the canvas samples, retaining tooltips, accessible labels and the existing handlers. Sort reuses the note popover chrome and row hover styling with left-aligned labels. A successful docked inactivity close now collapses the strip to its marker; failed saves retain the note and tabs. Manual Close continues to reveal tabs.
+
+Formatting, strict all-target Clippy with existing GTK deprecations allowed, the locked offline build and diff checks passed. The build retains 24 GTK deprecation warnings. No tests or app sessions were run; runtime and visual verification remain with the owner. This stage is authorized for a local commit. The owner's `implementation.md` edit remains excluded; no push is authorized.
+
+## October 15 native editing menu and adjacent emoji picker
+
+The owner authorized wiring the existing right-click Undo/Redo entries and shrinking/moving the emoji picker. Body and title native PopoverMenus now override only their history actions with the shared NoteSession handlers; native Cut/Copy/Paste/Delete/Select All/Emoji entries remain. Menu availability reads the real history and editability at open and on session changes. Keyboard shortcuts and formatting storage are unchanged. The native EmojiChooser has compact UI fonts, eight-column grids, smaller category buttons and a 180 px results cap. Its pointing rectangle moves from the caret to the sheet boundary: inward for each docked edge, left by preference for pop-outs and All Notes, with GTK popup constraints retaining screen-fit behavior. It closes the context menu and footer popovers before use.
+
+The native history regression includes activating the existing body Undo and title Redo menu actions. Formatting, strict all-target Clippy with existing GTK deprecations allowed, the locked offline build and diff checks passed. The build retains 24 GTK deprecation warnings. No tests or app sessions were run; tests were compiled only. Visual and runtime verification remain with the owner. No commit or push is authorized. The owner's `implementation.md` edit remains untouched.
+
+## October 15 checklist caret and list-edit crash
+
+The owner's manual run aborted with SIGABRT at 02:19:07 IST, PID 1683626. The recorded stack enters `note_text::decorate` through `TextView::iter_at_location`, then GTK's visible-line-index conversion reports byte index 29 beyond the line. The renderer now starts at `line_at_y` rather than hit-testing coordinates and skips unmarked text, anchors and hidden markers before requesting decoration geometry. The checkbox callback preserves the caret/selection across its internal marker replacement; native edits and checklist decoration move a collapsed caret out of the hidden prefix. Checkbox clicks retain text focus. Stored marker text and inline-format encoding remain unchanged.
+
+The existing native typing/history regression now uses the actual decorated view and includes typing before an anchor and typing after checkbox activation. These cases were compiled only. Formatting, strict all-target Clippy with existing GTK deprecations allowed, the locked offline build and diff checks passed; the build retains 24 GTK deprecation warnings. No tests or app sessions were authorized or run; manual confirmation of the crash fix and caret behavior remains pending. The journal stack was read without extracting a core or altering saved notes. No commit or push is authorized; `implementation.md` remains untouched.
+
+## October 15 Settings spacing and formatting feedback
+
+The owner requested more breathing room in Settings, full checklist strike coverage and selected formatting states. Undo/Redo remain keyboard-only. Settings now spaces rows by 16 px, with full-width Edge, Position and Auto-close choices below their labels. The existing B/I/U/S buttons show a selected fill for a fully marked visible selection and refresh on range/tag changes without moving the capsule. Mixed selections stay inactive; hidden checklist prefixes and anchors are excluded when determining and toggling the selected mark. Checklist decorations use visible cursor geometry after hidden prefixes, avoiding the raw-offset displacement. Titles remain plain text; adding saved title formatting was discussed but is not approved.
+
+Formatting, strict all-target Clippy with existing GTK deprecations allowed, the locked offline build and diff checks passed. The build retains 24 GTK deprecation warnings. No tests or app sessions were authorized or run. Manual review remains with the owner. No commit or push is authorized; the owner's `implementation.md` edit remains untouched.
+
+## October 15 contextual footer capsule and menu simplification
+
+The owner locked the design and explicitly authorized implementation without tests or native app sessions. The agreed scope is one fixed, opaque footer capsule in both editors; its normal controls switch to B/I/U/S while editable body text is selected, with no separate popup, positional tracking, animation or extra Back control. A homogeneous Stack reserves the larger page size. Selection and editable-state notifications follow buffer replacement, and formatting uses the existing handlers without clearing selection. Escape clears the selection before closing an individual note. Archived notes remain read-only.
+
+Separate notes now have a small native drag handle in their existing top margin. More uses canvas samples without a heading, bullet/numbered list icons in individual notes, compact icon-and-label actions and a separated Delete row. Aa shows the same sample in each bundled font with full-name tooltips, plus S/M/L. Whole-note weight controls and handlers are removed; new styles omit the weight key, while existing stored bold stays readable and survives later style edits. Both editors share note-menu chrome. All Notes keeps per-note styling and Archive/Restore. Individual deletion still uses the edge Undo host; All Notes keeps its own toast.
+
+Settings starts with theme previews and compact labeled rows, without Appearance/Edge strip/Behavior headings. Its existing choices, Reposition and bottom switches remain. Classic tabs use one button extending off screen, removing the shadow extension seam while preserving the 6 px inward pull and attachment on every edge. Stacked motion is unchanged. The 300 × 280 minimum remains.
+
+Formatting, strict all-target Clippy with existing GTK deprecations allowed, the locked offline build and diff checks passed. The build retains 24 existing GTK deprecation warnings. Existing native expectations were updated for the contextual controls, compact Settings rows and preserved legacy weight; they were compiled but not executed. No tests or app sessions were run. Visual approval is pending. No commit or push is authorized for this pass. The owner's `implementation.md` edit remains untouched.
+
+## October 15 selected-note styling in All Notes
+
+The owner approved restoring Color, Font and Canvas pattern to the selected-note editor in All Notes. It now reuses the individual note's eight-column color palette and Aa font family/size/weight popover, with the same flat pattern choices in More. Handlers use the selected note's shared session and persistence, so another open view receives the same style. Archived notes keep styling disabled. Global Settings remains unchanged.
+
+Formatting, strict all-target Clippy with existing GTK deprecations allowed, the locked offline build and diff checks passed. The build retains 24 existing GTK deprecation warnings. No tests or app sessions were run. Existing menu-capture and archived-control assertions were updated for the restored controls and compiled only. Changes remain uncommitted for owner review, and `implementation.md` is untouched.
+
+## October 15 per-note styling and compact Settings
+
+The owner requested implementation without tests or app sessions. Color, font family/size/weight and canvas controls now exist only in docked and separate notes. All Notes keeps Checklist, Pin, Pop out and More. Archive remains only in All Notes. Individual Color uses eight columns and two rows; Aa includes the four bundled font families. More opens toward the screen interior on the footer row. Nonmodal popovers allow a direct first click on another footer option, and options use a subtle gray hover fill.
+
+Selection-bubble updates coalesce cursor/selection changes and retain unchanged placement. The shared native TextView paints font-sized underline/strike strokes while preserving tags, stored spans and history. Legacy global font/canvas values migrate into saved note styles before their config keys are retired; the database schema is unchanged.
+
+Settings retains theme/mode, edge/position, a visible Reposition button, four/five notes, Classic/Stacked, Pills/Bar and docked timeout. Non-theme choice rows are smaller, and Reduce motion, Hover to reveal and Launch at login switches sit at the bottom. The old dots value now draws pills. Classic tabs only pull inward 6 px; Stacked keeps the accepted magnification/spread. Both use the existing interruptible follower, screen attachment and reduced-motion handling.
+
+Formatting, strict all-target Clippy with existing GTK deprecations allowed, the locked offline build and diff checks passed. The build retains 24 existing GTK deprecation warnings. No tests or native app sessions were run. Existing Settings, config/style and editor control assertions were updated for the removed controls and compiled only. Manual verification is pending. Changes remain uncommitted; the owner's `implementation.md` edit is untouched.
+
+## October 15 compact Search, restored strip choices and menus
+
+The owner requested a local checkpoint before this pass. Commit `1157b27` includes the preceding stacked-hover, transition and chrome work, excluding the owner's `implementation.md` edit. No push was requested or made.
+
+Quick Search now requests 224 px width, with content-driven height and a 128 px cap on results. Rows are compact and the scrollbar is hidden; wheel scrolling and keyboard selection retain access to every result. The no-match creation label is shortened. Docked placement now moves the sheet only when the new tab lies outside its arrow range, preventing an arrow clamped to the sheet from indicating a different note.
+
+The owner explicitly restored both Classic/Stacked and Dots/Bar in Settings, overriding their earlier removal. Both keys serialize again, with Stacked/Bar defaults; old adjacent/overlapping values load. Classic uses a 4 px gap and Stacked an 8 px overlap, sharing the accepted hover wave and edge attachment. Dot markers follow saved visible notes, with a neutral empty marker. Vertical titles shorten when needed to fit five Classic tabs on a small screen. Reposition now belongs to Position. Canvas choices have visible labels and larger samples drawn with stronger theme ink. All Notes defaults to 720 × 500 with a 680 × 480 minimum.
+
+Approved footer-menu polish uses left-aligned 32 px action rows, tighter inline pattern choices, 8 px popup corners, smaller arrows and lighter shadows. Menu contents and single-level behavior are unchanged.
+
+Formatting, strict all-target Clippy with existing GTK deprecations allowed, the locked offline build and diff checks passed. The build retains 24 existing GTK deprecation warnings. Tests and app sessions were not run. Existing config migration/round-trip assertions now retain restored choices; native Settings checks no longer expect Tabs/Marker to be absent, and window-size cases use the shorter sizes. These were compiled only. Current changes remain uncommitted for manual review; `implementation.md` remains untouched.
+
 ## October 15 chrome and visible-note count
 
 The owner requested removal of decorative interaction outlines/highlights, a more visible dormant bar, a fresh Settings audit and bottom-menu suggestions only. Tab selection accents and their class-management code are removed. App buttons no longer gain decorative hover/pressed fills or focus rings; color/theme checks, switch positions, selected value fills, collection filters and selected rows remain readable. Static paper/control boundaries and shadows remain. The accepted hover wave and note transitions are unchanged. The dormant bar grows from 3 × 28 to 4 × 40 px with a subtle shadow.

@@ -57,6 +57,24 @@ pub enum Shape {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
+pub enum TabLayout {
+    #[serde(alias = "adjacent")]
+    Classic,
+    #[default]
+    #[serde(alias = "overlapping")]
+    Stacked,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MarkerStyle {
+    Dots,
+    #[default]
+    Bar,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Font {
     #[default]
     Theme,
@@ -77,20 +95,29 @@ pub enum NoteTextSize {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum NoteTextWeight {
+pub enum LegacyTextWeight {
     #[default]
     Regular,
     Bold,
 }
 
+impl LegacyTextWeight {
+    fn is_regular(&self) -> bool {
+        *self == Self::Regular
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct NoteStyle {
-    // Read older overrides, but font family now comes only from Settings.
-    #[serde(rename = "font", skip_serializing)]
-    pub legacy_font: Option<Font>,
+    pub font: Option<Font>,
     pub text_size: NoteTextSize,
-    pub text_weight: NoteTextWeight,
+    // Read/preserve existing whole-note bold styles; there is no weight control.
+    #[serde(
+        rename = "text_weight",
+        skip_serializing_if = "LegacyTextWeight::is_regular"
+    )]
+    pub legacy_text_weight: LegacyTextWeight,
     pub paper: Option<Paper>,
     pub shape: Option<Shape>,
 }
@@ -98,6 +125,9 @@ pub struct NoteStyle {
 impl NoteStyle {
     pub fn resolve(&self, defaults: &Config) -> Config {
         let mut config = defaults.clone();
+        if let Some(font) = self.font {
+            config.font = font;
+        }
         if let Some(paper) = self.paper {
             config.paper = paper;
         }
@@ -117,17 +147,24 @@ pub struct Config {
     pub launch_at_login: bool,
     pub theme: Theme,
     pub appearance: Appearance,
+    // Rendering defaults; legacy global choices migrate into per-note styles.
+    #[serde(skip_serializing)]
     pub font: Font,
     // Accept obsolete saved values, but no longer write this setting.
     #[serde(rename = "font_size", skip_serializing)]
     pub legacy_font_size: Option<u32>,
+    #[serde(skip_serializing)]
     pub paper: Paper,
     pub shape: Shape,
+    pub tab_layout: TabLayout,
+    pub marker_style: MarkerStyle,
     pub visible_notes: usize,
     pub inactivity_seconds: u64,
     pub reduced_motion: bool,
     pub hide_in_fullscreen: bool,
     pub hide_in_dnd: bool,
+    #[serde(skip)]
+    pub legacy_note_defaults: [bool; 2],
 }
 
 impl Default for Config {
@@ -143,11 +180,14 @@ impl Default for Config {
             legacy_font_size: None,
             paper: Paper::Plain,
             shape: Shape::Ticket,
+            tab_layout: TabLayout::Stacked,
+            marker_style: MarkerStyle::Bar,
             visible_notes: 4,
             inactivity_seconds: 120,
             reduced_motion: false,
             hide_in_fullscreen: true,
             hide_in_dnd: true,
+            legacy_note_defaults: [false; 2],
         }
     }
 }
@@ -164,11 +204,13 @@ impl Config {
             Err(error) => return Err(error.into()),
         };
         let mut preferences: toml::Table = toml::from_str(&contents)?;
-        let mut removed = false;
-        for key in ["white_paper", "tab_layout", "marker_style"] {
-            removed |= preferences.remove(key).is_some();
-        }
+        let legacy_note_defaults = [
+            preferences.contains_key("font"),
+            preferences.contains_key("paper"),
+        ];
+        let removed = preferences.remove("white_paper").is_some();
         let mut config: Self = preferences.try_into()?;
+        config.legacy_note_defaults = legacy_note_defaults;
         // Older files allowed custom timeouts from 30 to 1800 seconds.
         // Use the default when a legacy value has no matching Behavior choice.
         if (30..=1800).contains(&config.inactivity_seconds)
@@ -177,7 +219,7 @@ impl Config {
             config.inactivity_seconds = Self::default().inactivity_seconds;
         }
         config.validate()?;
-        if removed {
+        if removed && !legacy_note_defaults.into_iter().any(|present| present) {
             config.save(path)?;
         }
         Ok(config)
@@ -280,7 +322,10 @@ mod tests {
         assert_eq!(config.font, super::Font::Handwritten);
         let saved = toml::to_string(&config).unwrap();
         assert!(saved.contains("theme = \"minimal\""));
-        assert_eq!(toml::from_str::<super::Config>(&saved).unwrap(), config);
+        let loaded: super::Config = toml::from_str(&saved).unwrap();
+        assert_eq!(loaded.theme, config.theme);
+        assert_eq!(loaded.appearance, config.appearance);
+        assert_eq!(loaded.font, super::Font::Theme);
     }
 
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -308,7 +353,7 @@ mod tests {
         let saved = toml::to_string(&config).unwrap();
         assert!(!saved.contains("font_size"));
         let loaded: Config = toml::from_str(&saved).unwrap();
-        assert_eq!(loaded.font, Font::Mono);
+        assert_eq!(loaded.font, Font::Theme);
         assert_eq!(loaded.edge, ScreenEdge::Left);
     }
 
@@ -317,9 +362,11 @@ mod tests {
         let config = Config {
             theme: Theme::Paper,
             appearance: Appearance::Dark,
-            font: Font::Handwritten,
-            paper: Paper::Grid,
+            font: Font::Theme,
+            paper: Paper::Plain,
             shape: Shape::Ticket,
+            tab_layout: TabLayout::Classic,
+            marker_style: MarkerStyle::Dots,
             visible_notes: 4,
             inactivity_seconds: 60,
             ..Config::default()
@@ -340,12 +387,12 @@ mod tests {
             assert!(invalid.validate().is_err());
         }
         let style: NoteStyle = toml::from_str("font = 'mono'").unwrap();
-        assert_eq!(style.legacy_font, Some(Font::Mono));
+        assert_eq!(style.font, Some(Font::Mono));
         assert_eq!(style.text_size, NoteTextSize::Medium);
-        assert_eq!(style.text_weight, NoteTextWeight::Regular);
-        assert_eq!(style.resolve(&config).font, config.font);
-        assert!(!toml::to_string(&style).unwrap().contains("font ="));
-        assert_eq!(style.resolve(&config).paper, Paper::Grid);
+        assert_eq!(style.legacy_text_weight, LegacyTextWeight::Regular);
+        assert_eq!(style.resolve(&config).font, Font::Mono);
+        assert!(toml::to_string(&style).unwrap().contains("font ="));
+        assert_eq!(style.resolve(&config).paper, Paper::Plain);
     }
 
     #[test]
@@ -362,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn retired_choices_are_removed_without_losing_file_only_preferences() {
+    fn white_paper_is_removed_without_losing_restored_choices_or_file_only_preferences() {
         let directory = test_directory("retired-choices");
         let path = directory.join("config.toml");
         fs::create_dir_all(&directory).unwrap();
@@ -372,9 +419,11 @@ mod tests {
         assert!(!config.hide_in_fullscreen);
         assert!(!config.hide_in_dnd);
         let saved = fs::read_to_string(&path).unwrap();
-        for key in ["white_paper", "tab_layout", "marker_style"] {
-            assert!(!saved.contains(key));
-        }
+        assert!(!saved.contains("white_paper"));
+        assert_eq!(config.tab_layout, TabLayout::Classic);
+        assert_eq!(config.marker_style, MarkerStyle::Dots);
+        assert!(saved.contains("tab_layout"));
+        assert!(saved.contains("marker_style"));
         assert_eq!(Config::load(&path).unwrap(), config);
         fs::remove_dir_all(directory).unwrap();
     }

@@ -258,6 +258,42 @@ impl Storage {
         .unwrap_or_else(|| Ok(crate::config::NoteStyle::default()))
     }
 
+    /// Preserve existing appearance before retiring app-wide font/paper keys.
+    pub fn migrate_note_defaults(
+        &self,
+        font: Option<crate::config::Font>,
+        paper: Option<crate::config::Paper>,
+    ) -> Result<(), StorageError> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let rows = {
+            let mut statement = transaction.prepare("SELECT notes.id, note_styles.settings FROM notes LEFT JOIN note_styles ON notes.id = note_styles.note_id")?;
+            statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        for (id, text) in rows {
+            let mut style: crate::config::NoteStyle = text
+                .map(|text| toml::from_str(&text))
+                .transpose()
+                .map_err(|error| StorageError::InvalidStyle(error.to_string()))?
+                .unwrap_or_default();
+            if let Some(font) = font {
+                // The old per-note font key was ignored; preserve the formerly active global font.
+                style.font = Some(font);
+            }
+            if style.paper.is_none() {
+                style.paper = paper;
+            }
+            let text = toml::to_string(&style)
+                .map_err(|error| StorageError::InvalidStyle(error.to_string()))?;
+            transaction.execute("INSERT INTO note_styles (note_id, settings) VALUES (?1, ?2) ON CONFLICT(note_id) DO UPDATE SET settings = excluded.settings", params![id, text])?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn save_note_style(
         &self,
         id: NoteId,
@@ -798,16 +834,19 @@ mod tests {
             )
             .unwrap();
         let legacy = storage.load_note_style(note.id).unwrap();
-        assert_eq!(legacy.legacy_font, Some(crate::config::Font::Mono));
+        assert_eq!(legacy.font, Some(crate::config::Font::Mono));
         assert_eq!(legacy.text_size, crate::config::NoteTextSize::Medium);
-        assert_eq!(legacy.text_weight, crate::config::NoteTextWeight::Regular);
+        assert_eq!(
+            legacy.legacy_text_weight,
+            crate::config::LegacyTextWeight::Regular
+        );
         assert_eq!(
             legacy.resolve(&crate::config::Config::default()).font,
-            crate::config::Font::Theme
+            crate::config::Font::Mono
         );
         let style = crate::config::NoteStyle {
             text_size: crate::config::NoteTextSize::Large,
-            text_weight: crate::config::NoteTextWeight::Bold,
+            legacy_text_weight: crate::config::LegacyTextWeight::Bold,
             paper: Some(crate::config::Paper::Dots),
             shape: Some(crate::config::Shape::Torn),
             ..crate::config::NoteStyle::default()

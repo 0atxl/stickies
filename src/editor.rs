@@ -85,7 +85,7 @@ impl Editor {
         let close = ui_assets::icon("close", "Close note");
         header.append(&title);
         header.append(&close);
-        let body = gtk::TextView::with_buffer(&session.body);
+        let body = crate::note_text::view(Some(&session.body));
         body.add_css_class("editor-body");
         connect_checklist_backspace(&body);
         body.set_wrap_mode(gtk::WrapMode::WordChar);
@@ -108,6 +108,24 @@ impl Editor {
             Surface::Detached
         });
         controls.bind_checklist(&body);
+        let emoji_config = config.clone();
+        crate::text_editing::bind_emoji_placement(
+            &title,
+            &body,
+            &sheet,
+            &controls.popovers(),
+            move || {
+                if !docked {
+                    return gtk::PositionType::Left;
+                }
+                match emoji_config.borrow().edge {
+                    crate::config::ScreenEdge::Right => gtk::PositionType::Left,
+                    crate::config::ScreenEdge::Left => gtk::PositionType::Right,
+                    crate::config::ScreenEdge::Top => gtk::PositionType::Bottom,
+                    crate::config::ScreenEdge::Bottom => gtk::PositionType::Top,
+                }
+            },
+        );
         let keep = controls.pin.clone();
         let checklist = controls.checklist.clone();
         let bullet = controls.bullet.clone().unwrap();
@@ -125,6 +143,26 @@ impl Editor {
         content.append(&controls.root);
         sheet.add_overlay(&content);
         sheet.set_measure_overlay(&content, true);
+        if !docked {
+            let handle = gtk::WindowHandle::new();
+            handle.add_css_class("note-drag-handle");
+            handle.set_halign(gtk::Align::Center);
+            handle.set_valign(gtk::Align::Start);
+            handle.set_margin_top(9);
+            handle.set_size_request(40, 14);
+            handle.set_cursor_from_name(Some("grab"));
+            handle.set_tooltip_text(Some("Drag to move note"));
+            handle.update_property(&[gtk::accessible::Property::Label("Drag to move note")]);
+            let grip = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            grip.add_css_class("note-drag-grip");
+            grip.set_can_target(false);
+            grip.set_size_request(24, 3);
+            grip.set_halign(gtk::Align::Center);
+            grip.set_valign(gtk::Align::Center);
+            handle.set_child(Some(&grip));
+            sheet.add_overlay(&handle);
+        }
+
         // Keep the native resize input unchanged; its grip is decorative.
         let resize = gtk::Box::new(gtk::Orientation::Vertical, 0);
         resize.set_size_request(16, 16);
@@ -168,8 +206,7 @@ impl Editor {
         let weak_session = Rc::downgrade(&session);
         let selection = crate::text_editing::SelectionTools::new(
             &body,
-            &root,
-            &title,
+            &controls.pages,
             move || weak_session.upgrade(),
             &controls.popovers(),
         );
@@ -212,7 +249,8 @@ impl Editor {
             .controls
             .popovers()
             .into_iter()
-            .chain(std::iter::once(editor.selection.popover.clone()))
+            .map(|panel| panel.upcast::<gtk::Widget>())
+            .chain(std::iter::once(editor.selection.row.clone().upcast()))
         {
             let keys = gtk::EventControllerKey::new();
             keys.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -229,6 +267,22 @@ impl Editor {
             });
             panel.add_controller(keys);
         }
+        editor.controls.bind_dismissal(&editor.root);
+        for (button, font) in &editor.controls.fonts {
+            let font = *font;
+            let weak = Rc::downgrade(&editor);
+            button.connect_toggled(move |button| {
+                if let Some(editor) = weak.upgrade()
+                    && button.is_active()
+                    && !editor.syncing_style.get()
+                {
+                    let mut style = editor.session.style();
+                    style.font = Some(font);
+                    editor.session.set_style(style);
+                    editor.activity();
+                }
+            });
+        }
         for (button, size) in &editor.controls.sizes {
             let size = *size;
             let weak = Rc::downgrade(&editor);
@@ -239,21 +293,6 @@ impl Editor {
                 {
                     let mut style = editor.session.style();
                     style.text_size = size;
-                    editor.session.set_style(style);
-                    editor.activity();
-                }
-            });
-        }
-        for (button, weight) in &editor.controls.weights {
-            let weight = *weight;
-            let weak = Rc::downgrade(&editor);
-            button.connect_toggled(move |button| {
-                if let Some(editor) = weak.upgrade()
-                    && button.is_active()
-                    && !editor.syncing_style.get()
-                {
-                    let mut style = editor.session.style();
-                    style.text_weight = weight;
                     editor.session.set_style(style);
                     editor.activity();
                 }
@@ -367,7 +406,7 @@ impl Editor {
         editor.root.add_controller(scrolling);
         for target in std::iter::once(editor.root.clone().upcast::<gtk::Widget>())
             .chain(editor.controls.popovers().into_iter().map(|p| p.upcast()))
-            .chain(std::iter::once(editor.selection.popover.clone().upcast()))
+            .chain(std::iter::once(editor.selection.row.clone().upcast()))
         {
             let motion = gtk::EventControllerMotion::new();
             motion.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -385,12 +424,6 @@ impl Editor {
             });
             target.add_controller(motion);
         }
-        let weak = Rc::downgrade(&editor);
-        editor.background.connect_resize(move |_, _, _| {
-            if let Some(editor) = weak.upgrade() {
-                editor.selection.refresh();
-            }
-        });
         editor.refresh_appearance();
         editor.activity();
         editor
@@ -481,6 +514,7 @@ impl Editor {
         self.color.set(self.session.color());
         self.background.queue_draw();
         let config = self.resolved.borrow();
+        self.controls.position_more(config.edge);
         let (above, below) = match config.theme {
             Theme::Paper => (1, 3),
             Theme::Playful => (1, 3),

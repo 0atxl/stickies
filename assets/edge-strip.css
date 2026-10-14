@@ -191,3 +191,12 @@
 .edge-window.edge-minimal .edge-delete-toast { background: #ffffff; color: #23262B; }
 .edge-window.edge-minimal-dark .edge-delete-toast { background: #22252C; color: #F0F0EE; border-color: alpha(#F0F0EE, .16); box-shadow: 0 2px 4px alpha(black, .35); }
 .edge-window .edge-delete-toast button { background: transparent; color: inherit; border: none; box-shadow: none; padding: 4px 6px; min-height: 22px; border-radius: 5px; font-size: 13px; }
+
+.edge-window .edge-marker .marker-pill { min-width: 0; min-height: 0; border-radius: 3px; box-shadow: none; }
+.edge-window .edge-marker .marker-pill:not(.edge-result-color) { background: #88847d; }
+
+/* Classic reveals one continuous tab from off screen; no shadow seam. */
+.edge-window.edge-classic.edge-right button.note-tab { padding-right: 6px; }
+.edge-window.edge-classic.edge-left button.note-tab { padding-left: 6px; }
+.edge-window.edge-classic.edge-top button.note-tab { padding-top: 6px; }
+.edge-window.edge-classic.edge-bottom button.note-tab { padding-bottom: 6px; }

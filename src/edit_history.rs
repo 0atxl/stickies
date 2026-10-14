@@ -105,6 +105,13 @@ impl History {
         self.group = None;
         self.origin = None;
     }
+    pub fn can_restore(&self, redo: bool) -> bool {
+        if redo {
+            self.index + 1 < self.states.len()
+        } else {
+            self.index > 0
+        }
+    }
     pub fn note_change(&mut self, field: Field, start: usize) {
         self.origin.get_or_insert((field, start));
     }

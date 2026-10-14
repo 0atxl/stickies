@@ -2,6 +2,36 @@
 
 Run against the release build on the reference compositor. Record failures and pending checks, not a history of every run. Final UI approval belongs to the user.
 
+## October 15 final menu and timeout corrections
+
+Pending owner verification, with no tests or app sessions run. In all four themes, open All Notes More and verify the three action icons, tooltips, Archive/Restore replacement and existing Delete/Undo behavior. Check Sort's left-aligned rows, hover fill and matching popup chrome. Let a docked note time out on each edge: the note and title strip should close to the marker. Manual Close should still return to tabs; a failed save must leave both editor and tabs open. Always open and timeout Off should prevent automatic closure.
+
+## October 15 contextual capsule and compact menus
+
+Owner review pending. No tests or app sessions were run. In Paper, Playful, Minimal Light and Minimal Dark, select text in both editors and check that the footer changes to B/I/U/S without changing size, moving text, opening a popup or stealing selection. Apply several marks, use keyboard selection and Undo/Redo, clear selection and switch notes. Archived selection must keep the normal read-only controls. Check the 300 × 280 note minimum and minimum All Notes size.
+
+Check the opaque capsule over every canvas pattern; eight-column palette; actual-font Aa samples and tooltips; S/M/L without Regular/Bold; canvas samples without a heading; list icons; separated Delete; and identical popup chrome between editors. Confirm appearance persistence and preservation of old whole-note bold. Check first-click popup switching and inward placement on each edge.
+
+Drag a separate note by its top grip and edit its title normally. Hover Classic tabs on all four sides, including quick reversal and reduced motion, checking for a continuous attached background without the old seam. Stacked must keep its existing hover. Check compact Settings rows, Reposition, all choices and bottom switches. Delete from a separate note should retain the six-second edge Undo host; All Notes deletion should retain its own toast.
+
+## October 15 selected-note styling follow-up
+
+Pending owner review; no tests or app sessions were run. In All Notes, change the selected note's color, font family, size, weight and canvas pattern. Check the same note in a docked/separate editor, switch notes and reopen the app to verify per-note persistence. Confirm that app-wide Settings stays unchanged, archived styling controls are disabled, direct popup switching still works and the footer fits at the existing minimum window size in all four themes. This supersedes the styling-control removal checks in the previous pass below.
+
+## October 15 per-note menus and Settings
+
+Pending owner verification; no tests or app sessions were run. In all themes and on each screen edge, check the sideways/inward More menu, eight-column color grid and Aa font choices. Click directly between Color, Aa and More, then click Checklist or the body. The first click should act. All Notes should have no Color/Aa/canvas controls; individual More should have no Archive. Confirm per-note appearance survives reopening and existing notes preserve their previous global font/canvas after startup migration.
+
+Select text near the title, lower in the body and across wrapped lines, then scroll and apply B/I/U/S. The bubble should remain steady, avoid the title and still work after switching notes. Check visible underline and suitably weighted strike in Virgil, Inter, Mono and Kalam, including completed checklist items, Undo and Redo.
+
+Check compact Settings rows, unchanged theme previews, the Reposition button under Position, and all switches at the bottom. Classic should pull only the hovered title 6 px inward; Stacked should retain its existing wave. Check edge attachment, quick reversals, all four edges, reduced motion, Pills/Bar, four/five notes and restart persistence.
+
+## October 15 compact Search and restored strip choices
+
+Pending owner review; no tests or app sessions were run. In all four themes, check the compact Search with no matches, one match and many matches. Its scrollbar should stay hidden, and wheel/arrow navigation must reach every result. Switch between far-apart note tabs on each screen edge and at the position extremes. The arrow must identify the selected tab, moving the sheet only as needed.
+
+Change Classic/Stacked and Dots/Bar independently with four and five visible notes. Check persistence, failed-write rollback, attached hover growth, empty notes and unpublished drafts. Check labels and contrast for all four canvas choices, Reposition beneath Position, and the shorter All Notes default/minimum. Footer menus should retain their exact actions while using compact left-aligned rows, tight inline patterns and smaller popup chrome. Existing config and native expectations were updated and compiled, not run.
+
 ## October 15 chrome and visible-note count
 
 Owner review is pending. Tests and app sessions were not run. In all four themes and on all four edges, check the stronger dormant bar, unchanged hover wave, and absence of decorative focus/pressed/selected rings. Color checkmarks, switch positions and selected values must remain readable. Scroll Settings below Appearance to Edge strip and switch Visible notes between 4 and 5 with at least five saved active notes, including while a note is docked. Check persistence after restart and that a rejected config write restores the accepted count. Hidden drafts must not consume slots. Bottom-menu layout is unchanged; compact menu suggestions await approval.

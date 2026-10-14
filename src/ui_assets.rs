@@ -173,7 +173,11 @@ pub fn refresh_icons(widget: &gtk::Widget, playful: bool, filled_pins: bool) {
                 "pin" if filled => "pin-filled",
                 other => other,
             };
-            let path = if playful {
+            let path = if playful
+                && !matches!(
+                    name,
+                    "copy" | "delete" | "bullets" | "numbering" | "restore"
+                ) {
                 format!("/dev/stickies/Stickies/icons/playful/{asset}.svg")
             } else if filled {
                 "/dev/stickies/Stickies/icons/stickies-pin-filled-symbolic.svg".to_string()

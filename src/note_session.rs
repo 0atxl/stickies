@@ -158,6 +158,9 @@ impl NoteSession {
             if let Some(session) = weak.upgrade()
                 && !session.decorating.get()
             {
+                if session.edit_depth.get() == 0 && session.mutation_depth.get() == 0 {
+                    session.move_cursor_past_checklist_marker();
+                }
                 session.edit_depth.set(session.edit_depth.get() + 1);
             }
         });
@@ -265,6 +268,10 @@ impl NoteSession {
         }
         result
     }
+    pub fn can_undo(&self, redo: bool) -> bool {
+        self.history.borrow().can_restore(redo)
+    }
+
     pub fn undo(self: &Rc<Self>, redo: bool) {
         self.record_edit();
         let Some(restored) = self.history.borrow_mut().restore(redo) else {
@@ -301,15 +308,7 @@ impl NoteSession {
         };
         self.isolate_next_edit();
         let tag = mark.tag(&self.body);
-        let mut at = start;
-        let mut all = true;
-        while at < end {
-            if at.child_anchor().is_none() && !at.has_tag(&tag) {
-                all = false;
-                break;
-            }
-            at.forward_char();
-        }
+        let all = crate::text_editing::selection_has_mark(&self.body, mark);
         if all {
             self.body.remove_tag(&tag, &start, &end);
         } else {
@@ -371,6 +370,28 @@ impl NoteSession {
             .borrow_mut()
             .retain(|v| v.upgrade().is_some_and(|other| other != *view));
         true
+    }
+
+    fn move_cursor_past_checklist_marker(&self) {
+        if self.body.has_selection() {
+            return;
+        }
+        let cursor = self.body.iter_at_mark(&self.body.get_insert());
+        let mut start = cursor;
+        start.set_line_offset(0);
+        let mut end = start;
+        end.forward_to_line_end();
+        let text = self.body.text(&start, &end, true);
+        if !text.starts_with("- [ ] ") && !text.starts_with("- [x] ") {
+            return;
+        }
+        if start.child_anchor().is_some() {
+            start.forward_char();
+        }
+        start.forward_chars(6);
+        if cursor < start {
+            self.body.place_cursor(&start);
+        }
     }
 
     fn refresh_checklists(self: &Rc<Self>) {
@@ -441,6 +462,7 @@ impl NoteSession {
                 }
                 let button = gtk::CheckButton::new();
                 button.add_css_class("inline-check");
+                button.set_focus_on_click(false);
                 button.set_active(active);
                 button.update_property(&[gtk::accessible::Property::Label("Completed")]);
                 let weak = Rc::downgrade(self);
@@ -452,6 +474,12 @@ impl NoteSession {
                     if session.decorating.get() || target.is_deleted() {
                         return;
                     }
+                    // Editing the hidden x/space must not leave the caret there.
+                    let cursor = session.body.cursor_position();
+                    let bound = session
+                        .body
+                        .iter_at_mark(&session.body.selection_bound())
+                        .offset();
                     let mut at = session.body.iter_at_child_anchor(&target);
                     at.forward_chars(4);
                     let mut end = at;
@@ -465,6 +493,10 @@ impl NoteSession {
                             .insert(&mut at, if b.is_active() { "x" } else { " " });
                         session.decorating.set(false);
                         session.body.end_user_action();
+                        session.body.select_range(
+                            &session.body.iter_at_offset(cursor),
+                            &session.body.iter_at_offset(bound),
+                        );
                         session.refresh_checklists();
                     });
                     session.schedule_save();
@@ -472,6 +504,7 @@ impl NoteSession {
                 view.add_child_at_anchor(&button, &anchor);
             }
         }
+        self.move_cursor_past_checklist_marker();
         self.decorating.set(false);
     }
 
@@ -639,10 +672,7 @@ impl Drop for NoteSession {
 
 pub fn decorate_checklists(buffer: &gtk::TextBuffer) {
     let tag = buffer.tag_table().lookup("completed").unwrap_or_else(|| {
-        let tag = gtk::TextTag::builder()
-            .name("completed")
-            .strikethrough(true)
-            .build();
+        let tag = gtk::TextTag::builder().name("completed").build();
         buffer.tag_table().add(&tag);
         tag
     });
@@ -664,7 +694,7 @@ pub fn decorate_checklists(buffer: &gtk::TextBuffer) {
     }
 }
 
-/// Completed text keeps Pango's font-specific strike metrics and the theme's ink.
+/// Completion color is shared with the text view's font-scaled strike decoration.
 pub fn style_checklists(buffer: &gtk::TextBuffer, config: &crate::config::Config) {
     let Some(tag) = buffer.tag_table().lookup("completed") else {
         return;
@@ -727,7 +757,7 @@ mod tests {
         let clock = time.clone();
         let session =
             NoteSession::new_with_clock(note, storage.clone(), || {}, move || clock.get());
-        let body = gtk::TextView::with_buffer(&session.body);
+        let body = crate::note_text::view(Some(&session.body));
         crate::editor::connect_checklist_backspace(&body);
         let title = gtk::Entry::with_buffer(&session.title);
         session.attach_view(&body);
@@ -905,6 +935,46 @@ mod tests {
         assert_eq!(text(), "Item");
         session.undo(false);
         assert_eq!(text(), "- [ ] Item");
+        // A click/Home can leave the insertion mark before the checkbox anchor.
+        // The next native edit must start after the hidden marker, not split it.
+        session.body.place_cursor(&session.body.start_iter());
+        body.emit_insert_at_cursor("New ");
+        assert_eq!(text(), "- [ ] New Item");
+        session.undo(false);
+        assert_eq!(text(), "- [ ] Item");
+        let anchor = session.body.start_iter().child_anchor().unwrap();
+        let check = anchor.widgets()[0]
+            .clone()
+            .downcast::<gtk::CheckButton>()
+            .unwrap();
+        session.body.place_cursor(&session.body.end_iter());
+        let caret = session.body.cursor_position();
+        check.set_active(true);
+        assert_eq!(session.body.cursor_position(), caret);
+        body.emit_insert_at_cursor("!");
+        assert_eq!(text(), "- [x] Item!");
+        // The existing native menus must use the same shared history as keys.
+        body.activate_action("menu.popup", None).unwrap();
+        let popup = |widget: &gtk::Widget| {
+            let mut child = widget.first_child();
+            while let Some(current) = child {
+                if let Ok(menu) = current.clone().downcast::<gtk::PopoverMenu>() {
+                    return menu;
+                }
+                child = current.next_sibling();
+            }
+            panic!("native edit menu missing");
+        };
+        let menu = popup(body.upcast_ref());
+        menu.activate_action("text.undo", None).unwrap();
+        assert_eq!(text(), "- [x] Item");
+        menu.popdown();
+        let title_text = title.delegate().unwrap().downcast::<gtk::Text>().unwrap();
+        title_text.activate_action("menu.popup", None).unwrap();
+        let menu = popup(title_text.upcast_ref());
+        menu.activate_action("text.redo", None).unwrap();
+        assert_eq!(text(), "- [x] Item!");
+        menu.popdown();
         assert!(session.flush());
         window.close();
         drop(session);
@@ -1047,17 +1117,16 @@ mod tests {
         swatch(first.root.upcast_ref(), "Large text")
             .unwrap()
             .emit_clicked();
-        first
-            .controls
-            .weights
-            .iter()
-            .find(|(_, weight)| *weight == crate::config::NoteTextWeight::Bold)
-            .unwrap()
-            .0
-            .emit_clicked();
+        // Existing whole-note bold data survives subsequent appearance edits.
+        let mut legacy = session.style();
+        legacy.legacy_text_weight = crate::config::LegacyTextWeight::Bold;
+        session.set_style(legacy);
         let text_style = session.style();
         assert_eq!(text_style.text_size, crate::config::NoteTextSize::Large);
-        assert_eq!(text_style.text_weight, crate::config::NoteTextWeight::Bold);
+        assert_eq!(
+            text_style.legacy_text_weight,
+            crate::config::LegacyTextWeight::Bold
+        );
         assert_eq!(storage.load_note_style(id).unwrap(), text_style);
         assert!(
             swatch(second.root.upcast_ref(), "Large text")
@@ -1065,31 +1134,10 @@ mod tests {
                 .is_active()
         );
         assert!(
-            second
-                .controls
-                .weights
-                .iter()
-                .find(|(_, weight)| { *weight == crate::config::NoteTextWeight::Bold })
-                .unwrap()
-                .0
-                .is_active()
-        );
-        assert!(
             !swatch(second.root.upcast_ref(), "Medium text")
                 .unwrap()
                 .is_active()
         );
-        assert!(
-            !second
-                .controls
-                .weights
-                .iter()
-                .find(|(_, weight)| { *weight == crate::config::NoteTextWeight::Regular })
-                .unwrap()
-                .0
-                .is_active()
-        );
-
         // Count content saves separately from these immediate style writes.
         saves.set(0);
         // A closing view must not cancel the other view's pending autosave.

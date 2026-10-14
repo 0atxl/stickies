@@ -1,7 +1,7 @@
 use crate::{
     app::NoteColor,
     appearance,
-    config::{Appearance, Config, Font, Paper, ScreenEdge, Shape, Theme},
+    config::{Appearance, Config, MarkerStyle, ScreenEdge, Shape, TabLayout, Theme},
 };
 use gtk::prelude::*;
 use std::{
@@ -39,8 +39,6 @@ struct AppearanceControls {
     themes: Vec<(gtk::ToggleButton, Theme)>,
     mode: gtk::Box,
     modes: Vec<gtk::ToggleButton>,
-    fonts: Vec<gtk::ToggleButton>,
-    patterns: Vec<(gtk::ToggleButton, Paper)>,
     motion: gtk::Switch,
     samples: Vec<(Rc<RefCell<Config>>, gtk::DrawingArea)>,
 }
@@ -55,17 +53,10 @@ impl AppearanceControls {
         for (index, button) in self.modes.iter().enumerate() {
             button.set_active(config.appearance as usize == index);
         }
-        for (index, button) in self.fonts.iter().enumerate() {
-            button.set_active(font_index(&config) == index);
-        }
-        for (button, pattern) in &self.patterns {
-            button.set_active(config.paper == *pattern);
-        }
         self.motion.set_active(config.reduced_motion);
         for (sample, drawing) in &self.samples {
             let mut sample = sample.borrow_mut();
             sample.appearance = config.appearance;
-            sample.paper = config.paper;
             drawing.queue_draw();
         }
         self.syncing.set(was_syncing);
@@ -77,6 +68,8 @@ struct PositionControls {
     edges: Vec<gtk::ToggleButton>,
     presets: Vec<gtk::ToggleButton>,
     counts: Vec<gtk::ToggleButton>,
+    layouts: Vec<gtk::ToggleButton>,
+    markers: Vec<gtk::ToggleButton>,
     error: gtk::Label,
     current: Rc<RefCell<Config>>,
     syncing: Cell<bool>,
@@ -105,6 +98,20 @@ impl PositionControls {
         for (button, count) in self.counts.iter().zip([4, 5]) {
             button.set_active(config.visible_notes == count);
         }
+        for (button, layout) in self
+            .layouts
+            .iter()
+            .zip([TabLayout::Classic, TabLayout::Stacked])
+        {
+            button.set_active(config.tab_layout == layout);
+        }
+        for (button, marker) in self
+            .markers
+            .iter()
+            .zip([MarkerStyle::Dots, MarkerStyle::Bar])
+        {
+            button.set_active(config.marker_style == marker);
+        }
         self.syncing.set(false);
     }
     fn result(&self, result: Result<(), String>) {
@@ -121,17 +128,23 @@ impl PositionControls {
         change: Rc<dyn Fn(Config) -> Result<(), String>>,
         reposition: impl Fn() -> Result<(), String> + 'static,
     ) -> Rc<Self> {
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 16);
         let edges = choices(&["Left", "Right", "Top", "Bottom"], 0);
         let presets = choices(&["Top", "Center", "Bottom"], 1);
-        section(&root, "Screen edge", &edges.0);
-        section(&root, "Position", &presets.0);
+        section(&root, "Edge", &edges.0);
+        let position = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        position.append(&presets.0);
+        let move_button = gtk::Button::with_label("Reposition");
+        move_button.set_halign(gtk::Align::Start);
+        move_button.add_css_class("reposition-button");
+        position.append(&move_button);
+        section(&root, "Position", &position);
         let counts = choices(&["4", "5"], 0);
         section(&root, "Visible notes", &counts.0);
-
-        let move_button = gtk::Button::with_label("Reposition");
-        move_button.set_tooltip_text(Some("Reposition"));
-        root.append(&move_button);
+        let layouts = choices(&["Classic", "Stacked"], 1);
+        section(&root, "Tabs", &layouts.0);
+        let markers = choices(&["Pills", "Bar"], 1);
+        section(&root, "Marker", &markers.0);
         let error = gtk::Label::new(None);
         error.set_wrap(true);
         error.set_max_width_chars(28);
@@ -143,6 +156,8 @@ impl PositionControls {
             edges: edges.1,
             presets: presets.1,
             counts: counts.1,
+            layouts: layouts.1,
+            markers: markers.1,
             error,
             current,
             syncing: Cell::new(false),
@@ -195,6 +210,35 @@ impl PositionControls {
                 }
             });
         }
+        for (buttons, write) in [
+            (
+                &controls.layouts,
+                (|c: &mut Config, index: usize| {
+                    c.tab_layout = [TabLayout::Classic, TabLayout::Stacked][index]
+                }) as fn(&mut Config, usize),
+            ),
+            (
+                &controls.markers,
+                (|c: &mut Config, index: usize| {
+                    c.marker_style = [MarkerStyle::Dots, MarkerStyle::Bar][index]
+                }) as fn(&mut Config, usize),
+            ),
+        ] {
+            for (index, button) in buttons.iter().enumerate() {
+                let weak = Rc::downgrade(&controls);
+                let change = change.clone();
+                button.connect_toggled(move |button| {
+                    if let Some(controls) = weak.upgrade()
+                        && !controls.syncing.get()
+                        && button.is_active()
+                    {
+                        let mut config = controls.current.borrow().clone();
+                        write(&mut config, index);
+                        controls.result(change(config));
+                    }
+                });
+            }
+        }
         let weak = Rc::downgrade(&controls);
         move_button.connect_clicked(move |_| {
             if let Some(controls) = weak.upgrade() {
@@ -212,7 +256,7 @@ pub fn build(
 ) -> Panel {
     let on_change: Rc<dyn Fn(Config) -> Result<(), String>> = Rc::new(on_change);
     let position = PositionControls::new(current.clone(), on_change.clone(), on_reposition);
-    let root = gtk::Box::new(gtk::Orientation::Vertical, 20);
+    let root = gtk::Box::new(gtk::Orientation::Vertical, 18);
     root.add_css_class("appearance-panel");
     let error = gtk::Label::new(None);
     error.set_wrap(true);
@@ -223,12 +267,8 @@ pub fn build(
     // Build controls once; changing a theme must not rebuild the focused drawer.
     let config = current.borrow().clone();
     let syncing = Rc::new(Cell::new(false));
-    let heading = gtk::Label::new(Some("Appearance"));
-    heading.set_xalign(0.);
-    heading.add_css_class("setting-label");
-    root.append(&heading);
     let themes = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    section(&root, "Theme", &themes);
+    root.append(&themes);
     let mut theme_buttons = Vec::new();
     let mut group: Option<gtk::ToggleButton> = None;
     for (theme, name) in [
@@ -286,93 +326,6 @@ pub fn build(
     section(&mode, "Mode", &modes.0);
     mode.set_visible(config.theme == Theme::Minimal);
     root.append(&mode);
-    let font_section = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    let font_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let font_label = gtk::Label::new(Some("Font"));
-    font_label.add_css_class("setting-label");
-    font_label.set_hexpand(true);
-    font_label.set_xalign(0.);
-    font_header.append(&font_label);
-    let reset = gtk::Button::from_icon_name("edit-undo-symbolic");
-    reset.add_css_class("icon-control");
-    reset.set_tooltip_text(Some("Reset font"));
-    font_header.append(&reset);
-    font_section.append(&font_header);
-    let fonts = choices(&["Virgil", "Inter", "Mono", "Kalam"], font_index(&config));
-    for (button, family) in
-        fonts
-            .1
-            .iter()
-            .zip(["Virgil 3 YOFF", "Inter", "JetBrains Mono", "Kalam"])
-    {
-        if let Some(label) = button.child().and_downcast::<gtk::Label>() {
-            label.set_markup(&format!(
-                "<span font_family=\"{family}\">{}</span>",
-                label.text()
-            ));
-        }
-    }
-    font_section.append(&fonts.0);
-    root.append(&font_section);
-    let patterns = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    let pattern_section = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    section(&pattern_section, "Canvas pattern", &patterns);
-    root.append(&pattern_section);
-    let mut pattern_buttons = Vec::new();
-    let mut group: Option<gtk::ToggleButton> = None;
-    for (pattern, name) in [
-        (Paper::Plain, "Plain"),
-        (Paper::Dots, "Dots"),
-        (Paper::Grid, "Grid"),
-        (Paper::Ruled, "Ruled"),
-    ] {
-        let b = gtk::ToggleButton::with_label(name);
-        let sample = gtk::Overlay::new();
-        let drawing = gtk::DrawingArea::new();
-        drawing.set_content_width(44);
-        drawing.set_content_height(20);
-        drawing.set_draw_func(move |_, cr, width, height| {
-            cr.set_source_rgba(0.35, 0.32, 0.27, 0.12);
-            cr.set_line_width(0.5);
-            match pattern {
-                Paper::Plain => {}
-                Paper::Dots => {
-                    for x in (3..width).step_by(7) {
-                        for y in (3..height).step_by(7) {
-                            cr.arc(f64::from(x), f64::from(y), 0.6, 0., std::f64::consts::TAU);
-                            let _ = cr.fill();
-                        }
-                    }
-                }
-                Paper::Grid | Paper::Ruled => {
-                    for y in (4..height).step_by(7) {
-                        cr.move_to(0., f64::from(y));
-                        cr.line_to(f64::from(width), f64::from(y));
-                    }
-                    if pattern == Paper::Grid {
-                        for x in (3..width).step_by(7) {
-                            cr.move_to(f64::from(x), 0.);
-                            cr.line_to(f64::from(x), f64::from(height));
-                        }
-                    }
-                    let _ = cr.stroke();
-                }
-            }
-        });
-        sample.set_child(Some(&drawing));
-        b.set_tooltip_text(Some(name));
-        b.update_property(&[gtk::accessible::Property::Label(name)]);
-        b.set_child(Some(&sample));
-        b.add_css_class("pattern-choice");
-        b.set_hexpand(true);
-        b.set_group(group.as_ref());
-        b.set_active(config.paper == pattern);
-        patterns.append(&b);
-        if group.is_none() {
-            group = Some(b.clone());
-        }
-        pattern_buttons.push((b, pattern));
-    }
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     let label = gtk::Label::new(Some("Reduce motion"));
     label.set_xalign(0.);
@@ -382,15 +335,13 @@ pub fn build(
     switch.set_active(config.reduced_motion);
     row.append(&label);
     row.append(&switch);
-    root.append(&row);
+    let motion_row = row;
     let appearance = Rc::new(AppearanceControls {
         current: current.clone(),
         syncing: syncing.clone(),
         themes: theme_buttons,
         mode,
         modes: modes.1,
-        fonts: fonts.1,
-        patterns: pattern_buttons,
         motion: switch,
         samples,
     });
@@ -437,48 +388,6 @@ pub fn build(
             }
         });
     }
-    for (index, button) in appearance.fonts.iter().enumerate() {
-        let weak = Rc::downgrade(&appearance);
-        let update = update.clone();
-        button.connect_toggled(move |button| {
-            if let Some(controls) = weak.upgrade()
-                && button.is_active()
-                && !controls.syncing.get()
-            {
-                let mut config = controls.current.borrow().clone();
-                config.font = [Font::Handwritten, Font::Grotesk, Font::Mono, Font::Kalam][index];
-                update(config);
-            }
-        });
-    }
-    for (button, pattern) in &appearance.patterns {
-        let pattern = *pattern;
-        let weak = Rc::downgrade(&appearance);
-        let update = update.clone();
-        button.connect_toggled(move |button| {
-            if let Some(controls) = weak.upgrade()
-                && button.is_active()
-                && !controls.syncing.get()
-            {
-                let mut config = controls.current.borrow().clone();
-                config.paper = pattern;
-                update(config);
-            }
-        });
-    }
-    {
-        let weak = Rc::downgrade(&appearance);
-        let update = update.clone();
-        reset.connect_clicked(move |_| {
-            if let Some(controls) = weak.upgrade()
-                && !controls.syncing.get()
-            {
-                let mut config = controls.current.borrow().clone();
-                config.font = Font::Theme;
-                update(config);
-            }
-        });
-    }
     {
         let weak = Rc::downgrade(&appearance);
         let update = update.clone();
@@ -494,22 +403,17 @@ pub fn build(
         });
     }
     root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    let heading = gtk::Label::new(Some("Edge strip"));
-    heading.set_xalign(0.);
-    heading.add_css_class("setting-label");
-    root.append(&heading);
     root.append(&position.root);
     root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    let heading = gtk::Label::new(Some("Behavior"));
-    heading.set_xalign(0.);
-    heading.add_css_class("setting-label");
-    root.append(&heading);
     let selected = [0, 60, 120, 300]
         .iter()
         .position(|seconds| *seconds == config.inactivity_seconds)
         .unwrap_or(2);
     let timeouts = choices(&["Off", "1 min", "2 min", "5 min"], selected);
-    section(&root, "Docked note timeout", &timeouts.0);
+    section(&root, "Auto-close", &timeouts.0);
+    timeouts
+        .0
+        .set_tooltip_text(Some("Close docked notes after inactivity"));
     let timeouts = Rc::new(timeouts.1);
     for (index, button) in timeouts.iter().enumerate() {
         let current = current.clone();
@@ -532,6 +436,8 @@ pub fn build(
             }
         });
     }
+    root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    root.append(&motion_row);
     let mut extras: Vec<Box<dyn Fn()>> = Vec::new();
     for (label, read, write) in [
         (
@@ -555,11 +461,7 @@ pub fn build(
         switch.set_active(read(&current.borrow()));
         row.append(&text);
         row.append(&switch);
-        if label == "Hover to reveal" {
-            position.root.append(&row);
-        } else {
-            root.append(&row);
-        }
+        root.append(&row);
         let current = current.clone();
         let update = update.clone();
         let guard = Rc::new(Cell::new(false));
@@ -600,26 +502,23 @@ pub fn build(
     }
 }
 
-fn font_index(c: &Config) -> usize {
-    match c.font {
-        Font::Kalam => 3,
-        Font::Handwritten => 0,
-        Font::Mono => 2,
-        Font::Grotesk => 1,
-        Font::Theme => {
-            if c.theme == Theme::Minimal {
-                1
-            } else {
-                0
-            }
-        }
-    }
-}
 fn section(root: &gtk::Box, name: &str, control: &impl IsA<gtk::Widget>) {
-    let box_ = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    // Give the four-way choices and position presets the drawer's full width.
+    let stacked = matches!(name, "Edge" | "Position" | "Auto-close");
+    let box_ = gtk::Box::new(
+        if stacked {
+            gtk::Orientation::Vertical
+        } else {
+            gtk::Orientation::Horizontal
+        },
+        if stacked { 8 } else { 14 },
+    );
+    box_.add_css_class("setting-row");
     let label = gtk::Label::new(Some(name));
     label.set_xalign(0.);
     label.add_css_class("setting-label");
+    label.set_valign(gtk::Align::Center);
+    control.as_ref().set_hexpand(true);
     box_.append(&label);
     box_.append(control);
     root.append(&box_);
@@ -649,9 +548,7 @@ mod tests {
         adw::init().unwrap();
         let current = Rc::new(RefCell::new(Config {
             theme: Theme::Paper,
-            font: Font::Theme,
             appearance: Appearance::Light,
-            paper: Paper::Dots,
             ..Config::default()
         }));
         let attempts = Rc::new(Cell::new(0));
@@ -679,38 +576,24 @@ mod tests {
         assert_eq!(attempts.get(), 1);
         assert!(controls.themes[1].0.is_active());
         assert!(!controls.mode.is_visible());
-        assert!(controls.fonts[0].is_active());
-
-        controls.fonts[2].set_active(true);
-        assert_eq!(attempts.get(), 2);
-        controls.patterns[2].0.set_active(true);
-        assert_eq!(attempts.get(), 3);
         controls.motion.set_active(true);
-        assert_eq!(attempts.get(), 4);
-        assert!(controls.fonts[0].is_active());
-        assert!(controls.patterns[1].0.is_active());
+        assert_eq!(attempts.get(), 2);
         assert!(!controls.motion.is_active());
 
         current.borrow_mut().theme = Theme::Minimal;
         panel.refresh();
         controls.modes[2].set_active(true);
-        assert_eq!(attempts.get(), 5);
+        assert_eq!(attempts.get(), 3);
         assert!(controls.mode.is_visible());
         assert!(controls.modes[1].is_active());
-        assert!(controls.fonts[1].is_active());
 
         reject.set(false);
         controls.themes[2].0.set_active(true);
-        assert_eq!(attempts.get(), 6);
+        assert_eq!(attempts.get(), 4);
         assert_eq!(current.borrow().theme, Theme::Playful);
         assert!(controls.themes[2].0.is_active());
         assert!(!controls.mode.is_visible());
         reject.set(true);
-        controls.fonts[3].set_active(true);
-        assert!(
-            controls.fonts[0].is_active(),
-            "failed Kalam selection must revert"
-        );
         fn descendants(widget: &gtk::Widget, result: &mut Vec<gtk::Widget>) {
             result.push(widget.clone());
             let mut child = widget.first_child();

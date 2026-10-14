@@ -616,9 +616,9 @@ pub fn build_window(
         .application(application)
         .title("All Notes")
         .default_width(720)
-        .default_height(540)
+        .default_height(500)
         .width_request(680)
-        .height_request(520)
+        .height_request(480)
         .build();
     window.add_css_class("management");
     window.connect_destroy(move |_| {
@@ -709,7 +709,7 @@ pub fn build_window(
     title.set_placeholder_text(Some("Untitled note"));
     title.set_width_chars(8);
     title.set_hexpand(true);
-    let body = gtk::TextView::new();
+    let body = crate::note_text::view(None);
     crate::editor::connect_checklist_backspace(&body);
     body.add_css_class("inline-body");
     body.set_wrap_mode(gtk::WrapMode::WordChar);
@@ -767,12 +767,15 @@ pub fn build_window(
     save_indicator.add_named(&gtk::Label::new(Some("✓")), Some("saved"));
     editor.append(&save_indicator);
     let controls = NoteControls::new(Surface::Preview);
+    crate::text_editing::bind_emoji_placement(&title, &body, &sheet, &controls.popovers(), || {
+        gtk::PositionType::Left
+    });
     controls.bind_checklist(&body);
     let pin = controls.pin.clone();
     let popout = controls.popout.clone().unwrap();
     let more = controls.more.clone();
-    let archive = controls.archive.clone();
-    let restore = controls.restore.clone();
+    let archive = controls.archive.as_ref().unwrap().clone();
+    let restore = controls.restore.as_ref().unwrap().clone();
     let delete = controls.delete.clone();
     let copy = controls.copy.clone();
     let checklist = controls.checklist.clone();
@@ -864,8 +867,7 @@ pub fn build_window(
     let getter = current_session.clone();
     let selection = crate::text_editing::SelectionTools::new(
         &body,
-        &sheet,
-        &title,
+        &controls.pages,
         move || {
             getter
                 .borrow()
@@ -1050,11 +1052,30 @@ pub fn build_window(
             ui.body.grab_focus();
         }
     });
+    for (button, font) in &ui.controls.fonts {
+        let weak = Rc::downgrade(&ui);
+        let font = *font;
+        button.connect_toggled(move |button| {
+            if let Some(ui) = weak.upgrade()
+                && ui.body.is_editable()
+                && !ui.syncing_style.get()
+                && button.is_active()
+            {
+                let session = ui.session.borrow().clone();
+                if let Some(session) = session {
+                    let mut style = session.style();
+                    style.font = Some(font);
+                    session.set_style(style);
+                }
+            }
+        });
+    }
     for (button, size) in &ui.controls.sizes {
         let weak = Rc::downgrade(&ui);
         let size = *size;
         button.connect_toggled(move |button| {
             if let Some(ui) = weak.upgrade()
+                && ui.body.is_editable()
                 && !ui.syncing_style.get()
                 && button.is_active()
             {
@@ -1067,18 +1088,19 @@ pub fn build_window(
             }
         });
     }
-    for (button, weight) in &ui.controls.weights {
+    for (button, paper) in &ui.controls.patterns {
         let weak = Rc::downgrade(&ui);
-        let weight = *weight;
+        let paper = *paper;
         button.connect_toggled(move |button| {
             if let Some(ui) = weak.upgrade()
+                && ui.body.is_editable()
                 && !ui.syncing_style.get()
                 && button.is_active()
             {
                 let session = ui.session.borrow().clone();
                 if let Some(session) = session {
                     let mut style = session.style();
-                    style.text_weight = weight;
+                    style.paper = paper;
                     session.set_style(style);
                 }
             }
@@ -1088,7 +1110,9 @@ pub fn build_window(
         let weak = Rc::downgrade(&ui);
         let color = *color;
         button.connect_clicked(move |_| {
-            if let Some(ui) = weak.upgrade() {
+            if let Some(ui) = weak.upgrade()
+                && ui.body.is_editable()
+            {
                 let session = ui.session.borrow().clone();
                 if let Some(session) = session {
                     session.set_color(color);
@@ -1096,6 +1120,7 @@ pub fn build_window(
             }
         });
     }
+    ui.controls.bind_dismissal(&ui.window);
     let keys = gtk::EventControllerKey::new();
     let weak = Rc::downgrade(&ui);
     keys.connect_key_pressed(move |_, key, _, modifiers| {
@@ -1128,17 +1153,12 @@ pub fn build_window(
             }
         }
     });
-    let weak = Rc::downgrade(&ui);
-    ui.background.connect_resize(move |_, _, _| {
-        if let Some(ui) = weak.upgrade() {
-            ui.selection.refresh();
-        }
-    });
     for panel in ui
         .controls
         .popovers()
         .into_iter()
-        .chain(std::iter::once(ui.selection.popover.clone()))
+        .map(|panel| panel.upcast::<gtk::Widget>())
+        .chain(std::iter::once(ui.selection.row.clone().upcast()))
     {
         let weak = Rc::downgrade(&ui);
         let keys = gtk::EventControllerKey::new();
@@ -1170,8 +1190,13 @@ fn menu_button(icon: &str, label: &str) -> gtk::MenuButton {
 }
 fn set_menu(menu: &gtk::MenuButton, buttons: &[&gtk::Button]) {
     let popover = gtk::Popover::new();
-    let box_ = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    popover.add_css_class("note-popover");
+    let box_ = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    box_.add_css_class("note-more");
     for button in buttons {
+        if let Some(label) = button.child().and_downcast::<gtk::Label>() {
+            label.set_xalign(0.);
+        }
         box_.append(*button);
     }
     popover.set_child(Some(&box_));
@@ -1282,7 +1307,7 @@ mod feedback_tests {
                 crate::config::Appearance::Light
             };
             ui.change_settings(config).unwrap();
-            for (width, height) in [(680, 520), (1040, 720)] {
+            for (width, height) in [(680, 480), (1040, 720)] {
                 manager.window.set_visible(false);
                 gtk::prelude::WidgetExt::unrealize(&manager.window);
                 manager.window.set_default_size(width, height);
@@ -1332,8 +1357,8 @@ mod feedback_tests {
                     };
                     crate::text_editing::capture_native(&format!("{name}-all-notes-resting"));
                     for (label, button) in [
-                        ("color", &manager.controls.color),
-                        ("text", &manager.controls.text),
+                        ("color", manager.controls.color.as_ref().unwrap()),
+                        ("font", manager.controls.text.as_ref().unwrap()),
                         ("more", &manager.controls.more),
                     ] {
                         button.popup();
@@ -1350,7 +1375,7 @@ mod feedback_tests {
                         &crate::text_editing::iter(&buffer, 13),
                     );
                     settle();
-                    assert!(manager.selection.popover.is_mapped());
+                    assert!(manager.selection.row.is_mapped());
                     crate::text_editing::capture_native(&format!("{name}-all-notes-selected"));
                     buffer.place_cursor(&buffer.end_iter());
                     manager.selection.dismiss();
@@ -1395,8 +1420,13 @@ mod feedback_tests {
         assert!(manager.storage.is_archived(id).unwrap());
         assert!(!manager.body.is_editable());
         for widget in [
-            manager.controls.color.upcast_ref::<gtk::Widget>(),
-            manager.controls.text.upcast_ref(),
+            manager
+                .controls
+                .color
+                .as_ref()
+                .unwrap()
+                .upcast_ref::<gtk::Widget>(),
+            manager.controls.text.as_ref().unwrap().upcast_ref(),
             manager.controls.checklist.upcast_ref(),
             manager.controls.pin.upcast_ref(),
             manager.controls.popout.as_ref().unwrap().upcast_ref(),
@@ -1404,10 +1434,23 @@ mod feedback_tests {
         ] {
             assert!(!widget.is_sensitive());
         }
-        assert!(manager.controls.copy.is_sensitive() && manager.controls.restore.is_sensitive());
+        assert!(
+            manager
+                .controls
+                .patterns
+                .iter()
+                .all(|(button, _)| !button.is_sensitive())
+        );
+        assert!(
+            manager.controls.copy.is_sensitive()
+                && manager.controls.restore.as_ref().unwrap().is_sensitive()
+        );
         manager.more.popup();
         settle();
-        assert!(!manager.controls.archive.is_visible() && manager.controls.restore.is_visible());
+        assert!(
+            !manager.controls.archive.as_ref().unwrap().is_visible()
+                && manager.controls.restore.as_ref().unwrap().is_visible()
+        );
         manager.window.close();
         ui.edge.window.close();
         ui.edge.strip_window.close();

@@ -38,4 +38,9 @@
 <file>fonts/Kalam-Regular.ttf</file>
 <file>fonts/Kalam-Bold.ttf</file>
 <file>fonts/Kalam-LICENSE.txt</file>
+<file>icons/stickies-copy-symbolic.svg</file>
+<file>icons/stickies-delete-symbolic.svg</file>
+<file>icons/stickies-bullets-symbolic.svg</file>
+<file>icons/stickies-numbering-symbolic.svg</file>
+<file>icons/stickies-restore-symbolic.svg</file>
 </gresource></gresources>

@@ -111,6 +111,12 @@ glib::wrapper! {
 const WIDTH: i32 = 420;
 const HEIGHT: i32 = 500;
 const TAB_GAP: i32 = -8;
+fn tab_gap(config: &Config) -> i32 {
+    match config.tab_layout {
+        config::TabLayout::Classic => 4,
+        config::TabLayout::Stacked => TAB_GAP,
+    }
+}
 // Covers the largest horizontal wave at either end, including its shadow.
 const TAB_INSET: i32 = 24;
 const TAB_MAGNIFICATION: f64 = 0.24;
@@ -125,9 +131,16 @@ fn tab_draw_order(count: usize, front: Option<usize>) -> Vec<usize> {
     order
 }
 
-fn tab_hover_target(index: usize, position: f64) -> f64 {
+fn tab_hover_target(index: usize, position: f64, layout: config::TabLayout) -> f64 {
     if !position.is_finite() {
         return 0.;
+    }
+    if layout == config::TabLayout::Classic {
+        return if index == position.round() as usize {
+            1.
+        } else {
+            0.
+        };
     }
     let distance = ((index as f64 - position).abs() / 1.5).min(1.);
     (1. + (distance * std::f64::consts::PI).cos()) / 2.
@@ -394,7 +407,7 @@ impl Strip {
         root.add_overlay(&stack);
         let search_panel = gtk::Box::new(gtk::Orientation::Vertical, 6);
         search_panel.add_css_class("edge-search");
-        search_panel.set_size_request(288, 300);
+        search_panel.set_width_request(224);
         let edge_search = gtk::SearchEntry::new();
         edge_search.set_placeholder_text(Some("Search active notes"));
         edge_search.set_hexpand(true);
@@ -403,7 +416,9 @@ impl Strip {
         search_results.set_activate_on_single_click(true);
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
-            .vexpand(true)
+            .vscrollbar_policy(gtk::PolicyType::External)
+            .propagate_natural_height(true)
+            .max_content_height(128)
             .child(&search_results)
             .build();
         search_panel.append(&scroll);
@@ -730,12 +745,13 @@ impl Ui {
     fn paint_tab(
         fixed: &gtk::Fixed,
         tab: &gtk::Widget,
-        edge: ScreenEdge,
+        config: &Config,
         index: usize,
         progress: f64,
         hovers: &[Rc<motion::Motion>],
     ) {
-        let gap = TAB_GAP;
+        let gap = tab_gap(config);
+        let edge = config.edge;
         let length = if matches!(edge, ScreenEdge::Top | ScreenEdge::Bottom) {
             tab.width_request()
         } else {
@@ -755,24 +771,30 @@ impl Ui {
                 direction * hover.value() * TAB_MAGNIFICATION * f64::from(length) / 2.
             })
             .sum();
-        let inset = TAB_INSET as f32 + spread as f32;
+        let stacked = config.tab_layout == config::TabLayout::Stacked;
+        let inset = TAB_INSET as f32 + if stacked { spread as f32 } else { 0. };
         let distance = (24. * (1. - progress)) as f32;
+        let pull = if stacked {
+            0.
+        } else {
+            6. * hovers.get(index).map_or(0., |hover| hover.value()) as f32
+        };
         let (x, y) = match edge {
             ScreenEdge::Left => (
-                -distance,
+                -distance + pull - if stacked { 0. } else { 6. },
                 inset + index as f32 * (tab.height_request() + gap) as f32,
             ),
             ScreenEdge::Right => (
-                distance,
+                distance - pull,
                 inset + index as f32 * (tab.height_request() + gap) as f32,
             ),
             ScreenEdge::Top => (
                 inset + index as f32 * (tab.width_request() + gap) as f32,
-                -distance,
+                -distance + pull - if stacked { 0. } else { 6. },
             ),
             ScreenEdge::Bottom => (
                 inset + index as f32 * (tab.width_request() + gap) as f32,
-                distance,
+                distance - pull,
             ),
         };
         let (width, height) = (tab.width_request() as f32, tab.height_request() as f32);
@@ -783,7 +805,11 @@ impl Ui {
             ScreenEdge::Bottom => (width / 2., height),
         };
         let hover = hovers.get(index).map_or(0., |hover| hover.value());
-        let scale = (1. + TAB_MAGNIFICATION * hover) as f32;
+        let scale = if stacked {
+            (1. + TAB_MAGNIFICATION * hover) as f32
+        } else {
+            1.
+        };
         let transform = gtk::gsk::Transform::new()
             .translate(&gtk::graphene::Point::new(x, y))
             .translate(&gtk::graphene::Point::new(cx, cy))
@@ -821,7 +847,7 @@ impl Ui {
             Self::paint_tab(
                 &fixed,
                 &tab,
-                self.config.borrow().edge,
+                &self.config.borrow(),
                 index,
                 self.edge.strip_motion.value(),
                 &hovers,
@@ -838,7 +864,11 @@ impl Ui {
                     f64::NAN
                 };
             for (index, hover) in self.edge.tab_hover.borrow().iter().enumerate() {
-                hover.jump(tab_hover_target(index, position));
+                hover.jump(tab_hover_target(
+                    index,
+                    position,
+                    self.config.borrow().tab_layout,
+                ));
             }
             self.paint_hover_tabs();
         }
@@ -1353,7 +1383,7 @@ impl Ui {
                 .unwrap_or(0);
             let (screen_width, _) = self.note_limits();
             let count = config.visible_notes as i32;
-            let reserved = (count - 1) * TAB_GAP
+            let reserved = (count - 1) * tab_gap(&config)
                 + 2 * TAB_INSET
                 + self.edge.tabs.spacing()
                 + 3 * 24
@@ -1372,7 +1402,18 @@ impl Ui {
             self.edge.horizontal_tab_width.set(0);
             24
         };
-        let tab_height = if horizontal { 24 } else { 80 };
+        let tab_height = if horizontal {
+            24
+        } else {
+            let (_, screen_height) = self.note_limits();
+            let count = config.visible_notes as i32;
+            let reserved = (count - 1) * tab_gap(&config)
+                + 2 * TAB_INSET
+                + self.edge.tabs.spacing()
+                + 3 * 24
+                + 2 * motion::HOVER_PAD;
+            ((screen_height - reserved) / count).clamp(24, 80)
+        };
         let fixed = glib::Object::new::<TabLayout>().upcast::<gtk::Fixed>();
         fixed
             .downcast_ref::<TabLayout>()
@@ -1380,7 +1421,7 @@ impl Ui {
             .imp()
             .pointer
             .set(f64::NAN);
-        let gap = TAB_GAP;
+        let gap = tab_gap(&config);
         let inset = 2 * TAB_INSET;
 
         fixed.set_overflow(gtk::Overflow::Visible);
@@ -1420,9 +1461,9 @@ impl Ui {
                 label.set_margin_end(9);
                 tab.set_child(Some(&label));
             } else {
-                label.set_size_request(60, 16);
+                label.set_size_request(tab_height - 20, 16);
                 let text = gtk::Fixed::new();
-                text.set_size_request(22, 78);
+                text.set_size_request(22, tab_height - 2);
                 text.put(&label, 0., 0.);
                 let transform = if config.edge == ScreenEdge::Right {
                     gtk::gsk::Transform::new()
@@ -1430,13 +1471,21 @@ impl Ui {
                         .rotate(90.)
                 } else {
                     gtk::gsk::Transform::new()
-                        .translate(&gtk::graphene::Point::new(3., 69.))
+                        .translate(&gtk::graphene::Point::new(3., (tab_height - 11) as f32))
                         .rotate(-90.)
                 };
                 text.set_child_transform(&label, Some(&transform));
                 tab.set_child(Some(&text));
             }
-            tab.set_size_request(tab_width, tab_height);
+            let extension = if config.tab_layout == config::TabLayout::Classic {
+                6
+            } else {
+                0
+            };
+            tab.set_size_request(
+                tab_width + if horizontal { 0 } else { extension },
+                tab_height + if horizontal { extension } else { 0 },
+            );
             // Match paint_tab's resting inset before any hover frame arrives.
             let (x, y) = if horizontal {
                 (
@@ -1467,13 +1516,40 @@ impl Ui {
                 }
             });
         }
-        let line = gtk::Box::new(orientation, 0);
-        line.add_css_class("marker-line");
-        line.set_size_request(
-            if horizontal { 40 } else { 4 },
-            if horizontal { 4 } else { 40 },
-        );
-        self.edge.marker.append(&line);
+        self.edge
+            .marker
+            .set_spacing(if config.marker_style == config::MarkerStyle::Dots {
+                5
+            } else {
+                0
+            });
+        match config.marker_style {
+            config::MarkerStyle::Bar => {
+                let line = gtk::Box::new(orientation, 0);
+                line.add_css_class("marker-line");
+                line.set_size_request(
+                    if horizontal { 40 } else { 4 },
+                    if horizontal { 4 } else { 40 },
+                );
+                self.edge.marker.append(&line);
+            }
+            config::MarkerStyle::Dots => {
+                // One pill per visible saved note; the empty strip keeps one neutral pill.
+                for index in 0..notes.len().max(1) {
+                    let dot = gtk::Box::new(orientation, 0);
+                    dot.add_css_class("marker-pill");
+                    dot.set_size_request(
+                        if horizontal { 14 } else { 5 },
+                        if horizontal { 5 } else { 14 },
+                    );
+                    if let Some(note) = notes.get(index) {
+                        dot.add_css_class("edge-result-color");
+                        appearance::set_color(&dot, note.color);
+                    }
+                    self.edge.marker.append(&dot);
+                }
+            }
+        }
         {
             let motion = gtk::EventControllerMotion::new();
             let weak = Rc::downgrade(self);
@@ -1492,7 +1568,7 @@ impl Ui {
                 let position = (((if horizontal { x } else { y })
                     - f64::from(TAB_INSET)
                     - f64::from(size) / 2.)
-                    / f64::from(size + TAB_GAP))
+                    / f64::from(size + gap))
                 .clamp(0., count.saturating_sub(1) as f64);
                 let layout = fixed.downcast_ref::<TabLayout>().unwrap().imp();
                 layout.pointer.set(position);
@@ -1501,7 +1577,10 @@ impl Ui {
                     fixed.queue_draw();
                 }
                 for i in 0..count {
-                    ui.animate_tab_hover(i, tab_hover_target(i, position));
+                    ui.animate_tab_hover(
+                        i,
+                        tab_hover_target(i, position, ui.config.borrow().tab_layout),
+                    );
                 }
             });
             let enter = update.clone();
@@ -1717,7 +1796,7 @@ impl Ui {
             .set_label(if query.trim().is_empty() {
                 "No active notes"
             } else {
-                "No matches. Create a note from this search"
+                "No matches. Create note"
             });
         // Rebuilt rows need their first allocation before scrolling to them.
         let weak = Rc::downgrade(self);
@@ -1968,6 +2047,11 @@ impl Ui {
             ] {
                 window.remove_css_class(class);
             }
+            if config.tab_layout == config::TabLayout::Classic {
+                window.add_css_class("edge-classic");
+            } else {
+                window.remove_css_class("edge-classic");
+            }
             window.add_css_class(edge);
             window.add_css_class(theme);
         }
@@ -2079,7 +2163,7 @@ impl Ui {
                         tab.height_request()
                     };
                     self.edge.pointer_origin.set(Some(
-                        offset + TAB_INSET + index * (length + TAB_GAP) + length / 2,
+                        offset + TAB_INSET + index * (length + tab_gap(&config)) + length / 2,
                     ));
                     break;
                 }
@@ -2129,6 +2213,10 @@ impl Ui {
                     origin - if horizontal { width / 2 } else { height / 2 },
                     |(_, offset)| offset,
                 );
+            // Keep an in-place switch when the arrow can reach its tab. Otherwise
+            // move the sheet just enough to avoid pointing at a different note.
+            let panel_length = if horizontal { width } else { height };
+            let along = along.clamp(origin - panel_length + 30, origin - 30);
             let along = along.clamp(
                 0,
                 if horizontal {
@@ -3397,33 +3485,15 @@ mod feedback_tests {
         let editor = ui.edge.docked.borrow().clone().unwrap();
         let db = rusqlite::Connection::open(crate::storage::database_path()).unwrap();
         db.execute_batch("CREATE TRIGGER reject_note_save BEFORE UPDATE ON notes BEGIN SELECT RAISE(FAIL, 'save rejected'); END;").unwrap();
-        editor.body.buffer().set_text("Saved before archive");
-        editor.controls.archive.emit_clicked();
+        editor.body.buffer().set_text("Saved before delete");
+        assert!(editor.controls.archive.is_none());
+        editor.controls.delete.emit_clicked();
         assert_eq!(ui.edge.state(), EdgeState::Docked(id));
-        assert!(!storage.is_archived(id).unwrap());
+        assert!(storage.load_note(id).is_ok());
         assert!(ui.edge.toast_note.get().is_none());
         db.execute_batch("DROP TRIGGER reject_note_save;").unwrap();
-        editor.controls.archive.emit_clicked();
-        settle(200);
-        assert!(ui.edge.docked.borrow().is_none());
-        assert!(storage.is_archived(id).unwrap());
-        assert_eq!(
-            storage
-                .search_notes(
-                    crate::storage::NoteCollection::Archived,
-                    "",
-                    crate::storage::NoteSort::Recent
-                )
-                .unwrap()
-                .iter()
-                .find(|n| n.id == id)
-                .unwrap()
-                .body,
-            "Saved before archive"
-        );
-        assert!(ui.edge.toast_note.get().is_none());
-        storage.restore_note(id).unwrap();
-        ui.refresh();
+        assert!(ui.close_docked());
+        assert_eq!(storage.load_note(id).unwrap().body, "Saved before delete");
         ui.open_separate(id);
         settle(200);
         let separate = ui.separate.borrow().get(&id).unwrap().editor.clone();

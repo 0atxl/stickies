@@ -66,9 +66,9 @@ pub fn apply_note_font(
         Theme::Minimal => 28,
         Theme::Playful => 30,
     } + adjustment;
-    let weight = match style.text_weight {
-        crate::config::NoteTextWeight::Regular => 400,
-        crate::config::NoteTextWeight::Bold => 700,
+    let weight = match style.legacy_text_weight {
+        crate::config::LegacyTextWeight::Regular => 400,
+        crate::config::LegacyTextWeight::Bold => 700,
     };
     provider.load_from_data(&format!(
         ".editor-title, .editor-body, .editor-body text, .inline-title, .inline-body, .inline-body text {{ font-family: {font}; font-weight: {weight}; }}
@@ -123,7 +123,7 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .map(|color| {
             let (r, g, b) = color.fill();
             format!(
-                ".note-tab.{} {{ background: rgb({:.0},{:.0},{:.0}); color: #202624; }}",
+                ".note-tab.{} {{ --tab-fill: rgb({:.0},{:.0},{:.0}); background: var(--tab-fill); color: #202624; }}",
                 color_class(color),
                 r * 255.,
                 g * 255.,
@@ -152,11 +152,11 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .edge-search {{ font-family: Inter, sans-serif; font-size: 13px; background: {bg}; color: {fg}; border: 1px solid {line}; border-radius: 10px; padding: 8px; }}
         .edge-search searchentry {{ min-height: 30px; background: transparent; color: {fg}; border: 1px solid {line}; border-radius: 8px; box-shadow: none; }}
         .edge-search list {{ background: transparent; }}
-        .edge-search row {{ background: transparent; color: {fg}; padding: 8px; border-radius: 6px; }}
+        .edge-search row {{ background: transparent; color: {fg}; min-height: 24px; padding: 2px 6px; border-radius: 6px; }}
         .edge-search row:selected {{ background: alpha({fg}, .12); }}
         .edge-search .edge-result-title {{ font-size: 13px; }}
         .edge-search .edge-create-result {{ background: transparent; color: {fg}; border: none; box-shadow: none; font-size: 12px; padding: 8px; }}
-        popover contents {{ padding: 4px; }}
+        .individual popover > contents {{ background: var(--rail-bg); color: var(--note-ink); border: 1px solid var(--rail-line); border-radius: 8px; padding: 8px; box-shadow: 0 2px 6px alpha(black, .12); }}
         popover button, popover modelbutton {{ min-height: 24px; padding: 4px 8px; font-size: 12px; }}
         scrollbar.vertical, scrollbar.vertical:hover {{ min-width: 6px; background: transparent; }}
         scrollbar.vertical slider, scrollbar.vertical:hover slider {{ min-width: 3px; min-height: 24px; margin: 0 1px; border: none; border-radius: 3px; }}
@@ -190,7 +190,7 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .inline-check check {{ color: inherit; min-width: 16px; min-height: 16px; border-radius: 3px; border: 1px solid currentColor; background: transparent; box-shadow: none; }}
         .inline-check check:checked {{ background: #30353b; border-color: #30353b; color: white; }}
         .individual.minimal-dark .inline-check check:checked, .management.minimal-dark .inline-check check:checked {{ background: #edf1f5; border-color: #edf1f5; color: #23262b; }}
-        .note-controls {{ --note-ink: #2d2c29; --rail-line: #e3e0d8; --rail-selected: #ece8df; }}
+
         .individual.minimal .note-controls {{ --note-ink: #292f36; --rail-line: #cdd4db; --rail-selected: #dceaff; }}
         .individual.minimal-dark .note-controls {{ --note-ink: #edf1f5; --rail-line: #424a55; --rail-selected: #37414d; }}
         .individual.minimal:not(.minimal-dark) {{ --note-ink: #252c34; --rail-bg: #ffffff; --rail-line: #dfe5ec; --rail-selected: #eaf3ff; }}
@@ -208,16 +208,33 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .management.minimal-dark .inline-check {{ min-height: 0; min-width: 0; padding: 0; margin: 0 8px 0 0; }}
         .individual.minimal-dark .inline-check check,
         .management.minimal-dark .inline-check check {{ min-width: 14px; min-height: 14px; padding: 0; margin: 0; -gtk-icon-size: 14px; border: 1px solid currentColor; border-radius: 3px; }}
-        .note-footer {{ font-family: Inter, sans-serif; font-size: 13px; border-top: 1px solid alpha(currentColor, .08); padding-top: 4px; }}
+        .note-footer {{ font-family: Inter, sans-serif; font-size: 13px; background: var(--rail-bg); color: var(--note-ink); border: none; border-radius: 22px; padding: 2px 6px; box-shadow: 0 1px 4px alpha(black, .10); }}
+        .note-drag-handle {{ padding: 0; }}
+        .note-drag-grip {{ background: alpha(var(--note-ink), .30); border-radius: 2px; }}
+        .note-drag-handle:hover .note-drag-grip {{ background: alpha(var(--note-ink), .50); }}
         .note-footer button {{ min-width: 24px; min-height: 24px; padding: 4px; border: none; border-radius: 7px; background: transparent; box-shadow: none; color: inherit; opacity: .65; }}
         .note-footer menubutton {{ padding: 0; }}
         .current-color-dot {{ border-radius: 50%; border: 1px solid alpha(currentColor, .18); }}
-        .note-popover contents, .selection-tools contents {{ background: var(--rail-bg); color: var(--note-ink); border: 1px solid var(--rail-line); border-radius: 10px; padding: 10px; box-shadow: 0 3px 10px alpha(black, .15); font-family: Inter, sans-serif; font-size: 12px; }}
-        .selection-tools contents {{ padding: 4px; }}
-        .selection-tools button {{ min-width: 22px; min-height: 24px; padding: 3px 6px; background: transparent; border: none; box-shadow: none; color: inherit; }}
-        .note-more > button {{ background: transparent; border: none; box-shadow: none; border-radius: 6px; padding: 5px 8px; min-height: 24px; color: inherit; }}
-        .note-more > label {{ padding: 4px 8px 0; }}
-        .pattern-choices button {{ min-width: 0; min-height: 22px; padding: 3px 5px; font-size: 11px; background: transparent; border: 1px solid var(--rail-line); box-shadow: none; color: inherit; }}
+        .note-popover contents {{ background: var(--rail-bg); color: var(--note-ink); border: 1px solid var(--rail-line); border-radius: 8px; padding: 8px; box-shadow: 0 2px 6px alpha(black, .12); font-family: Inter, sans-serif; font-size: 12px; }}
+        .note-popover > arrow {{ min-width: 10px; min-height: 6px; }}
+        popover.note-emoji, popover.note-emoji text {{ font-family: Inter, sans-serif; font-size: 13px; font-weight: 400; }}
+        popover.note-emoji > contents {{ padding: 4px; }}
+        popover.note-emoji emoji {{ font-size: 20px; padding: 3px; }}
+        popover.note-emoji .emoji-searchbar, popover.note-emoji .emoji-toolbar {{ padding: 4px; border-spacing: 2px; }}
+        popover.note-emoji .emoji-section {{ min-width: 18px; min-height: 20px; padding: 2px; -gtk-icon-size: 14px; }}
+        popover.note-emoji searchentry {{ font-size: 13px; min-height: 28px; padding: 2px 6px; }}
+        .selection-tools button {{ min-width: 24px; min-height: 24px; padding: 4px; background: transparent; border: none; box-shadow: none; color: inherit; opacity: .85; }}
+        .note-more > button {{ background: transparent; border: none; box-shadow: none; border-radius: 6px; padding: 4px 8px; min-height: 24px; color: inherit; }}
+        .note-footer button:hover, .note-more > button:hover, .note-controls button:hover, .pattern-choices button:hover, .selection-tools button:hover {{ background-color: alpha(currentColor, .08); }}
+        .selection-tools button:checked {{ background-color: var(--rail-selected); opacity: 1; }}
+        .note-controls .color-swatch:hover {{ box-shadow: inset 0 0 0 20px alpha(black, .08); }}
+        .font-choices button {{ min-width: 28px; min-height: 28px; padding: 3px 4px; border-radius: 6px; background: transparent; border: none; box-shadow: none; }}
+        .font-choices button:checked {{ background: var(--rail-selected); }}
+        .note-more separator {{ margin: 5px 2px; background: var(--rail-line); min-height: 1px; }}
+        .note-more .list-choices {{ margin-top: 6px; margin-bottom: 4px; }}
+        .note-more .list-choices button {{ min-height: 24px; padding: 4px; border-radius: 6px; background: transparent; border: none; box-shadow: none; }}
+        .note-more .list-choices button:hover {{ background: alpha(currentColor, .08); }}
+        .pattern-choices button {{ min-width: 0; min-height: 0; padding: 4px; border-radius: 6px; background: transparent; border: none; box-shadow: none; color: inherit; }}
         .pattern-choices button:checked {{ background: var(--rail-selected); }}
         .note-controls .color-swatch {{ min-width: 22px; min-height: 22px; padding: 0; border-radius: 50%; color: #23262b; border: 1px solid alpha(currentColor, .18); box-shadow: none; }}
         .individual:not(.minimal):not(.playful) .editor-card {{ padding: 28px 24px 26px 32px; }}
@@ -226,6 +243,7 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .management:not(.minimal):not(.playful) .inline-check {{ min-height: 0; min-width: 0; padding: 0; margin: 0 7px 0 0; }}
         .individual:not(.minimal):not(.playful) .inline-check check,
         .management:not(.minimal):not(.playful) .inline-check check {{ min-width: 14px; min-height: 14px; padding: 0; margin: 0; -gtk-icon-size: 14px; border: 1.5px solid currentColor; border-radius: 2px; }}
+        .note-popover button {{ opacity: 1; }}
         .note-controls .color-swatch:disabled {{ opacity: .4; }}
 
     "#));
