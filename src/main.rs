@@ -807,6 +807,46 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
 mod edge_tests {
     use super::*;
 
+    #[test]
+    #[ignore = "requires isolated Wayland, private bus and disposable XDG directories"]
+    fn docked_timeout_collapses_strip_and_reduced_motion_persists() {
+        for key in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+            assert!(std::path::Path::new(&std::env::var(key).unwrap()).starts_with("/tmp"));
+        }
+        ui_assets::register().unwrap();
+        adw::init().unwrap();
+        let app = gtk::Application::builder()
+            .application_id("dev.stickies.TimeoutRegression")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let ui = build(&app).unwrap();
+        let mut config = ui.config.borrow().clone();
+        config.reduced_motion = true;
+        ui.change_settings(config).unwrap();
+        assert!(Config::load(&config::config_path()).unwrap().reduced_motion);
+        assert!(!gtk::Settings::default().unwrap().is_gtk_enable_animations());
+        // Shorten only the in-memory interval, leaving persisted choices valid.
+        ui.config.borrow_mut().inactivity_seconds = 1;
+        ui.create_note_with_title("Timeout café");
+        let editor = ui.edge.docked.borrow().clone().unwrap();
+        editor.body.buffer().set_text("Save on timeout");
+        let end = std::time::Instant::now() + Duration::from_millis(1400);
+        while std::time::Instant::now() < end {
+            while glib::MainContext::default().iteration(false) {}
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(ui.edge.state(), edge::EdgeState::Dormant);
+        assert!(ui.edge.docked.borrow().is_none());
+        assert!(!ui.edge.tabs.is_visible());
+        assert_eq!(
+            ui.storage.load_note(editor.id()).unwrap().body,
+            "Save on timeout"
+        );
+        ui.edge.window.close();
+        ui.edge.strip_window.close();
+    }
+
     fn capture(ui: &Ui, name: &str) {
         let Ok(directory) = std::env::var("STICKIES_EDGE_CAPTURES") else {
             return;

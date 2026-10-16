@@ -1279,6 +1279,107 @@ fn short_date(millis: Option<i64>) -> String {
 #[cfg(test)]
 mod feedback_tests {
     use super::*;
+    #[test]
+    #[ignore = "requires isolated Wayland, private bus and disposable XDG directories"]
+    fn welcome_filters_and_creation_colors_follow_saved_notes() {
+        for key in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+            assert!(std::path::Path::new(&std::env::var(key).unwrap()).starts_with("/tmp"));
+        }
+        crate::ui_assets::register().unwrap();
+        adw::init().unwrap();
+        let app = gtk::Application::builder()
+            .application_id("dev.stickies.WelcomeRegression")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let ui = crate::build(&app).unwrap();
+        ui.show_manager();
+        let manager = ui.manager.borrow().clone().unwrap();
+        let manager = &manager.0;
+        assert_eq!(manager.empty_title.text(), "Welcome to Stickies");
+        assert_eq!(
+            manager.empty_action.label().as_deref(),
+            Some("Create your first note")
+        );
+        assert!(!manager.filter_row.is_visible());
+        manager.create();
+        let first = manager.selected.get().unwrap();
+        let first_color = ui.storage.load_note(first).unwrap().color;
+        assert!(ui.storage.is_draft(first).unwrap());
+        assert!(!manager.filter_row.is_visible());
+        let db = rusqlite::Connection::open(crate::storage::database_path()).unwrap();
+        db.execute_batch("CREATE TRIGGER reject_publication BEFORE UPDATE ON notes BEGIN SELECT RAISE(FAIL, 'verification failure'); END;").unwrap();
+        manager.title.set_text("First café 東京");
+        assert!(!manager.flush());
+        manager.refresh(None);
+        assert!(!manager.filter_row.is_visible());
+        assert!(ui.storage.is_draft(first).unwrap());
+        db.execute_batch("DROP TRIGGER reject_publication").unwrap();
+        assert!(manager.flush());
+        manager.refresh(None);
+        assert!(manager.filter_row.is_visible());
+        assert_eq!(manager.selected.get(), Some(first));
+        manager.archive.emit_clicked();
+        assert!(ui.storage.is_archived(first).unwrap());
+        assert!(manager.filter_row.is_visible());
+        assert_eq!(manager.empty_title.text(), "No active notes");
+        manager.collection.set(NoteCollection::Archived);
+        manager.refresh(Some(first));
+        assert!(!manager.body.is_editable());
+        manager.restore.emit_clicked();
+        manager.collection.set(NoteCollection::Active);
+        manager.refresh(Some(first));
+        manager.controls.delete.emit_clicked();
+        assert!(!manager.filter_row.is_visible());
+        assert_eq!(manager.empty_title.text(), "Welcome to Stickies");
+        fn undo_button(widget: &gtk::Widget) -> Option<gtk::Button> {
+            if let Some(button) = widget.downcast_ref::<gtk::Button>()
+                && button.label().as_deref() == Some("Undo")
+            {
+                return Some(button.clone());
+            }
+            let mut child = widget.first_child();
+            while let Some(widget) = child {
+                child = widget.next_sibling();
+                if let Some(button) = undo_button(&widget) {
+                    return Some(button);
+                }
+            }
+            None
+        }
+        settle();
+        let undo = undo_button(manager.window.upcast_ref()).unwrap();
+        undo.emit_clicked();
+        assert!(manager.filter_row.is_visible());
+        assert_eq!(manager.selected.get(), Some(first));
+        ui.create_note();
+        let editor = ui.edge.docked.borrow().clone().unwrap();
+        let second = editor.id();
+        let second_color = ui.storage.load_note(second).unwrap().color;
+        assert_ne!(first_color, second_color);
+        editor.title.set_text("Strip note");
+        assert!(ui.close_docked());
+        ui.show_edge_search();
+        ui.edge.edge_search.set_text("Search-created note");
+        ui.refresh_edge_search();
+        ui.activate_edge_search();
+        let third = ui.edge.docked.borrow().as_ref().unwrap().id();
+        let third_color = ui.storage.load_note(third).unwrap().color;
+        assert_ne!(second_color, third_color);
+        assert!(ui.close_docked());
+        let reopened = Storage::open(&crate::storage::database_path()).unwrap();
+        for (id, color) in [
+            (first, first_color),
+            (second, second_color),
+            (third, third_color),
+        ] {
+            assert_eq!(reopened.load_note(id).unwrap().color, color);
+        }
+        manager.window.close();
+        ui.edge.window.close();
+        ui.edge.strip_window.close();
+    }
+
     fn settle() {
         let end = std::time::Instant::now() + std::time::Duration::from_millis(250);
         while std::time::Instant::now() < end {

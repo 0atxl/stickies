@@ -1763,9 +1763,40 @@ impl Ui {
         self.transition_edge(EdgeEvent::Search);
         self.edge.edge_search.set_text("");
         self.refresh_edge_search();
+        if !self.popup_edge_search() {
+            let weak = Rc::downgrade(self);
+            self.edge.root.add_tick_callback(move |_, _| {
+                let Some(ui) = weak.upgrade() else {
+                    return glib::ControlFlow::Break;
+                };
+                if !ui.edge.state().is_searching() || ui.popup_edge_search() {
+                    glib::ControlFlow::Break
+                } else {
+                    glib::ControlFlow::Continue
+                }
+            });
+        }
+    }
+
+    fn popup_edge_search(self: &Rc<Self>) -> bool {
+        let Some(surface) = self.edge.window.surface() else {
+            return false;
+        };
+        let (x, y, width, height) = self.edge.panel_bounds.get();
+        // GDK clips popup anchors to the parent's current surface geometry.
+        // Wait for the initial layer allocation instead of mapping at (0, 1).
+        if self.edge.root.width() < x + width
+            || self.edge.root.height() < y + height
+            || surface.width() < x + width
+            || surface.height() < y + height
+        {
+            return false;
+        }
+        self.place_edge();
         self.transition_edge(EdgeEvent::FocusWindow);
         self.edge.search_popover.popup();
         self.edge.edge_search.grab_focus();
+        true
     }
 
     pub(super) fn close_edge_search(self: &Rc<Self>) {
@@ -3354,6 +3385,127 @@ mod tests {
 #[cfg(test)]
 mod feedback_tests {
     use super::*;
+    #[test]
+    #[ignore = "requires isolated Wayland, private bus and disposable XDG directories"]
+    fn quick_search_native_popup_uses_the_requested_panel_position() {
+        for key in ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+            assert!(std::path::Path::new(&std::env::var(key).unwrap()).starts_with("/tmp"));
+        }
+        ui_assets::register().unwrap();
+        adw::init().unwrap();
+        let app = gtk::Application::builder()
+            .application_id("dev.stickies.SearchPlacementRegression")
+            .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        app.register(None::<&gtk::gio::Cancellable>).unwrap();
+        let storage = crate::storage::Storage::open(&crate::storage::database_path()).unwrap();
+        for index in 0..12 {
+            storage
+                .create_note(&format!("Note {index}"), "café 東京", NoteColor::Blue)
+                .unwrap();
+        }
+        let settle = || {
+            let end = std::time::Instant::now() + Duration::from_millis(250);
+            while std::time::Instant::now() < end {
+                while glib::MainContext::default().iteration(false) {}
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        for edge in [
+            ScreenEdge::Right,
+            ScreenEdge::Left,
+            ScreenEdge::Top,
+            ScreenEdge::Bottom,
+        ] {
+            Config {
+                edge,
+                ..Config::default()
+            }
+            .save(&crate::config::config_path())
+            .unwrap();
+            // Each edge starts with a new, not-yet-allocated parent surface.
+            let ui = crate::build(&app).unwrap();
+            let layouts = Rc::new(RefCell::new(Vec::new()));
+            let positions = layouts.clone();
+            let weak = Rc::downgrade(&ui);
+            ui.edge.search_popover.connect_realize(move |popover| {
+                let positions = positions.clone();
+                let weak = weak.clone();
+                // Map precedes the async configure. Check the first configured
+                // layout and every later one, before relying on a settled frame.
+                popover
+                    .surface()
+                    .unwrap()
+                    .connect_layout(move |surface, _, _| {
+                        let ui = weak.upgrade().unwrap();
+                        if ui.edge.state().is_searching() {
+                            let popup = surface.downcast_ref::<gtk::gdk::Popup>().unwrap();
+                            let (x, y, _, _) = ui.edge.panel_bounds.get();
+                            positions.borrow_mut().push((
+                                popup.position_x(),
+                                popup.position_y(),
+                                x,
+                                y,
+                            ));
+                        }
+                    });
+            });
+            ui.show_edge_search();
+            settle();
+            assert!(
+                ui.edge.search_popover.is_mapped(),
+                "{edge:?}: initial opening"
+            );
+            assert!(
+                ui.edge.tabs.is_mapped(),
+                "{edge:?}: title strip must remain visible"
+            );
+            assert_eq!(ui.edge.strip_motion.value(), 1.);
+            let first_layouts = layouts.borrow().len();
+            assert!(first_layouts > 0);
+            ui.close_edge_search();
+            settle();
+            assert!(!ui.edge.search_popover.is_mapped());
+            // Use the same button callback as a strip click for the second opening.
+            ui.edge
+                .tabs
+                .last_child()
+                .unwrap()
+                .first_child()
+                .unwrap()
+                .next_sibling()
+                .unwrap()
+                .downcast::<gtk::Button>()
+                .unwrap()
+                .emit_clicked();
+            settle();
+            assert!(
+                ui.edge.search_popover.is_mapped(),
+                "{edge:?}: strip opening"
+            );
+            assert!(layouts.borrow().len() > first_layouts);
+            for &(actual_x, actual_y, x, y) in layouts.borrow().iter() {
+                assert!(
+                    (actual_x - x).abs() <= 10 && (actual_y - y).abs() <= 10,
+                    "{edge:?}: native popup at {actual_x}, {actual_y}; requested panel at {x}, {y}"
+                );
+            }
+            ui.close_edge_search();
+            ui.edge.window.close();
+            ui.edge.strip_window.close();
+            settle();
+        }
+        // Closing before the first allocation must cancel the queued popup.
+        let ui = crate::build(&app).unwrap();
+        ui.show_edge_search();
+        ui.close_edge_search();
+        settle();
+        assert!(!ui.edge.search_popover.is_mapped());
+        assert!(!ui.edge.state().is_searching());
+        ui.edge.window.close();
+        ui.edge.strip_window.close();
+    }
+
     #[test]
     #[ignore = "requires Wayland and disposable XDG directories"]
     fn stacked_tabs_and_bar_keep_clicks_and_bounds_on_every_edge() {

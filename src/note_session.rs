@@ -938,7 +938,11 @@ mod tests {
         // A click/Home can leave the insertion mark before the checkbox anchor.
         // The next native edit must start after the hidden marker, not split it.
         session.body.place_cursor(&session.body.start_iter());
+        // Match GTK's IM commit path, which begins the action before resolving
+        // the insertion iter. insert-at-cursor alone resolves it too early.
+        session.body.begin_user_action();
         body.emit_insert_at_cursor("New ");
+        session.body.end_user_action();
         assert_eq!(text(), "- [ ] New Item");
         session.undo(false);
         assert_eq!(text(), "- [ ] Item");

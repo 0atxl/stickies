@@ -543,6 +543,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn schema_three_notes_survive_upgrade_and_four_five_slot_boundaries() {
+        let connection = Connection::open_in_memory().unwrap();
+        for migration in [
+            include_str!("../migrations/001_initial.sql"),
+            include_str!("../migrations/002_note_style.sql"),
+            include_str!("../migrations/003_note_colors.sql"),
+        ] {
+            connection.execute_batch(migration).unwrap();
+        }
+        connection.pragma_update(None, "user_version", 3).unwrap();
+        let mut storage = Storage { connection };
+        let original = storage
+            .create_note("café 東京", "Keep this body", NoteColor::Pink)
+            .unwrap();
+        storage.migrate().unwrap();
+        assert_eq!(storage.load_note(original.id).unwrap(), original);
+        assert!(storage.load_formatting(original.id).unwrap().is_empty());
+        for count in 2..=6 {
+            storage
+                .create_note(&format!("Note {count}"), "Short", NoteColor::Blue)
+                .unwrap();
+            if count >= 3 {
+                for slots in [4, 5] {
+                    assert_eq!(
+                        storage
+                            .load_deck_notes(slots, NoteSort::Recent)
+                            .unwrap()
+                            .len(),
+                        count.min(slots)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn draft_queries_preserve_visible_notes_until_first_nonblank_save() {
         let storage = Storage::open(Path::new(":memory:")).unwrap();
         let existing_blank = storage.create_note("", "", NoteColor::Blue).unwrap();
