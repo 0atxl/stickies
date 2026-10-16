@@ -1,6 +1,6 @@
 # Stickies
 
-Stickies is a fast, local scratchpad that lives on the edge of a Linux desktop. It is built for thoughts that are too small to justify opening a full notes application.
+Stickies is a local scratchpad for Linux Wayland desktops with Layer Shell v4+ and compatible native libraries. It lives at the screen edge for thoughts that are too small to justify opening a full notes application.
 
 The interaction is simple. Recent or pinned notes sit at the screen edge. Hovering reveals title-only tabs, clicking a title opens the full note, and closing returns it to the edge.
 
@@ -10,13 +10,13 @@ The interaction is simple. Recent or pinned notes sit at the screen edge. Hoveri
 - Local SQLite storage, offline editing, and no telemetry. No account is required for local use.
 - Fast mouse and keyboard access without a normal tiled application window.
 - Plain-text notes and checklists with optional inline formatting, undo/redo and Copy text.
-- Target Wayland broadly. Hyprland is the current testing environment; KDE Plasma Wayland, Sway and other Layer Shell compositors are intended targets whose support must be verified.
+- Target Wayland broadly. Hyprland is the development reference; scoped isolated Sway checks and owner desktop confirmations are recorded separately. KDE Plasma Wayland and other Layer Shell desktops are intended targets whose support must be verified. These results do not certify the final build across desktops.
 
 The edge implementation requires Wayland with `zwlr_layer_shell_v1` version 4 or newer for on-demand keyboard focus. Startup checks support before creating the edge windows and prints a diagnostic if it is unavailable or too old. GNOME Wayland without Layer Shell cannot run that edge implementation; no fallback is implemented. This is a protocol limitation, not a Hyprland-only product scope. X11, Windows and macOS are outside this release.
 
 ## Status
 
-The owner accepts the current UI/UX. UI design is complete; work now focuses on reliability, Wayland compatibility and finishing the app. Current runtime and compositor verification remain open.
+The owner accepts the current UI/UX. UI design is complete; work now focuses on reliability, Wayland compatibility and finishing the app. Recorded scoped checks passed editing/saving, history, representative input, timeout, catchable shutdown and Search. The owner confirmed resolution recovery and accepted fixed-size Search without no-match jitter. These results do not establish broad compositor compatibility; remaining gaps are tracked in the verification record below.
 
 All Notes and individual notes share live editing, per-note fonts/canvas/color, plain-text lists, separate formatting metadata and title/body undo history. Paper, Playful and Minimal Light/Dark are implemented. The fixed footer changes to B/I/U/S during editable body selection; there is no Find in note or hover preview. Fonts are Virgil, Inter, JetBrains Mono and Kalam. Existing font/canvas preferences migrate into note styles to preserve saved appearance.
 
@@ -28,7 +28,7 @@ The single strip retains its selected monitor while available. Both layer window
 
 ## Remaining work
 
-Finish saving/formatting/history, focus, timeout, startup/shutdown, accessibility and scaling verification. Manually verify the implemented shared-output selection and recovery after monitor, resolution and scale changes. Automatic cursor-following is deferred. Verify Wayland environments in stages before claiming support, then package Arch/AUR and GitHub artifacts with an application icon, metadata, licences and safe installation/upgrades/removal.
+Remaining verification includes complete checklist caret/wrap and emoji keyboard coverage, accessibility, fractional/high scaling, installed login/session-end, multi-monitor recovery and resource/lifetime observations. The owner's resolution pass does not establish hotplug or mixed-scale behavior. Automatic cursor-following is deferred. Verify Wayland environments in stages before claiming support, then package Arch/AUR and GitHub artifacts with an application icon, metadata, licences and safe installation/upgrades/removal.
 
 Google Drive sync remains a future requirement outside the first release, with its long-term scope needing a separate decision. No sync integration currently exists. Extra Settings additions and manual drag ordering are removed from finishing work. Additional package formats are deferred. Dedicated Markdown support, export and application-level note encryption are outside the planned scope.
 
@@ -37,8 +37,8 @@ Current project documentation: [specification](agent-docs/SPEC.md), [milestone](
 ## Requirements
 
 - A Wayland compositor with `zwlr_layer_shell_v1` version 4 or newer. Protocol availability alone is not verified Stickies support.
-- Rust and Cargo.
-- GTK4, libadwaita 1.7 or newer, and gtk4-layer-shell development libraries.
+- Rust and Cargo 1.92 or newer for the current locked dependencies. A minimum-toolchain build remains unverified.
+- GTK4 4.10 or newer, libadwaita 1.7 or newer, and gtk4-layer-shell 1.0 or newer development libraries, with mutually compatible transitive dependencies.
 - Fontconfig and `glib-compile-resources`. Bundled fonts and their licenses are in `assets/fonts`.
 - SQLite development library.
 - `pkg-config`.
@@ -51,6 +51,12 @@ pkg-config --modversion libadwaita-1
 pkg-config --modversion gtk4-layer-shell-0
 pkg-config --modversion sqlite3
 ```
+
+## Packaging
+
+The [packaging guide](packaging/README.md) prepares an Arch Linux x86_64 PKGBUILD, matching source and checksums. The planned GitHub binary download is **Arch Linux x86_64 only**, using that same native package. No Kali or Ubuntu binary compatibility is claimed; other package formats are outside this pass. Source builds require compatible native libraries and a Layer Shell v4+ Wayland desktop.
+
+The owner's approved original PNG application icon is included in the package inputs. Release identity, clean-runner, installed icon/launcher, upgrade/removal and installed-login verification remain outstanding; no release has been published by this preparation.
 
 ## Build and run
 

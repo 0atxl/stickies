@@ -55,4 +55,4 @@ Historical logs, event/analysis metadata and offline extraction source remain. R
 
 ## Verification and boundary
 
-Static file-integrity and reference checks cover the approved paths, retained duplicate, current tracked documentation links and protected runtime/reference files. No tests, benchmarks or app sessions were run for historical removal. These changes remain uncommitted; further commits and pushes require explicit owner instruction. The eight unused runtime icons were approved and removed in the earlier mechanical cleanup commit `8750f23`.
+Static file-integrity and reference checks cover the approved paths, retained duplicate, current tracked documentation links and protected runtime/reference files. No tests, benchmarks or app sessions were run for historical removal. Historical cleanup was committed in `7cfdc23`; further commits and pushes require explicit owner instruction. The eight unused runtime icons were approved and removed in the earlier mechanical cleanup commit `8750f23`.
