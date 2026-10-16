@@ -10,46 +10,31 @@ The interaction is simple. Recent or pinned notes sit at the screen edge. Hoveri
 - Local SQLite storage, offline editing, and no telemetry. No account is required for local use.
 - Fast mouse and keyboard access without a normal tiled application window.
 - Plain-text notes and checklists with optional inline formatting, undo/redo and Copy text.
-- Hyprland is the reference environment. KDE Plasma Wayland, Sway, and other Wayland compositors that support Layer Shell are planned Linux targets.
+- Target Wayland broadly. Hyprland is the current testing environment; KDE Plasma Wayland, Sway and other Layer Shell compositors are intended targets whose support must be verified.
 
-GNOME and X11 are outside the Linux release scope. Windows and macOS may receive separate ports later.
+The current edge implementation requires the Layer Shell protocol. GNOME Wayland without Layer Shell cannot run that edge implementation; no fallback is implemented. This is a protocol limitation, not a Hyprland-only product scope. X11, Windows and macOS are outside this release.
 
 ## Status
 
-Stickies is in early development. All Notes now has a compact list, an editable note, and an embedded Appearance drawer with immediate changes. Main and floating editors share the same live note. Search, pinning, archive, restore, deletion with Undo, and Copy text are available. Paper, Playful, and Minimal Light/Dark are implemented. All Notes and individual notes await final visual approval; the edge-strip redesign remains unfinished.
+The owner accepts the current UI/UX. UI design is complete; work now focuses on reliability, Wayland compatibility and finishing the app. Current runtime and compositor verification remain open.
 
-Notes save locally after 750 ms of quiet time. Failed saves block closing or replacing an editor. Always open disables the default two-minute inactivity timeout; pinning controls note order. Checklist markers, bullets, numbered lists, and completed-line strike-through work in the plain-text editor.
+All Notes and individual notes share live editing, per-note fonts/canvas/color, plain-text lists, separate formatting metadata and title/body undo history. Paper, Playful and Minimal Light/Dark are implemented. The fixed footer changes to B/I/U/S during editable body selection; there is no Find in note or hover preview. Fonts are Virgil, Inter, JetBrains Mono and Kalam. Existing font/canvas preferences migrate into note styles to preserve saved appearance.
 
-The UI is awaiting manual design review and compositor checks. Minimal has fully opaque light and dark modes with no compositor blur dependency. Saved Glass preferences remain compatible. DND integration currently watches Omarchy shell state. Other desktop compatibility is unverified.
-New databases start empty. Use `+` at the edge to create your first note. Existing databases retain their notes, including any examples created by earlier prototypes.
+Notes save after 750 ms of quiet time. Failed saves retain the editor. Only docked notes time out, with Off/1/2/5-minute choices and an Always open override; All Notes pin controls ordering. Blank new drafts stay out of lists/search until their first successful nonblank save. Existing blank notes remain. New All Notes windows start on Active without a selected note. Archive/restore, soft deletion with Undo and plain Copy text remain available.
 
-Font choices are Virgil, Inter, JetBrains Mono and Kalam, selected per note. New notes use the theme font and a plain canvas. Existing global font and canvas preferences migrate into saved note styles on startup so existing notes keep their appearance. No database schema change is needed.
-
-Individual notes have a fixed, opaque footer capsule with Color, Text, Checklist, Always open and More. Separate notes also have a small drag grip in the top margin that uses native window movement. All Notes has Color, Text, Checklist, ordering Pin, Pop out and More. Color opens a 16-color grid in eight columns and two rows. Text opens four Aa samples in the actual fonts, with full-name tooltips, plus S/M/L. The whole-note Regular/Bold control is removed; existing saved bold styles retain their appearance. Color, font and canvas choices change the current note in either editor; they are absent from app-wide Settings. The old header tools launcher and inline tools panel are removed.
-
-Individual More contains four canvas samples without a heading, bullet/numbered list icons, Copy and Delete. Tooltips name the samples and list icons. Docked notes also offer Open away from edge. Archive is available only in All Notes. Its More menu contains the same canvas samples, Copy, Archive/Restore and Delete. Both editors share menu colors, corners, spacing and hover/selected styling. Delete has a separator above it. Individual More opens toward the screen interior, from the same footer row. Footer popovers allow switching directly to another control with one click. Archived preview controls are disabled except Copy and Restore. Checklist toggles checklist mode on the current line; the embedded checkbox changes completion.
-
-Selecting editable body text replaces the normal footer controls with Bold/Italic/Underline/Strikethrough in the same capsule. Its outer size and position stay fixed, with no transition or floating selection menu. Formatting clicks retain the selection; clearing selection or pressing Escape restores the normal controls. Archived notes never switch to formatting controls. Underline and strike strokes scale with the note font for readable handwriting decorations. Ctrl+B, Ctrl+I and Ctrl+U use the same formatting handler. Ctrl+Z undoes; Ctrl+Shift+Z and Ctrl+Y redo. Formatting remains separate from the plain body and survives reopening. Copy text is plain text. Search inside a note remains removed.
-
-Title and body edits use the note's shared, session-local undo history. Continuous typing or deletion groups into one step, up to 100 Unicode characters. A pause of at least one second, a typed newline, changing between insertion and deletion, or moving the cursor/selection starts another step. Paste, cut, drop, formatting, list-prefix and checkbox changes, and list continuation each have their own step. Undo/redo restores text and formatting together and returns the cursor to the changed range. A new edit after undo clears redo.
-
-Archive and Delete first save the shared note. A failed save retains its editor. Archive closes individual views without a toast. Delete closes them and shows one replaceable six-second "Note deleted" / Undo toast beside the current strip position, on the existing strip surface. The toast uses the docked-note Overlay/DND policy, accepts input only within its own bounds and fades over 120 ms unless motion is reduced. Undo restores the previous collection and pin state. All Notes keeps its existing deletion toast.
-
-The edge defaults to overlapping title tabs and a 4 × 40 px bar marker. Settings also offers Classic tabs with a small gap and a Pills marker colored by the visible notes. Classic tabs pull 6 px toward the screen center without scaling or moving their neighbors. Their single background extends off screen to keep them attached without a shadow seam. Stacked retains the Dock-style hover wave. Settings starts with theme previews, followed by compact rows for Mode, Edge, Position, Visible notes, Tabs, Marker and Auto-close. Reposition remains under Position. Redundant Appearance/Edge strip/Behavior headings are removed. Settings has compact choice rows, a distinct Reposition button and the Reduce motion, Hover to reveal and Launch at login switches at the bottom. The note-count choice applies immediately and survives restart. The bar fades into the tabs and utilities on one shared reveal clock, with a short slide from the screen edge. In Stacked, a Dock-style hover wave enlarges the nearest title by up to 24%, with a smaller response in nearby titles. The stack makes room without losing its overlap, and every tab stays attached to the screen edge on Left, Right, Top and Bottom. Pointer tracking updates the destination without restarting the animation. There are no hover previews or tooltips. Clicking a title opens the docked editor; switching notes crossfades the sheet, moving it only when needed to keep its arrow aligned with the selected tab. New individual windows start at 320 × 376 px. Reduced motion makes reveal, collapse and hover changes immediate.
+The strip supports all four edges, four/five visible notes, Classic/Stacked tabs and Pills/Bar markers. Current design, dimensions, menus and motion are described in the local specification. They are settled, not an invitation to add controls or redesign them.
 
 ## Remaining work
 
-1. Finalize the UI and finish phase 5A/5B desktop checks, including installed launch after login.
-2. Add multi-monitor behavior: the monitor containing the cursor has the edge strip.
-3. Add simple, optional-to-enable Google Drive sync. The integration is not chosen yet; offline editing and preservation of conflicting edits remain required.
-4. Validate other Layer Shell compositors and distributions.
-5. Package and release, starting with Arch/AUR and GitHub artifacts, with other Linux package formats following.
+Finish saving/formatting/history, focus, timeout, startup/shutdown, accessibility and scaling verification. Fix basic multi-monitor correctness so surface selection and geometry agree and notes remain reachable after display changes. Automatic cursor-following is deferred. Verify Wayland environments in stages before claiming support, then package Arch/AUR and GitHub artifacts with an application icon, metadata, licences and safe installation/upgrades/removal.
 
-Dedicated Markdown support, file export, and application-level note encryption are outside the planned scope. Existing plain-text list controls and Copy text remain. Google Drive sync is planned, not currently available.
+Google Drive sync remains a future requirement outside the first release, with its long-term scope needing a separate decision. No sync integration currently exists. Extra Settings additions and manual drag ordering are removed from finishing work. Additional package formats are deferred. Dedicated Markdown support, export and application-level note encryption are outside the planned scope.
+
+Current project documentation: [specification](agent-docs/SPEC.md), [milestone](agent-docs/current-milestone.md), [roadmap, completion conditions and follow-ups](agent-docs/implementation.md), and [verification checklist](agent-docs/manual-testing.md). These documents are tracked in Git.
 
 ## Requirements
 
-- A Wayland compositor with Layer Shell support. Hyprland is the reference environment.
+- A Wayland compositor with Layer Shell support. Protocol availability alone is not verified Stickies support.
 - Rust and Cargo.
 - GTK4, libadwaita 1.7 or newer, and gtk4-layer-shell development libraries.
 - Fontconfig and `glib-compile-resources`. Bundled fonts and their licenses are in `assets/fonts`.
@@ -106,7 +91,7 @@ Stickies accepts one action flag per invocation:
 
 When Stickies is running, these flags use [GApplication's command-line forwarding](https://docs.gtk.org/gio/method.Application.add_main_option.html) over the session D-Bus. The second process sends the request to the primary instance and exits. With no running instance, Stickies starts and performs the requested action. Running without a flag retains the normal startup behavior. `stickies --help` lists the flags; unknown flags or multiple different action flags return an error.
 
-Global shortcuts belong to the compositor and are documented here rather than shown in Settings. For current Omarchy Lua configurations, choose unused bindings:
+Global shortcuts belong to the compositor and are documented here rather than shown in Settings. Other Wayland compositors can bind the same CLI flags using their own configuration syntax. For current Omarchy Lua configurations, choose unused bindings:
 
 ```lua
 o.bind("SUPER + N", "New note", "stickies --new-note")

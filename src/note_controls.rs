@@ -18,18 +18,18 @@ pub struct NoteControls {
     pub root: gtk::Box,
     pub pages: gtk::Stack,
     normal: gtk::Box,
-    pub color: Option<gtk::MenuButton>,
-    pub text: Option<gtk::MenuButton>,
+    pub color: gtk::MenuButton,
+    pub text: gtk::MenuButton,
     pub checklist: gtk::ToggleButton,
     pub pin: gtk::ToggleButton,
     pub popout: Option<gtk::Button>,
     pub more: gtk::MenuButton,
-    pub color_popover: Option<gtk::Popover>,
-    pub text_popover: Option<gtk::Popover>,
+    pub color_popover: gtk::Popover,
+    pub text_popover: gtk::Popover,
     pub more_popover: gtk::Popover,
     pub sizes: Vec<(gtk::ToggleButton, NoteTextSize)>,
     pub colors: Vec<(gtk::ToggleButton, NoteColor)>,
-    pub patterns: Vec<(gtk::ToggleButton, Option<Paper>)>,
+    pub patterns: Vec<(gtk::ToggleButton, Paper)>,
     pub bullet: Option<gtk::Button>,
     pub numbered: Option<gtk::Button>,
     pub separate: Option<gtk::Button>,
@@ -37,7 +37,7 @@ pub struct NoteControls {
     pub archive: Option<gtk::Button>,
     pub restore: Option<gtk::Button>,
     pub delete: gtk::Button,
-    color_dot: Option<gtk::Box>,
+    color_dot: gtk::Box,
     surface: Surface,
     pub fonts: Vec<(gtk::ToggleButton, Font)>,
 }
@@ -75,8 +75,8 @@ impl NoteControls {
         let normal = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         pages.add_named(&normal, Some("settings"));
         root.append(&pages);
-        let color = Some(menu("Color"));
-        let color_dot = color.as_ref().map(|color| {
+        let color = menu("Color");
+        let color_dot = {
             let dot = gtk::Box::new(gtk::Orientation::Vertical, 0);
             dot.add_css_class("current-color-dot");
             dot.set_size_request(12, 12);
@@ -84,12 +84,12 @@ impl NoteControls {
             dot.set_valign(gtk::Align::Center);
             color.set_child(Some(&dot));
             dot
-        });
-        let text = Some({
+        };
+        let text = {
             let button = menu("Font");
             button.set_label("Aa");
             button
-        });
+        };
         let checklist = appearance::toggle("checkbox-checked-symbolic", "Checklist");
         checklist.set_child(Some(&ui_assets::image("checklist")));
         checklist.set_focus_on_click(false);
@@ -105,7 +105,7 @@ impl NoteControls {
         let more = menu("More");
         more.set_child(Some(&ui_assets::image("more")));
         let popout = (surface == Surface::Preview).then(|| ui_assets::icon("popout", "Pop out"));
-        for button in [&color, &text].into_iter().flatten() {
+        for button in [&color, &text] {
             normal.append(button);
         }
         normal.append(&checklist);
@@ -117,7 +117,7 @@ impl NoteControls {
 
         let mut sizes = Vec::new();
         let mut fonts = Vec::new();
-        let text_popover = text.as_ref().map(|text| {
+        let text_popover = {
             let typography = gtk::Box::new(gtk::Orientation::Vertical, 8);
             typography.add_css_class("note-controls");
             let size_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -167,10 +167,10 @@ impl NoteControls {
                 fonts.push((button, font));
             }
             typography.prepend(&families);
-            popup(text, &typography)
-        });
+            popup(&text, &typography)
+        };
         let mut colors = Vec::new();
-        let color_popover = color.as_ref().map(|color| {
+        let color_popover = {
             let grid = gtk::Grid::new();
             grid.add_css_class("note-controls");
             grid.set_row_spacing(7);
@@ -183,11 +183,11 @@ impl NoteControls {
                 grid.attach(&button, index as i32 % 8, index as i32 / 8, 1, 1);
                 colors.push((button, color));
             }
-            popup(color, &grid)
-        });
+            popup(&color, &grid)
+        };
         let commands = gtk::Box::new(gtk::Orientation::Vertical, 0);
         commands.add_css_class("note-more");
-        let mut patterns: Vec<(gtk::ToggleButton, Option<Paper>)> = Vec::new();
+        let mut patterns: Vec<(gtk::ToggleButton, Paper)> = Vec::new();
         let mut bullet = None;
         let mut numbered = None;
         let mut separate = None;
@@ -207,7 +207,7 @@ impl NoteControls {
                 button.set_group(Some(first));
             }
             row.append(&button);
-            patterns.push((button, Some(paper)));
+            patterns.push((button, paper));
         }
         commands.append(&row);
         if surface != Surface::Preview {
@@ -267,13 +267,8 @@ impl NoteControls {
         }
         actions.append(&delete);
         let more_popover = popup(&more, &commands);
-        let panels: Vec<_> = color_popover
-            .iter()
-            .chain(text_popover.iter())
-            .chain(std::iter::once(&more_popover))
-            .cloned()
-            .collect();
-        for panel in &panels {
+        let panels = [&color_popover, &text_popover, &more_popover];
+        for panel in panels {
             let others: Vec<_> = panels.iter().map(|p| p.downgrade()).collect();
             panel.connect_visible_notify(move |panel| {
                 if panel.is_visible() {
@@ -331,12 +326,11 @@ impl NoteControls {
         }
     }
     pub fn popovers(&self) -> Vec<gtk::Popover> {
-        self.color_popover
-            .iter()
-            .chain(self.text_popover.iter())
-            .chain(std::iter::once(&self.more_popover))
-            .cloned()
-            .collect()
+        vec![
+            self.color_popover.clone(),
+            self.text_popover.clone(),
+            self.more_popover.clone(),
+        ]
     }
     pub fn position_more(&self, edge: ScreenEdge) {
         if self.surface == Surface::Preview {
@@ -405,7 +399,7 @@ impl NoteControls {
             button.set_label(if selected { "✓" } else { "" });
         }
         for (button, paper) in &self.patterns {
-            button.set_active(Some(style.paper.unwrap_or(Paper::Plain)) == *paper);
+            button.set_active(style.paper.unwrap_or(Paper::Plain) == *paper);
         }
         let font = match style.font.unwrap_or(Font::Theme) {
             Font::Theme if theme == Theme::Minimal => Font::Grotesk,
@@ -415,9 +409,7 @@ impl NoteControls {
         for (button, value) in &self.fonts {
             button.set_active(font == *value);
         }
-        if let Some(dot) = &self.color_dot {
-            appearance::set_color(dot, color);
-        }
+        appearance::set_color(&self.color_dot, color);
     }
     pub fn sync_checklist(&self, body: &gtk::TextView) {
         sync_checklist_button(&self.checklist, body);
@@ -457,7 +449,7 @@ impl NoteControls {
         if let Some(popout) = &self.popout {
             popout.set_sensitive(editable);
         }
-        for button in [&self.color, &self.text].into_iter().flatten() {
+        for button in [&self.color, &self.text] {
             button.set_sensitive(editable);
         }
         for (button, _) in &self.patterns {

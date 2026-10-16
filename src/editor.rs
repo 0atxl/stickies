@@ -307,7 +307,7 @@ impl Editor {
                     && !editor.syncing_style.get()
                 {
                     let mut style = editor.session.style();
-                    style.paper = paper;
+                    style.paper = Some(paper);
                     editor.session.set_style(style);
                     editor.activity();
                 }
@@ -515,13 +515,8 @@ impl Editor {
         self.background.queue_draw();
         let config = self.resolved.borrow();
         self.controls.position_more(config.edge);
-        let (above, below) = match config.theme {
-            Theme::Paper => (1, 3),
-            Theme::Playful => (1, 3),
-            Theme::Minimal => (1, 3),
-        };
-        self.body.set_pixels_above_lines(above);
-        self.body.set_pixels_below_lines(below);
+        self.body.set_pixels_above_lines(1);
+        self.body.set_pixels_below_lines(3);
         for (class, enabled) in [
             ("minimal", config.theme == Theme::Minimal),
             (

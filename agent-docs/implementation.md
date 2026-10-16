@@ -1,83 +1,100 @@
-# Stickies roadmap
+# Stickies finishing roadmap
 
-[current-milestone.md](current-milestone.md) defines the work allowed now. This file records the agreed product scope and remaining phases. Do not implement later phases until they become the active milestone.
+[current-milestone.md](current-milestone.md) defines current authorization. The owner accepts the implemented UI/UX. This roadmap tracks reliability and release work, without new UI design or extra controls.
 
 ## Product scope
 
 Stickies is a small, native Linux scratchpad. It uses Rust, GTK4/libadwaita, Wayland Layer Shell, and SQLite. Local editing works offline without an account. There is no telemetry or application-owned cloud backend.
 
-- Keep plain-text notes, clickable checklists, and the existing simple list controls.
+- Keep plain-text note bodies, clickable checklists, and the existing simple list controls. The October 12 feedback scope adds selected-text formatting as separate metadata, plus undo/redo and Find in note. Find was subsequently retired; body formatting and shared title/body undo/redo remain.
 - Copy text is sufficient. Dedicated Markdown editing, Markdown rendering, and file export are not required.
-- Multi-monitor behavior follows the cursor: the monitor containing the cursor has the edge strip. Do not add a monitor picker or independently maintained decks per monitor.
-- Google Drive sync is required, with a simple setup and few controls. Sync is optional to enable; local notes must keep working when disconnected. The exact integration is not selected yet.
+- Basic multi-monitor correctness belongs in the first release. Automatic cursor-following is deferred; its previously agreed one-strip behavior remains future scope. Do not add a monitor picker or independently maintained decks per monitor.
+- Google Drive sync remains a future requirement with simple setup and few controls, outside the first release. Optional enablement does not cancel that requirement. Its long-term scope needs a separate decision; no integration is selected and disconnected local editing must keep working.
 - Application-level note encryption is not required. Authentication credentials for Drive still need appropriate storage.
-- Retain broader compositor validation and packaging/release work.
-- Virgil is the agreed handwritten font, Inter the clean font, and JetBrains Mono the monospace font. Reference images do not override these choices.
+- Target Wayland broadly, with staged compatibility verification and packaging/release work. Hyprland is the current testing environment, not the product boundary.
+- Virgil is the default handwritten font, Inter the clean font, JetBrains Mono the monospace font, and Kalam an additional cursive choice. Reference images do not override these choices.
 
-## Work order
+## Implemented work
 
-Documentation cleanup, the audit, and confirmed unused-code cleanup are complete. The UI checkpoint is committed as `fe97c94`. Remaining audit findings are listed in [code-audit.md](code-audit.md).
+| Category | Evidence and limit |
+|---|---|
+| Implemented and verified | UI design accepted by the owner. Current static/compile checks belong in the milestone. Acceptance does not establish every runtime or compositor behavior. |
+| Implemented but awaiting verification | Local SQLite notes and schema 1-4 upgrades; shared editing, formatting/history, lists, searches, archive/restore/Delete Undo; configuration, autostart, CLI/D-Bus actions, focus, timeout, motion and scaling behavior. Code and earlier scoped regression records exist; latest changes still need focused runtime acceptance. |
 
-1. Continue the UI revision in [ui-implementation-plan.md](ui-implementation-plan.md) through separately authorized passes. The compact visual preview, resizing and complete note controls are implemented in the working tree, including All Notes More parity, the 16-color palette and save-error toasts. The [updated spec and Settings image](design-references/2026-10-01/README.md) are stored for planning; Settings sections/behavior, checklist behavior and final text sizes remain unsettled. The user authorized completion of note controls. Edge redesign, Settings and checklist implementation still require separately approved scopes.
-2. Resolve the remaining approved fixes and platform checks before closing phases 5A and 5B.
-3. Continue with cursor-following multi-monitor behavior, Google Drive sync, compositor validation, and packaging/release.
+## Remaining first-release work
 
-Commit and push require explicit authorization.
+Complexity is Small, Medium or Large for the individual scope. Dependencies describe sequencing, not permission to implement or run tests.
 
-## Current foundation
+### Ordinary-use verification scope
 
-Phases 0 through 4 are implemented: native edge interaction, note state, SQLite persistence, and All Notes management. Phase 5A implementation exists for CI, single-instance handling, configuration, desktop metadata, and autostart entry management, but final validation remains open. Parts of phase 5B are also implemented. Neither phase should be declared complete before the final UI and outstanding desktop checks pass.
+Use roughly 10–30 notes, mostly short, with a few longer notes containing realistic paragraphs, lists and formatting. Reuse that collection for editing, search, switching, startup and resource checks. Add only the smallest fixture needed for a specific boundary: an empty database, a single note, or just below/at/above the configured four- or five-slot capacity. Migration and failure fixtures need only the records and states relevant to that check.
 
-## UI and phase 5B: desktop behavior
+Completion means reliable, responsive ordinary use. Record the environment and workload with any timing or resource observation; a few open/close cycles should settle without accumulating retained objects. Large collections, oversized bodies, endurance loops and stress benchmarks are outside default completion requirements and require separate explicit approval. Ordinary checks still require execution authorization under the current checklist.
 
-Finish the compact All Notes and individual-note revision, the four-note vertical edge strip with integrated search, pointer targeting, reduced motion, and final user review. Verify all four edges, marker movement, approved resizing behavior, separate-window movement, fullscreen/DND behavior, and independent inactivity timers. Finish the application icon and user-facing startup controls as needed. Verify an installed launch after login.
+| Item and category | Complexity and reason | Dependencies | User benefit | Completion condition |
+|---|---|---|---|---|
+| Saving, formatting/history and checklist crash regression. Implemented but awaiting verification. | Medium: shared buffers, hidden markers and save failure paths interact. | Existing storage/session/history regressions; separately authorized disposable verification. | Notes, marks and edits survive ordinary use and failures. | Current source passes focused shared-view, failure/retry, Unicode, history and checklist caret/crash checks without changing stored encoding. |
+| Focus, timeout, shortcuts, accessibility and scaling. Implemented but awaiting verification. | Medium: input crosses native windows, popovers and layer surfaces. | Protocol availability and current manual checklist. | Existing controls remain usable with keyboard, assistive tools and different scales. | Layered Escape, docked-only inactivity, native menus, CLI forwarding, accessible names/focus and minimum-size behavior work at normal and fractional/high scales. |
+| Startup/shutdown and installed login. Implemented but awaiting verification. | Medium: session delivery and executable discovery depend on the desktop. | Initial installation path; disposable session and write-failure fixtures. | Launch reliably and retain pending edits on delivered shutdown events. | An installed executable launches after login; delivered session-end/signals flush active sessions, log rejected writes and exit; invalid configuration remains untouched. |
+| Full-body All Notes excerpts. Confirmed defect. | Small: bound the two label-input paths without truncating stored/editor text. | Choose a Unicode-safe excerpt bound; separately authorize focused ordinary-use verification. | Avoid laying out entire long bodies for a short list row. | Both row creation and live update bound excerpts; full-body search/edit/copy remain intact. All Notes opens and updates responsively with the ordinary collection and a few longer notes, including Unicode and line breaks. No large-collection benchmark is required. |
+| Basic multi-monitor correctness. Missing essential functionality. | Medium: both layer surfaces, cached geometry and open editors must agree. | GDK monitor lifecycle and Layer Shell output selection; resolve current mismatch first. | Strip and notes remain reachable after plug/unplug, resolution and scale changes. | Surfaces and geometry use the same surviving output; hotplug and mixed-scale changes reclamp content without duplicate strips or lost edits. No automatic cursor following. |
+| Cross-compositor Wayland compatibility. Implemented but awaiting verification; protocol availability handling is missing. | Large: shell behavior differs despite shared protocols. | Layer Shell capability check; monitor fix; staged environments below. | Reach the intended Wayland audience with accurate support claims. | Record per-environment results and dependencies for placement, focus, input pass-through, resize/movement, fullscreen, scaling, hotplug and session startup; explain unsupported protocol environments. |
+| GTK object lifetimes and final resource use. Implemented but awaiting verification. | Medium: source ownership review needs measured confirmation. | Separately authorized focused lifetime checks and ordinary-use observations. | Repeatedly opening notes/menus does not accumulate objects or stall the app. | With roughly 10–30 notes and a few longer bodies, closed views/menus release, startup/editing/switching remain responsive, and resource use settles after a few open/close cycles. Include both layer surfaces and supported display scales; record the environment and intervals. Historical stress results and numerical targets below are not release gates. |
+| CI reproducibility. Implemented but awaiting verification. | Small: native dependency list and existing checks. | A clean runner with locked dependencies. | Builds work away from the development machine. | A separately authorized clean CI run installs native dependencies and completes the existing workflow. Local compilation alone is insufficient. |
+| Initial packaging, icon and metadata. Missing essential functionality. | Medium: install paths, licences and data ownership need coordinated checks. | Stable runtime, CI and an approved application icon. | Users can install, launch, upgrade and remove Stickies safely. | Ship Arch/AUR and GitHub artifacts with desktop entry, icon, binary, font notices, source licence and checksums; verify install/login/upgrade/removal without deleting notes. |
 
-Use native keyboard navigation and readable focus states. Add application shortcuts only after the core UI is stable. Keep pinned-first ordering, with the edge following All Notes' ordering choice. The individual pin icon controls Always open rather than ordering. Manual drag reordering is not part of the active milestone.
+## Focused follow-ups
 
-Complexity: medium. Desktop interaction and final visual approval are the main uncertainties; most note behavior already exists.
+These findings come from source inspection at `a2105f2` plus the mechanical cleanup. They are separate proposals, without implementation or execution authorization. Useful findings from the ignored local audit are consolidated here so current documentation does not depend on that file.
 
-## Phase 6: cursor-following monitors
+| Topic | Evidence and smallest follow-up |
+|---|---|
+| All Notes excerpts | `manager.rs::note_row` and the live update in `sync_editor` flatten complete bodies for ellipsized labels. Bound both inputs without truncating saved text or changing full-body search, editing or Copy text. The icon cache already exists. Use the ordinary workload above for current acceptance. |
+| Monitor selection | `edge.rs::note_limits` reads GDK monitor zero; neither layer surface selects an output explicitly, and cached bounds lack monitor lifecycle/geometry/scale updates. Select one consistent output for both surfaces and geometry, handle display changes and reclamp open content while preserving edits. Cursor-following remains deferred. |
+| Layer Shell availability | `Strip::new` initializes layer surfaces without an `is_supported` check. Propose a capability check and clear diagnostic before constructing surfaces. No fallback UI is approved. |
+| Application icon | The desktop entry names `dev.stickies.Stickies`, but no distributable application icon or package recipe exists. Keep that work in the initial release scope. |
+| Duplicate state | `app.rs::AppState` retains an open-note guard and temporary overflow membership used by `main.rs`/`edge.rs`; returned events have no production consumers. Trace those responsibilities before proposing consolidation. Existing callers prevent treating the state model as dead code. |
+| Checklist completion branches | `toggle_checklist` removes an existing checked/unchecked prefix itself and calls `toggle_line` only to add an absent prefix; other production callers pass bullet/numbered prefixes. The two checklist x/space swap branches have no production route. Only a formatting regression calls that old helper contract directly. Propose removing those branches and updating that regression to activate the actual embedded checkbox, preserving completion, history and spans. This is outside the mechanical cleanup. |
+| GTK lifetimes and scaling | Old menu probes found strong callback cycles; current controls/editor/Sort callbacks use weak references, but complete release is unverified. Check editors, sessions, menus and buffer subscriptions with a few open/close cycles; fix demonstrated retention only. Two screen-sized surfaces are intentional for stable transitions. Observe ordinary use at supported scales before changing them; 36x36 icon masks also need a high-scale clarity check. |
+| Checklist crash/caret | October 15, 02:19:07 IST, PID 1683626: GTK rejected byte index 29 beyond the visible line through `note_text::decorate` and `iter_at_location`, causing SIGABRT. Current code uses `line_at_y`, skips hidden markers/anchors and uses cursor geometry; checkbox toggles preserve selection and native edits advance a collapsed caret beyond hidden prefixes. The updated native regression compiled but was not run. Focus future checks on typing before anchors, after checkbox activation and around wrapped/empty lines. |
+| Startup and graphics diagnostics | Installed login and delivered session-end/signals still need verification. Rejected shutdown writes log errors but do not prevent exit; crashes/SIGKILL cannot flush pending edits. Older pixman/invalid-rectangle warnings were transient and not reproduced later; retain stderr and investigate a reproducible trigger without claiming a fix. |
+| Clean CI | Native dependencies and the GTK deprecation allowance were corrected. Neither a clean-runner workflow nor remote package installation was verified during cleanup; local compilation does not establish those results. |
 
-Maintain one edge strip on the monitor containing the cursor. Preserve the configured edge and notes when the cursor crosses monitors. Verify laptop-only, external-only, dual-display, hotplug, and mixed-scale setups.
+### Historical performance context
 
-Before implementation, settle what happens to an already-open docked note during a monitor change. Preserve edits and avoid duplicating the strip. Determine how each supported compositor exposes the required cursor/monitor information; do not assume the existing first-monitor geometry code provides this behavior.
+The October 10 run used an isolated 1920x1080 output at 125%. Timing covered process launch to first mapped All Notes, including GTK/fonts/private-bus startup. These historical measurements explain the excerpt follow-up; they do not describe current performance or constitute a before/after benchmark on the owner's desktop.
 
-Complexity: medium to high. The product rule is simple; compositor access and display changes need testing.
+| Collection | Largest body | First mapped All Notes | PSS |
+|---|---:|---:|---:|
+| 20 notes | 382 bytes | 1.33 s | 143.1 MiB |
+| 1,284 notes | 382 bytes | 3.18 s | 178.2 MiB |
+| 1,284 notes | 20,582 bytes | 54.18 s | 379.4 MiB |
 
-## Phase 8: Google Drive sync
+The long-content run's final four one-second idle samples were 0% CPU after earlier settling activity; interaction/animation CPU acceptance was not established.
 
-Build the smallest Google Drive integration that meets the user's needs. Choose direct integration or an existing local Drive integration only after checking feasibility during this phase. No generic multi-provider sync framework, collaboration, or dedicated Stickies server.
+Earlier plans proposed at most 200 MiB PSS, interaction below 2% CPU, animation below 3%, exceptional one-second spikes at most 5%, and idle returning to 0%. Retain those as historical targets, not universal completion thresholds. No new stress measurements are required for release; stress testing needs its own explicit approval and agreed workload.
 
-Define the minimum behavior before coding: connect/disconnect, initial upload/download, offline edits, updates, deletions, and simultaneous edits on two devices. Handle conflicts without silently discarding a note; a simple retained conflict copy may be enough. Do not treat copying a live SQLite database between devices as a complete sync design.
+## Staged Wayland verification
 
-Drive sync is a required remaining feature. Optional enablement does not mean optional implementation. Keep authentication and sync transport separate from ordinary offline editing. No note-encryption feature is planned.
+1. Establish actual dependencies: Wayland, `zwlr_layer_shell_v1`, compatible GTK/libadwaita/gtk4-layer-shell libraries, a session bus for single-instance actions, and normal GTK toplevel move/resize support. The app currently has no unsupported-Layer-Shell startup path.
+2. Use the existing Hyprland environment for the current regression baseline. Previous isolated Sway runs are useful scoped evidence, not a broad current support claim.
+3. Verify Sway and KDE Plasma Wayland next. Include input/focus, fullscreen layer policy, minimum sizes, movement, login/session-end and hotplug/mixed scale. No development-machine window rule may be an installation prerequisite.
+4. Expand to other available Layer Shell implementations, such as COSMIC, Niri, River and Wayfire, one environment at a time. Keep this compatibility work in scope; do not promise universal support based on protocol names alone.
 
-Complexity: medium to high until the integration is chosen. Sign-in, offline recovery, and preserving conflicting edits are the essential work, even with a small UI.
+The current edge implementation requires Layer Shell. GNOME Wayland without that protocol cannot provide this edge implementation; this is a compatibility limitation to document and review, not a Hyprland product restriction. X11 is outside the Wayland release. Omarchy-only DND is optional; other desktops currently leave the strip visible. Compositor keybinding examples stay in README.
 
-## Phase 10: compositor validation
+Production uses GTK/Layer Shell rather than Hyprland/Sway IPC and does not modify compositor configuration. Separate-window floating placement is compositor-dependent and must not rely on the owner's window rules. Minimal System appearance reads GTK's dark preference/theme name. DND reads `OMARCHY_PATH` and `~/.local/state/omarchy/notifications.json`; fullscreen behavior selects Top/Overlay layers without a compositor-specific detector. Output selection and older protocol layer changes may remap surfaces, so verify focus and pending edits with the smallest useful display setup.
 
-Keep Hyprland as the reference compositor. Validate Hyprland on other distributions, KDE Plasma Wayland and Sway, then other Layer Shell compositors such as COSMIC, Niri, River, and Wayfire.
+## Deferred work and explicit exclusions
 
-Test edge placement, focus, floating windows, fullscreen behavior, scaling, cursor-following monitors, and launch at login. Claim support only after testing. DND currently integrates with Omarchy shell only.
+| Item and category | Complexity and reason | Dependencies | User benefit | Completion condition if separately approved |
+|---|---|---|---|---|
+| Automatic cursor-following. Optional future work. | Large: global cursor access varies and moving surfaces can remap them. | Basic monitor correctness; agree how an open docked note behaves. | Convenience across monitors. | One strip follows the cursor without lost edits, duplicate surfaces or focus disruption on each supported environment. |
+| Google Drive. Deferred future requirement, not part of the first release. | Large: authentication, offline edits, deletions and conflicts need preservation rules. | Separate long-term scope decision and feasibility work. | Notes available on multiple devices. | Select the smallest integration; connect/disconnect and reconcile initial/offline/concurrent edits and deletions without silently losing content. Do not copy a live SQLite database as the sync design. |
+| AppImage, Flatpak, Debian and RPM. Optional future work. | Medium per format: runtime/portal and installation rules differ. | Working initial package and demonstrated distribution need. | More installation choices. | Each chosen format passes safe installation, upgrade/removal, startup and licence checks. |
 
-GNOME and X11 are outside this Linux scope. Windows and macOS would be separate future projects, not reasons to add portability abstractions now.
+Remove extra Settings additions and manual drag ordering from the finishing roadmap. Preserve existing preferences and controls. Windows/macOS ports and scripting/MCP remain outside this release. No rich document editor, attachments, team workspace, generic sync framework, application-owned backend, Markdown/export or note-encryption feature is planned.
 
-Complexity: high testing effort across environments.
+## Constraints
 
-## Phase 11: packaging and release
-
-Start with Arch/AUR and GitHub release artifacts. Retain AppImage, Flatpak, Debian and RPM packaging as distribution-expansion work; stage those formats instead of requiring every format for the first package.
-
-Provide the binary, desktop entry, application icon, needed metadata and bundled-font notices. Verify installation, startup, upgrade, and removal without deleting user notes. Automate checks, builds, checksums, and release artifacts. Review the project name before public release.
-
-Complexity: medium for the first package, higher across all formats.
-
-## Implementation constraints
-
-Keep the existing stack and module responsibilities. Prefer concrete fixes over architectural rewrites. Do not introduce a generic event bus, unused storage backends, or future configuration controls.
-
-Retain database migrations and compatibility parsing needed to load existing data. Remove obsolete runtime branches only after confirming their callers. Never delete user notes as cleanup.
-
-The source license is MPL-2.0. Keep bundled asset notices. Basic accessibility, readable contrast, keyboard focus, and reduced motion remain requirements.
-
-A local scripting interface or external MCP adapter is outside the release work above and requires its own approved milestone. No AI assistant, rich document editor, team workspaces, or attachments are planned.
+Keep current module responsibilities and the Rust/GTK4/libadwaita/Layer Shell/SQLite stack. Preserve migrations, legacy configuration acceptance and saved styles. Keep MPL-2.0 and bundled asset licences. Do not introduce speculative storage, event or portability abstractions. Commit, push and test execution need their own authorization.

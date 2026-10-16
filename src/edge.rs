@@ -2648,12 +2648,13 @@ mod tests {
         let expected = transition(state, EdgeEvent::Refresh, policy());
         assert_eq!(transition(state, EdgeEvent::Collapse, policy()), expected);
         assert_eq!(transition(state, EdgeEvent::Reveal, policy()), expected);
-        // Replacement requires the coordinator's successful close first.
+        // Search/Reposition require a successful close. Direct note switches
+        // pass the coordinator's save/release guards before this transition.
         assert_eq!(transition(state, EdgeEvent::Search, policy()), expected);
         assert_eq!(transition(state, EdgeEvent::Reposition, policy()), expected);
         assert_eq!(
             transition(state, EdgeEvent::Dock(NoteId::new(2)), policy()),
-            expected
+            (EdgeState::Docked(NoteId::new(2)), expected.1)
         );
     }
 

@@ -1,13 +1,13 @@
 <gresources><gresource prefix="/dev/stickies/Stickies">
-  <file>all-notes.css</file>
   <file>icons/stickies-archive-symbolic.svg</file>
   <file>fonts/Virgil.ttf</file>
   <file>fonts/Virgil-LICENSE.txt</file>
   <file>fonts/Inter.ttf</file>
+  <file>fonts/Inter-LICENSE.txt</file>
   <file>fonts/JetBrainsMono.ttf</file>
+  <file>fonts/JetBrainsMono-LICENSE.txt</file>
   <file>icons/stickies-plus-symbolic.svg</file>
   <file>icons/stickies-close-symbolic.svg</file>
-  <file>icons/stickies-chevron-symbolic.svg</file>
   <file>icons/stickies-sort-symbolic.svg</file>
   <file>icons/stickies-settings-symbolic.svg</file>
   <file>icons/stickies-more-symbolic.svg</file>
@@ -15,10 +15,8 @@
   <file>icons/stickies-popout-symbolic.svg</file>
   <file>icons/playful/archive.svg</file>
   <file>icons/playful/checklist.svg</file>
-  <file>icons/playful/chevron-left.svg</file>
   <file>icons/playful/close.svg</file>
   <file>icons/playful/more-dots.svg</file>
-  <file>icons/playful/palette.svg</file>
   <file>icons/playful/pin-filled.svg</file>
   <file>icons/playful/pin.svg</file>
   <file>icons/playful/plus-new-note.svg</file>
@@ -27,11 +25,6 @@
   <file>icons/playful/sort.svg</file>
 <file>icons/stickies-pin-filled-symbolic.svg</file>
 <file>icons/stickies-checklist-symbolic.svg</file>
-<file>icons/stickies-palette-symbolic.svg</file>
-<file>icons/stickies-search-symbolic.svg</file>
-<file>icons/playful/search.svg</file>
-<file>icons/stickies-grid-symbolic.svg</file>
-<file>icons/playful/grid.svg</file>
 <file>icons/edge/new.svg</file>
 <file>icons/edge/search.svg</file>
 <file>icons/edge/notes.svg</file>

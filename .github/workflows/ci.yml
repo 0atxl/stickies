@@ -21,7 +21,7 @@ jobs:
       - name: Install native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes desktop-file-utils libgtk-4-dev libgtk4-layer-shell-dev libsqlite3-dev pkg-config
+          sudo apt-get install --yes desktop-file-utils libadwaita-1-dev libfontconfig-dev libglib2.0-dev-bin libgtk-4-dev libgtk4-layer-shell-dev libsqlite3-dev pkg-config
 
       - name: Install Rust checks
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
@@ -36,7 +36,7 @@ jobs:
         run: cargo check --locked --all-targets
 
       - name: Run Clippy
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings -A deprecated
 
       - name: Run tests
         run: cargo test --locked

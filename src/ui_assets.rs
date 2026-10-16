@@ -165,7 +165,6 @@ pub fn refresh_icons(widget: &gtk::Widget, playful: bool, filled_pins: bool) {
         };
         if !image.has_css_class(state) {
             let asset = match name {
-                "chevron" => "chevron-left",
                 "plus" => "plus-new-note",
                 "settings" => "settings-gear",
                 "popout" => "pop-out-window",

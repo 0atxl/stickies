@@ -447,10 +447,6 @@ impl Ui {
         }
     }
     fn finish_change(self: &Rc<Self>, id: NoteId, change: manager::ManagerChange) {
-        if change == manager::ManagerChange::Create {
-            self.refresh_tabs();
-            return;
-        }
         if change == manager::ManagerChange::Pin {
             let session = self.sessions.borrow().get(&id).and_then(Weak::upgrade);
             if let Some(session) = session {
@@ -2298,8 +2294,8 @@ mod edge_tests {
             assert!(body_before.intersection(&footer).is_none());
             crate::text_editing::capture_native(&format!("{name}-individual-resting"));
             for (label, button) in [
-                ("color", editor.controls.color.as_ref().unwrap()),
-                ("text", editor.controls.text.as_ref().unwrap()),
+                ("color", &editor.controls.color),
+                ("text", &editor.controls.text),
                 ("more", &editor.controls.more),
             ] {
                 button.popup();

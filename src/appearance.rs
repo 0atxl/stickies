@@ -48,23 +48,15 @@ pub fn apply_note_font(
         Font::Kalam => "Kalam, cursive",
         Font::Handwritten => "'Virgil 3 YOFF', cursive",
     };
-    // Provisional preview values, reviewed separately for each theme.
     let adjustment = match style.text_size {
         crate::config::NoteTextSize::Small => -3,
         crate::config::NoteTextSize::Medium => 0,
         crate::config::NoteTextSize::Large => 3,
     };
-    let body_size = match config.theme {
-        Theme::Paper => 17,
-        Theme::Playful => 17,
-        Theme::Minimal if !dark(config) => 17,
-        Theme::Minimal => 17,
-    } + adjustment;
+    let body_size = 17 + adjustment;
     let title_size = match config.theme {
-        Theme::Paper => 30,
-        Theme::Minimal if !dark(config) => 28,
+        Theme::Paper | Theme::Playful => 30,
         Theme::Minimal => 28,
-        Theme::Playful => 30,
     } + adjustment;
     let weight = match style.legacy_text_weight {
         crate::config::LegacyTextWeight::Regular => 400,

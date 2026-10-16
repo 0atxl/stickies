@@ -16,7 +16,6 @@ use std::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ManagerChange {
     Pin,
-    Create,
     Archive,
     Restore,
     Delete,
@@ -32,7 +31,7 @@ pub fn change_collection(
         ManagerChange::Archive => storage.archive_note(id),
         ManagerChange::Restore => storage.restore_note(id),
         ManagerChange::Delete => storage.delete_note(id),
-        ManagerChange::Pin | ManagerChange::Create => unreachable!("not a collection mutation"),
+        ManagerChange::Pin => unreachable!("not a collection mutation"),
     }
 }
 
@@ -333,13 +332,8 @@ impl ManagerUi {
     }
     fn sync_editor(&self) {
         let defaults = self.config.borrow().clone();
-        let (above, below) = match defaults.theme {
-            Theme::Paper => (1, 3),
-            Theme::Playful => (1, 3),
-            Theme::Minimal => (1, 3),
-        };
-        self.body.set_pixels_above_lines(above);
-        self.body.set_pixels_below_lines(below);
+        self.body.set_pixels_above_lines(1);
+        self.body.set_pixels_below_lines(3);
         if defaults.theme == Theme::Minimal {
             self.window.add_css_class("minimal");
         } else {
@@ -539,7 +533,6 @@ impl ManagerUi {
             return;
         }
         let result = match change {
-            ManagerChange::Create => return,
             ManagerChange::Pin => {
                 let session = self.session.borrow().clone();
                 if let Some(session) = session {
@@ -1100,7 +1093,7 @@ pub fn build_window(
                 let session = ui.session.borrow().clone();
                 if let Some(session) = session {
                     let mut style = session.style();
-                    style.paper = paper;
+                    style.paper = Some(paper);
                     session.set_style(style);
                 }
             }
@@ -1357,8 +1350,8 @@ mod feedback_tests {
                     };
                     crate::text_editing::capture_native(&format!("{name}-all-notes-resting"));
                     for (label, button) in [
-                        ("color", manager.controls.color.as_ref().unwrap()),
-                        ("font", manager.controls.text.as_ref().unwrap()),
+                        ("color", &manager.controls.color),
+                        ("font", &manager.controls.text),
                         ("more", &manager.controls.more),
                     ] {
                         button.popup();
@@ -1420,13 +1413,8 @@ mod feedback_tests {
         assert!(manager.storage.is_archived(id).unwrap());
         assert!(!manager.body.is_editable());
         for widget in [
-            manager
-                .controls
-                .color
-                .as_ref()
-                .unwrap()
-                .upcast_ref::<gtk::Widget>(),
-            manager.controls.text.as_ref().unwrap().upcast_ref(),
+            manager.controls.color.upcast_ref::<gtk::Widget>(),
+            manager.controls.text.upcast_ref(),
             manager.controls.checklist.upcast_ref(),
             manager.controls.pin.upcast_ref(),
             manager.controls.popout.as_ref().unwrap().upcast_ref(),
