@@ -187,6 +187,7 @@ impl Ui {
         let timeout = Rc::downgrade(self);
         let editor = editor::Editor::new(session, self.config.clone(), !detached, move || {
             if let Some(ui) = timeout.upgrade()
+                && !ui.edge.output_suspended()
                 && ui.close_docked()
             {
                 ui.dormant();
@@ -671,6 +672,19 @@ fn main() -> glib::ExitCode {
     application.run()
 }
 fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
+    if !gtk4_layer_shell::is_supported() {
+        eprintln!(
+            "Stickies requires Wayland with zwlr_layer_shell_v1 version 4 or newer; Layer Shell is unavailable on this display."
+        );
+        return None;
+    }
+    let protocol_version = gtk4_layer_shell::protocol_version();
+    if protocol_version < 4 {
+        eprintln!(
+            "Stickies requires zwlr_layer_shell_v1 version 4 or newer for on-demand keyboard focus; this display provides version {protocol_version}."
+        );
+        return None;
+    }
     let storage = match Storage::open(&storage::database_path()) {
         Ok(storage) => Rc::new(storage),
         Err(error) => {
@@ -736,8 +750,6 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
     );
     let edge = edge::Strip::new(application);
-    let window = edge.window.clone();
-    let strip_window = edge.strip_window.clone();
     let ui = Rc::new(Ui {
         sessions: RefCell::new(HashMap::new()),
         application: application.clone(),
@@ -774,6 +786,7 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
     let shutdown_ui = ui.clone();
     application.connect_shutdown(move |_| {
         let ui = &shutdown_ui;
+        ui.edge.disconnect_monitors();
         ui.flush_sessions_on_shutdown();
         for source in shutdown_signals.borrow_mut().drain(..) {
             source.remove();
@@ -789,8 +802,7 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
             note.editor.stop();
         }
     });
-    window.present();
-    strip_window.present();
+    ui.update_visibility();
     ui.set_input();
     let weak = Rc::downgrade(&ui);
     let monitor = platform::watch_do_not_disturb(move |dnd| {

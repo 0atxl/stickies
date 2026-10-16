@@ -302,6 +302,22 @@ enum StripPhase {
 }
 
 pub(super) struct Strip {
+    monitor: RefCell<Option<gtk::gdk::Monitor>>,
+    monitor_handlers: RefCell<Vec<(glib::Object, glib::SignalHandlerId)>>,
+    monitor_list_handler: RefCell<Option<(gtk::gio::ListModel, glib::SignalHandlerId)>>,
+    monitor_update: RefCell<Option<glib::SourceId>>,
+    layout_update: RefCell<Option<glib::SourceId>>,
+    layout_handlers: RefCell<[Vec<(glib::Object, glib::SignalHandlerId)>; 2]>,
+    layout_size: Cell<(i32, i32)>,
+    recovery_focus: RefCell<Option<(EdgeState, glib::WeakRef<gtk::Widget>)>>,
+    search_popup_request: Cell<Option<bool>>,
+    search_size_dirty: Cell<bool>,
+    search_selection_pending: Cell<bool>,
+    search_size: Cell<(i32, i32)>,
+    search_placement: Cell<Option<(i32, i32, i32, i32)>>,
+    remapping: Cell<bool>,
+    monitor_layout_dirty: Cell<bool>,
+    monitor_stopped: Cell<bool>,
     pub(super) window: gtk::ApplicationWindow,
     pub(super) root: gtk::Overlay,
     pub(super) strip_window: gtk::ApplicationWindow,
@@ -350,7 +366,53 @@ pub(super) struct Strip {
     outgoing_session: RefCell<Option<Rc<crate::note_session::NoteSession>>>,
 }
 
+fn usable_monitor(monitor: &gtk::gdk::Monitor) -> bool {
+    let geometry = monitor.geometry();
+    monitor.is_valid() && geometry.width() > 0 && geometry.height() > 0
+}
+
+impl Drop for Strip {
+    fn drop(&mut self) {
+        self.disconnect_monitors();
+    }
+}
+
 impl Strip {
+    pub(super) fn output_suspended(&self) -> bool {
+        self.remapping.get() || !self.monitor.borrow().as_ref().is_some_and(usable_monitor)
+    }
+
+    fn cancel_search_popup(&self) {
+        self.search_popup_request.set(None);
+    }
+
+    fn disconnect_layout(&self, index: usize) {
+        for (object, handler) in self.layout_handlers.borrow_mut()[index].drain(..) {
+            object.disconnect(handler);
+        }
+    }
+
+    pub(super) fn disconnect_monitors(&self) {
+        self.monitor_stopped.set(true);
+        self.cancel_search_popup();
+        if let Some(source) = self.layout_update.borrow_mut().take() {
+            source.remove();
+        }
+        for index in 0..2 {
+            self.disconnect_layout(index);
+        }
+        self.recovery_focus.borrow_mut().take();
+        if let Some(source) = self.monitor_update.borrow_mut().take() {
+            source.remove();
+        }
+        for (object, handler) in self.monitor_handlers.borrow_mut().drain(..) {
+            object.disconnect(handler);
+        }
+        if let Some((list, handler)) = self.monitor_list_handler.borrow_mut().take() {
+            list.disconnect(handler);
+        }
+    }
+
     pub(super) fn new(application: &gtk::Application) -> Self {
         let (_, initial) = transition(
             EdgeState::Dormant,
@@ -385,6 +447,18 @@ impl Strip {
         strip_window.set_namespace(Some("stickies-strip"));
         strip_window.set_exclusive_zone(-1);
         strip_window.set_keyboard_mode(initial.strip_keyboard);
+        let monitor = gtk::prelude::WidgetExt::display(&window)
+            .monitors()
+            .iter::<gtk::gdk::Monitor>()
+            .filter_map(Result::ok)
+            .find(usable_monitor);
+        for window in [&window, &strip_window] {
+            window.set_monitor(monitor.as_ref());
+            window.set_anchor(Edge::Left, true);
+            window.set_anchor(Edge::Top, true);
+            window.set_anchor(Edge::Right, false);
+            window.set_anchor(Edge::Bottom, false);
+        }
         let strip_root = gtk::Overlay::new();
         strip_root.set_child(Some(&gtk::Box::new(gtk::Orientation::Vertical, 0)));
         let root = gtk::Overlay::new();
@@ -419,14 +493,20 @@ impl Strip {
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::External)
-            .propagate_natural_height(true)
+            .propagate_natural_height(false)
+            .min_content_height(128)
             .max_content_height(128)
             .child(&search_results)
             .build();
-        search_panel.append(&scroll);
+        // Reserve the full results area for every query. The create action
+        // occupies that same space rather than adding another row below it.
+        let search_content = gtk::Overlay::new();
+        search_content.set_child(Some(&scroll));
+        search_panel.append(&search_content);
         let search_create = gtk::Button::with_label("No active notes");
         search_create.add_css_class("edge-create-result");
-        search_panel.append(&search_create);
+        search_create.set_valign(gtk::Align::Start);
+        search_content.add_overlay(&search_create);
         // Keep the existing panel geometry and motion clock. The native popup
         // supplies outside-click dismissal without treating pointer focus as a click.
         let search_anchor = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -492,6 +572,22 @@ impl Strip {
         strip_window.set_child(Some(&strip_root));
         window.set_child(Some(&root));
         Self {
+            monitor: RefCell::new(monitor),
+            monitor_handlers: RefCell::new(Vec::new()),
+            monitor_list_handler: RefCell::new(None),
+            monitor_update: RefCell::new(None),
+            layout_update: RefCell::new(None),
+            layout_handlers: RefCell::new([Vec::new(), Vec::new()]),
+            layout_size: Cell::new((0, 0)),
+            recovery_focus: RefCell::new(None),
+            search_popup_request: Cell::new(None),
+            search_size_dirty: Cell::new(true),
+            search_selection_pending: Cell::new(false),
+            search_size: Cell::new((224, 1)),
+            search_placement: Cell::new(None),
+            remapping: Cell::new(false),
+            monitor_layout_dirty: Cell::new(false),
+            monitor_stopped: Cell::new(false),
             window,
             root,
             strip_window,
@@ -1033,8 +1129,9 @@ impl Ui {
                 let dy = if edge == ScreenEdge::Bottom { -dy } else { dy };
                 let (max_width, max_height) = ui.note_limits();
                 editor.set_docked_size(
-                    (width + dx as i32).clamp(editor::MIN_WIDTH, max_width),
-                    (height + dy as i32).clamp(editor::MIN_HEIGHT, max_height),
+                    (width + dx as i32).clamp(editor::MIN_WIDTH, max_width.max(editor::MIN_WIDTH)),
+                    (height + dy as i32)
+                        .clamp(editor::MIN_HEIGHT, max_height.max(editor::MIN_HEIGHT)),
                 );
                 ui.place_edge();
             }
@@ -1047,7 +1144,240 @@ impl Ui {
             }
         });
     }
+    fn watch_selected_monitor(self: &Rc<Self>) {
+        for (object, handler) in self.edge.monitor_handlers.borrow_mut().drain(..) {
+            object.disconnect(handler);
+        }
+        let Some(monitor) = self.edge.monitor.borrow().clone() else {
+            return;
+        };
+        for property in ["geometry", "scale-factor", "scale"] {
+            // Fractional scale is a property on GTK 4.14+. Keep the GTK 4.10 floor.
+            if monitor.find_property(property).is_none() {
+                continue;
+            }
+            let weak = Rc::downgrade(self);
+            let handler = monitor.connect_notify_local(Some(property), move |_, _| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.queue_monitor_update(true);
+                }
+            });
+            self.edge
+                .monitor_handlers
+                .borrow_mut()
+                .push((monitor.clone().upcast(), handler));
+        }
+        let weak = Rc::downgrade(self);
+        let handler = monitor.connect_invalidate(move |_| {
+            if let Some(ui) = weak.upgrade() {
+                ui.queue_monitor_update(false);
+            }
+        });
+        self.edge
+            .monitor_handlers
+            .borrow_mut()
+            .push((monitor.upcast(), handler));
+    }
+
+    fn queue_monitor_update(self: &Rc<Self>, layout_changed: bool) {
+        if self.edge.monitor_stopped.get() {
+            return;
+        }
+        self.edge
+            .monitor_layout_dirty
+            .set(self.edge.monitor_layout_dirty.get() || layout_changed);
+        if self.edge.monitor_update.borrow().is_some() {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        self.edge
+            .monitor_update
+            .replace(Some(glib::idle_add_local_once(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.edge.monitor_update.borrow_mut().take();
+                    ui.recover_monitor();
+                }
+            })));
+    }
+
+    fn recover_monitor(self: &Rc<Self>) {
+        let monitors = gtk::prelude::WidgetExt::display(&self.edge.window).monitors();
+        let available: Vec<_> = monitors
+            .iter::<gtk::gdk::Monitor>()
+            .filter_map(Result::ok)
+            .filter(usable_monitor)
+            .collect();
+        let previous = self.edge.monitor.borrow().clone();
+        let selected = previous
+            .as_ref()
+            .filter(|monitor| available.contains(monitor))
+            .cloned()
+            .or_else(|| available.first().cloned());
+        let changed = previous != selected;
+        let layout_changed = self.edge.monitor_layout_dirty.replace(false);
+        if !changed && !layout_changed && !self.edge.remapping.get() {
+            return;
+        }
+
+        if changed || selected.is_none() || self.edge.remapping.get() {
+            self.edge.cancel_search_popup();
+        }
+        self.edge.cancel_timers();
+        self.finish_edge_motion();
+        // Keep widget focus locally. Never issue an exclusive keyboard request
+        // merely because an output changed, even if another app took focus meanwhile.
+        if !self.edge.remapping.get() && changed && self.edge.window.is_active() {
+            self.edge.recovery_focus.replace(
+                gtk::prelude::GtkWindowExt::focus(&self.edge.window)
+                    .map(|focus| (self.edge.state(), focus.downgrade())),
+            );
+        }
+        if changed || selected.is_none() || self.edge.remapping.get() {
+            self.edge.remapping.set(true);
+            self.edge.search_popover.popdown();
+            self.edge.window.set_visible(false);
+            self.edge.strip_window.set_visible(false);
+        }
+        self.edge.monitor.replace(selected.clone());
+        if changed {
+            self.watch_selected_monitor();
+            // Both are hidden while their outputs change. No compositor-chosen
+            // output is used during a temporary gap in the monitor list.
+            self.edge.window.set_monitor(selected.as_ref());
+            self.edge.strip_window.set_monitor(selected.as_ref());
+        }
+        if selected.is_none() {
+            if let Some(source) = self.edge.layout_update.borrow_mut().take() {
+                source.remove();
+            }
+            return;
+        }
+        self.edge.search_size_dirty.set(true);
+        self.refresh_tabs_inner(false);
+        self.transition_edge(EdgeEvent::Visibility);
+        self.queue_edge_layout();
+    }
+
+    // One idle pass per burst of content/configure/allocation events. A pass
+    // never schedules itself; subsequent work requires an actual layout change.
+    fn queue_edge_layout(self: &Rc<Self>) {
+        if self.edge.monitor_stopped.get() || self.edge.layout_update.borrow().is_some() {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        self.edge
+            .layout_update
+            .replace(Some(glib::idle_add_local_once(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                ui.edge.layout_update.borrow_mut().take();
+                if !ui
+                    .edge
+                    .monitor
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(usable_monitor)
+                {
+                    return;
+                }
+                ui.apply_edge_classes(&ui.config.borrow());
+                if ui.edge.state().is_searching() && ui.edge.search_size_dirty.replace(false) {
+                    ui.measure_edge_search();
+                }
+                let size = ui.note_limits();
+                if ui.edge.layout_size.replace(size) != size {
+                    ui.refresh_tabs_inner(false);
+                } else {
+                    ui.place_edge();
+                }
+                if ui.edge.remapping.get()
+                    && ui.edge.monitor_update.borrow().is_none()
+                    && ui.edge_allocation_ready()
+                {
+                    ui.edge.remapping.set(false);
+                    if let Some(editor) = ui.edge.docked.borrow().as_ref() {
+                        editor.activity();
+                    }
+                    if ui.edge.state().is_searching() {
+                        ui.edge.search_popup_request.set(Some(false));
+                    }
+                    let focus = ui.edge.recovery_focus.borrow_mut().take();
+                    if let Some((state, focus)) = focus
+                        && ui.edge.state() == state
+                        && let Some(focus) = focus.upgrade()
+                        && focus.is_ancestor(&ui.edge.root)
+                    {
+                        gtk::prelude::GtkWindowExt::set_focus(&ui.edge.window, Some(&focus));
+                    }
+                }
+                if ui.edge.state().is_searching()
+                    && !ui.edge.output_suspended()
+                    && let Some(request_focus) = ui.edge.search_popup_request.get()
+                    && ui.popup_edge_search(request_focus)
+                {
+                    ui.edge.search_popup_request.set(None);
+                }
+            })));
+    }
+
+    fn measure_edge_search(&self) {
+        // The results area always reserves 128 logical pixels, including when
+        // the create action is shown. Query changes do not change panel size.
+        let (_, width, _, _) = self
+            .edge
+            .search_panel
+            .measure(gtk::Orientation::Horizontal, -1);
+        let (_, height, _, _) = self
+            .edge
+            .search_panel
+            .measure(gtk::Orientation::Vertical, width);
+        self.edge.search_size.set((width, height));
+    }
+
+    fn edge_allocation_ready(&self) -> bool {
+        let (width, height) = self.note_limits();
+        [
+            (&self.edge.window, &self.edge.root),
+            (&self.edge.strip_window, &self.edge.strip_root),
+        ]
+        .into_iter()
+        .all(|(window, root)| {
+            !window.is_visible()
+                || (window.is_mapped()
+                    && window.surface().is_some_and(|surface| {
+                        // Oversized minimum layouts are allowed, but the native parent
+                        // must agree with its widget allocation before a popup is mapped.
+                        root.width() >= width
+                            && root.height() >= height
+                            && surface.width() == root.width()
+                            && surface.height() == root.height()
+                    }))
+        })
+    }
+
     pub(super) fn connect_edge(self: &Rc<Self>) {
+        let monitors = gtk::prelude::WidgetExt::display(&self.edge.window).monitors();
+        let weak = Rc::downgrade(self);
+        let handler = monitors.connect_items_changed(move |_, _, _, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.queue_monitor_update(false);
+            }
+        });
+        self.edge
+            .monitor_list_handler
+            .replace(Some((monitors, handler)));
+        self.watch_selected_monitor();
+        // Older gtk4-layer-shell releases forward compositor closure to GTK.
+        // Output removal must not destroy the editor or either strip window.
+        for window in [&self.edge.window, &self.edge.strip_window] {
+            let weak = Rc::downgrade(self);
+            window.connect_close_request(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.queue_monitor_update(false);
+                }
+                glib::Propagation::Stop
+            });
+        }
+
         let weak = Rc::downgrade(self);
         self.edge.undo_delete.connect_clicked(move |_| {
             if let Some(ui) = weak.upgrade()
@@ -1117,6 +1447,7 @@ impl Ui {
         ui.edge.search_popover.connect_closed(move |_| {
             if let Some(ui) = weak.upgrade()
                 && ui.edge.state().is_searching()
+                && !ui.edge.output_suspended()
             {
                 ui.close_edge_search();
                 ui.schedule_hide();
@@ -1311,28 +1642,64 @@ impl Ui {
             }
             target.add_controller(keys);
         }
-        {
+        for (index, window) in [&window, &strip_window].into_iter().enumerate() {
             let weak = Rc::downgrade(ui);
             window.connect_map(move |_| {
                 if let Some(ui) = weak.upgrade() {
-                    ui.set_input();
+                    ui.queue_edge_layout();
                 }
             });
-        }
-        {
             let weak = Rc::downgrade(ui);
             window.connect_realize(move |window| {
+                let Some(ui) = weak.upgrade() else { return };
+                ui.edge.disconnect_layout(index);
                 if let Some(surface) = window.surface() {
+                    let last_size = Cell::new((surface.width(), surface.height()));
                     let weak = weak.clone();
-                    surface.connect_layout(move |_, _, _| {
-                        if let Some(ui) = weak.upgrade() {
-                            ui.set_input();
+                    let handler = surface.connect_layout(move |_, width, height| {
+                        if last_size.replace((width, height)) != (width, height)
+                            && let Some(ui) = weak.upgrade()
+                        {
+                            ui.queue_edge_layout();
                         }
                     });
+                    ui.edge.layout_handlers.borrow_mut()[index].push((surface.upcast(), handler));
+                }
+                if let Some(clock) = window.frame_clock() {
+                    let last_size = Cell::new((0, 0));
+                    let weak = weak.clone();
+                    let handler = clock.connect_after_paint(move |_| {
+                        if let Some(ui) = weak.upgrade() {
+                            let root = if index == 0 {
+                                &ui.edge.root
+                            } else {
+                                &ui.edge.strip_root
+                            };
+                            let size = (root.width(), root.height());
+                            if last_size.replace(size) != size {
+                                ui.queue_edge_layout();
+                            }
+                            if index == 0
+                                && ui.edge.search_selection_pending.get()
+                                && !ui.edge.output_suspended()
+                                && ui.keep_search_selection_visible()
+                            {
+                                ui.edge.search_selection_pending.set(false);
+                            }
+                        }
+                    });
+                    ui.edge.layout_handlers.borrow_mut()[index].push((clock.upcast(), handler));
+                }
+            });
+            let weak = Rc::downgrade(ui);
+            window.connect_unrealize(move |_| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.edge.disconnect_layout(index);
                 }
             });
         }
     }
+
     pub(super) fn transition_edge(self: &Rc<Self>, event: EdgeEvent) {
         let previous = self.edge.state();
         let (state, effects) = transition(
@@ -1345,6 +1712,15 @@ impl Ui {
             self.prepare_motion(previous, state);
             self.edge.pending_motion.set(Some(state));
         }
+        if previous.is_searching() && !state.is_searching() {
+            self.edge.cancel_search_popup();
+            self.edge.search_selection_pending.set(false);
+        }
+        if self.edge.output_suspended()
+            && matches!(event, EdgeEvent::FocusWindow | EdgeEvent::FocusStrip)
+        {
+            return;
+        }
         match event {
             EdgeEvent::FocusWindow | EdgeEvent::WindowFocused => {
                 self.edge.window.set_keyboard_mode(effects.window_keyboard)
@@ -1354,9 +1730,14 @@ impl Ui {
                 .strip_window
                 .set_keyboard_mode(effects.strip_keyboard),
             EdgeEvent::Visibility => {
-                self.edge
-                    .strip_window
-                    .set_visible(effects.strip_visible || self.edge.toast_note.get().is_some());
+                self.edge.strip_window.set_visible(
+                    self.edge
+                        .monitor
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(usable_monitor)
+                        && (effects.strip_visible || self.edge.toast_note.get().is_some()),
+                );
                 self.edge
                     .strip_window
                     .set_layer(if self.edge.toast_note.get().is_some() {
@@ -1364,12 +1745,23 @@ impl Ui {
                     } else {
                         effects.strip_layer
                     });
-                self.edge.window.set_visible(effects.window_visible);
+                self.edge.window.set_visible(
+                    self.edge
+                        .monitor
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(usable_monitor)
+                        && effects.window_visible,
+                );
             }
             _ => self.edge.apply(effects),
         }
     }
     pub(super) fn refresh_tabs(self: &Rc<Self>) {
+        self.refresh_tabs_inner(true);
+    }
+
+    fn refresh_tabs_inner(self: &Rc<Self>, refresh_search: bool) {
         // Saves can arrive during hover motion. Keep the current widgets and input
         // bounds until that motion settles, then apply the latest note data once.
         if self.edge.strip_phase.get() != StripPhase::Settled {
@@ -1377,6 +1769,9 @@ impl Ui {
             return;
         }
         self.edge.refresh_pending.set(false);
+        let focused_control = gtk::prelude::GtkWindowExt::focus(&self.edge.strip_window)
+            .filter(|widget| widget.is_ancestor(&self.edge.tabs))
+            .map(|widget| widget.widget_name());
         self.edge.tab_hover.borrow_mut().clear();
         while let Some(child) = self.edge.tabs.first_child() {
             self.edge.tabs.remove(&child);
@@ -1692,6 +2087,7 @@ impl Ui {
             ("grid", "All Notes"),
         ] {
             let button = ui_assets::edge_icon(name, label);
+            button.set_widget_name(name);
             button.add_css_class("strip-control");
             button.set_size_request(24, 24);
             let weak = Rc::downgrade(self);
@@ -1721,6 +2117,22 @@ impl Ui {
             utilities.append(&button);
         }
         self.edge.tabs.append(&utilities);
+        if let Some(name) = focused_control {
+            let mut group = self.edge.tabs.first_child();
+            while let Some(container) = group {
+                let mut child = container.first_child();
+                while let Some(widget) = child {
+                    if widget.widget_name() == name {
+                        gtk::prelude::GtkWindowExt::set_focus(
+                            &self.edge.strip_window,
+                            Some(&widget),
+                        );
+                    }
+                    child = widget.next_sibling();
+                }
+                group = container.next_sibling();
+            }
+        }
         ui_assets::refresh_icons(
             self.edge.tabs.upcast_ref(),
             config.theme == config::Theme::Playful,
@@ -1734,7 +2146,7 @@ impl Ui {
                 0.
             });
         self.paint_strip(self.edge.strip_motion.value());
-        if self.edge.state().is_searching() {
+        if refresh_search && self.edge.state().is_searching() {
             self.refresh_edge_search();
         }
         self.place_edge();
@@ -1763,29 +2175,27 @@ impl Ui {
         self.transition_edge(EdgeEvent::Search);
         self.edge.edge_search.set_text("");
         self.refresh_edge_search();
-        if !self.popup_edge_search() {
-            let weak = Rc::downgrade(self);
-            self.edge.root.add_tick_callback(move |_, _| {
-                let Some(ui) = weak.upgrade() else {
-                    return glib::ControlFlow::Break;
-                };
-                if !ui.edge.state().is_searching() || ui.popup_edge_search() {
-                    glib::ControlFlow::Break
-                } else {
-                    glib::ControlFlow::Continue
-                }
-            });
-        }
+        self.queue_search_popup(true);
     }
 
-    fn popup_edge_search(self: &Rc<Self>) -> bool {
+    fn queue_search_popup(self: &Rc<Self>, request_focus: bool) {
+        self.edge.cancel_search_popup();
+        if self.edge.output_suspended() {
+            return;
+        }
+        self.edge.search_popup_request.set(Some(request_focus));
+        self.queue_edge_layout();
+    }
+
+    fn popup_edge_search(self: &Rc<Self>, request_focus: bool) -> bool {
         let Some(surface) = self.edge.window.surface() else {
             return false;
         };
         let (x, y, width, height) = self.edge.panel_bounds.get();
-        // GDK clips popup anchors to the parent's current surface geometry.
-        // Wait for the initial layer allocation instead of mapping at (0, 1).
-        if self.edge.root.width() < x + width
+        // Preserve the allocation -> placement -> focus -> popup sequence.
+        if !self.edge.window.is_mapped()
+            || self.edge.search_size_dirty.get()
+            || self.edge.root.width() < x + width
             || self.edge.root.height() < y + height
             || surface.width() < x + width
             || surface.height() < y + height
@@ -1793,9 +2203,13 @@ impl Ui {
             return false;
         }
         self.place_edge();
-        self.transition_edge(EdgeEvent::FocusWindow);
+        if request_focus {
+            self.transition_edge(EdgeEvent::FocusWindow);
+        }
         self.edge.search_popover.popup();
-        self.edge.edge_search.grab_focus();
+        if request_focus {
+            self.edge.edge_search.grab_focus();
+        }
         true
     }
 
@@ -1871,25 +2285,13 @@ impl Ui {
             } else {
                 "No matches. Create note"
             });
-        self.place_edge();
-        // Rebuilt rows need their first allocation before scrolling to them.
-        let weak = Rc::downgrade(self);
-        self.edge.search_results.add_tick_callback(move |_, _| {
-            if let Some(ui) = weak.upgrade()
-                && !ui.keep_search_selection_visible()
-            {
-                return glib::ControlFlow::Continue;
-            }
-            // Tick callbacks run before layout; the scroller may reset its
-            // adjustment during that layout. Apply the final position afterward.
-            let weak = weak.clone();
-            glib::idle_add_local_once(move || {
-                if let Some(ui) = weak.upgrade() {
-                    ui.keep_search_selection_visible();
-                }
-            });
-            glib::ControlFlow::Break
-        });
+        self.edge.search_size_dirty.set(true);
+        self.queue_edge_layout();
+        // The existing frame clock's after-paint observer scrolls after GTK
+        // allocates the rebuilt rows. Do not run a tick loop or queue stale idles.
+        self.edge
+            .search_selection_pending
+            .set(self.edge.search_results.selected_row().is_some());
     }
     fn keep_search_selection_visible(&self) -> bool {
         if !self.edge.state().is_searching() {
@@ -2119,7 +2521,9 @@ impl Ui {
                 "edge-minimal",
                 "edge-minimal-dark",
             ] {
-                window.remove_css_class(class);
+                if class != edge && class != theme {
+                    window.remove_css_class(class);
+                }
             }
             if config.tab_layout == config::TabLayout::Classic {
                 window.add_css_class("edge-classic");
@@ -2132,6 +2536,19 @@ impl Ui {
     }
 
     pub(super) fn place_edge(self: &Rc<Self>) {
+        if self.edge.state().is_searching() && self.edge.search_size_dirty.get() {
+            self.queue_edge_layout();
+            return;
+        }
+        if !self
+            .edge
+            .monitor
+            .borrow()
+            .as_ref()
+            .is_some_and(usable_monitor)
+        {
+            return;
+        }
         let config = self.config.borrow();
         self.apply_edge_classes(&config);
         let effects = self.edge.effects(&config, self.dnd.get());
@@ -2143,12 +2560,10 @@ impl Ui {
             (&self.edge.window, &self.edge.root),
             (&self.edge.strip_window, &self.edge.strip_root),
         ] {
-            window.set_anchor(Edge::Left, true);
-            window.set_anchor(Edge::Top, true);
-            window.set_anchor(Edge::Right, false);
-            window.set_anchor(Edge::Bottom, false);
-            root.set_size_request(screen_width, screen_height);
-            window.set_default_size(screen_width, screen_height);
+            if root.width_request() != screen_width || root.height_request() != screen_height {
+                root.set_size_request(screen_width, screen_height);
+                window.set_default_size(screen_width, screen_height);
+            }
         }
         let measure = |widget: &gtk::Widget| {
             let visible = widget.get_visible();
@@ -2189,24 +2604,30 @@ impl Ui {
             ScreenEdge::Top => (offset, 0),
             ScreenEdge::Bottom => (offset, screen_height - th),
         };
-        let position = |widget: &gtk::Widget, x, y| {
+        let position = |widget: &gtk::Widget, x: i32, y: i32| {
             widget.set_halign(gtk::Align::Start);
             widget.set_valign(gtk::Align::Start);
-            widget.set_margin_start(x);
-            widget.set_margin_top(y);
+            widget.set_margin_start(x.max(0));
+            widget.set_margin_top(y.max(0));
         };
         // Measure without placement margins, which otherwise feed back into size.
         position(self.edge.tabs.upcast_ref(), tx, ty);
         let (mw, mh) = measure(self.edge.marker.upcast_ref());
         let (mx, my) = match config.edge {
-            ScreenEdge::Left => (0, (offset + (th - mh) / 2).clamp(0, screen_height - mh)),
+            ScreenEdge::Left => (
+                0,
+                (offset + (th - mh) / 2).clamp(0, (screen_height - mh).max(0)),
+            ),
             ScreenEdge::Right => (
                 screen_width - mw,
-                (offset + (th - mh) / 2).clamp(0, screen_height - mh),
+                (offset + (th - mh) / 2).clamp(0, (screen_height - mh).max(0)),
             ),
-            ScreenEdge::Top => ((offset + (tw - mw) / 2).clamp(0, screen_width - mw), 0),
+            ScreenEdge::Top => (
+                (offset + (tw - mw) / 2).clamp(0, (screen_width - mw).max(0)),
+                0,
+            ),
             ScreenEdge::Bottom => (
-                (offset + (tw - mw) / 2).clamp(0, screen_width - mw),
+                (offset + (tw - mw) / 2).clamp(0, (screen_width - mw).max(0)),
                 screen_height - mh,
             ),
         };
@@ -2271,7 +2692,7 @@ impl Ui {
                 });
                 editor.docked_size()
             } else if self.edge.state().is_searching() {
-                let size = measure(self.edge.search_panel.upcast_ref());
+                let size = self.edge.search_size.get();
                 self.edge
                     .stack
                     .child_by_name("search")
@@ -2317,13 +2738,20 @@ impl Ui {
                 ScreenEdge::Top => (along, th + gap),
                 ScreenEdge::Bottom => (along, screen_height - th - gap - height),
             };
+            let (x, y) = (x.max(0), y.max(0));
             position(self.edge.stack.upcast_ref(), x, y);
             self.edge.panel_bounds.set((x, y, width, height));
-            if self.edge.state().is_searching() {
+            if self.edge.state().is_searching()
+                && self
+                    .edge
+                    .search_placement
+                    .replace(Some((x, y, width, height)))
+                    != Some((x, y, width, height))
+            {
                 self.edge
                     .search_popover
                     .set_pointing_to(Some(&gtk::gdk::Rectangle::new(x + width / 2, y - 1, 1, 1)));
-                if self.edge.search_popover.is_visible() {
+                if self.edge.search_popover.is_visible() && !self.edge.output_suspended() {
                     self.edge.search_popover.present();
                 }
             }
@@ -2424,22 +2852,19 @@ impl Ui {
         );
     }
     pub(super) fn note_limits(&self) -> (i32, i32) {
-        gtk::gdk::Display::default()
-            .and_then(|display| {
-                display
-                    .monitors()
-                    .item(0)
-                    .and_downcast::<gtk::gdk::Monitor>()
-            })
+        // Layer coordinates start at (0, 0) on the selected output. GDK's
+        // desktop-global x/y must not be added, nor logical sizes scaled again.
+        self.edge
+            .monitor
+            .borrow()
+            .as_ref()
             .map(|monitor| {
                 let geometry = monitor.geometry();
-                (
-                    geometry.width().max(editor::MIN_WIDTH),
-                    geometry.height().max(editor::MIN_HEIGHT),
-                )
+                (geometry.width().max(1), geometry.height().max(1))
             })
             .unwrap_or((720, 500))
     }
+
     pub(super) fn docked_pointer(&self, gesture: &gtk::GestureDrag) -> Option<(f64, f64)> {
         // The panel surface has a fixed screen origin, including during resize.
         gesture.current_event()?.position()

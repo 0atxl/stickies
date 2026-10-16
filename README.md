@@ -12,7 +12,7 @@ The interaction is simple. Recent or pinned notes sit at the screen edge. Hoveri
 - Plain-text notes and checklists with optional inline formatting, undo/redo and Copy text.
 - Target Wayland broadly. Hyprland is the current testing environment; KDE Plasma Wayland, Sway and other Layer Shell compositors are intended targets whose support must be verified.
 
-The current edge implementation requires the Layer Shell protocol. GNOME Wayland without Layer Shell cannot run that edge implementation; no fallback is implemented. This is a protocol limitation, not a Hyprland-only product scope. X11, Windows and macOS are outside this release.
+The edge implementation requires Wayland with `zwlr_layer_shell_v1` version 4 or newer for on-demand keyboard focus. Startup checks support before creating the edge windows and prints a diagnostic if it is unavailable or too old. GNOME Wayland without Layer Shell cannot run that edge implementation; no fallback is implemented. This is a protocol limitation, not a Hyprland-only product scope. X11, Windows and macOS are outside this release.
 
 ## Status
 
@@ -24,9 +24,11 @@ Notes save after 750 ms of quiet time. Failed saves retain the editor. Only dock
 
 The strip supports all four edges, four/five visible notes, Classic/Stacked tabs and Pills/Bar markers. Current design, dimensions, menus and motion are described in the local specification. They are settled, not an invitation to add controls or redesign them.
 
+The single strip retains its selected monitor while available. Both layer windows use that monitor's logical coordinates; removal selects the first valid remaining GDK monitor. With no outputs, the windows stay hidden until an output returns. The owner confirmed resolution placement and accepted fixed-size Search without no-match jitter. Temporary diagnostics have been removed. Multi-monitor behavior remains unverified. Existing layout minimums remain: a docked note needs 300 × 280 logical pixels plus its adjacent strip and gap. Smaller outputs can leave controls outside the visible area. Separate note placement remains compositor-owned.
+
 ## Remaining work
 
-Finish saving/formatting/history, focus, timeout, startup/shutdown, accessibility and scaling verification. Fix basic multi-monitor correctness so surface selection and geometry agree and notes remain reachable after display changes. Automatic cursor-following is deferred. Verify Wayland environments in stages before claiming support, then package Arch/AUR and GitHub artifacts with an application icon, metadata, licences and safe installation/upgrades/removal.
+Finish saving/formatting/history, focus, timeout, startup/shutdown, accessibility and scaling verification. Manually verify the implemented shared-output selection and recovery after monitor, resolution and scale changes. Automatic cursor-following is deferred. Verify Wayland environments in stages before claiming support, then package Arch/AUR and GitHub artifacts with an application icon, metadata, licences and safe installation/upgrades/removal.
 
 Google Drive sync remains a future requirement outside the first release, with its long-term scope needing a separate decision. No sync integration currently exists. Extra Settings additions and manual drag ordering are removed from finishing work. Additional package formats are deferred. Dedicated Markdown support, export and application-level note encryption are outside the planned scope.
 
@@ -34,7 +36,7 @@ Current project documentation: [specification](agent-docs/SPEC.md), [milestone](
 
 ## Requirements
 
-- A Wayland compositor with Layer Shell support. Protocol availability alone is not verified Stickies support.
+- A Wayland compositor with `zwlr_layer_shell_v1` version 4 or newer. Protocol availability alone is not verified Stickies support.
 - Rust and Cargo.
 - GTK4, libadwaita 1.7 or newer, and gtk4-layer-shell development libraries.
 - Fontconfig and `glib-compile-resources`. Bundled fonts and their licenses are in `assets/fonts`.

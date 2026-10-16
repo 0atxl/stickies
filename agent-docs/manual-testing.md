@@ -4,6 +4,57 @@ The UI/UX is accepted. Verify correctness against [SPEC.md](SPEC.md) without red
 
 The October 16 finishing tweaks received partial runtime verification. The focused Search follow-up below resolves the two observed Search failures in isolated Sway. The owner subsequently confirmed the requested normal-desktop Search checks passed. Other unchecked behavior remains pending; these results do not establish broad Wayland compatibility.
 
+## October 16 fixed Search size acceptance
+
+Before the local commit, the owner explicitly reconfirmed that resolution recovery and no-match Search jitter pass and accepted the fixed-size layout. These are owner-reported desktop checks. Multi-monitor behavior remains unverified, and the 24 known GTK deprecation warnings remain unresolved.
+
+The owner subsequently reported that resolution changes now place the app and strip correctly. `/tmp/stickies-layout.SU5R6m/resolution.log` reached its 200-record limit without a recorded resolution change, so that result remains owner-reported. The complete `search.log` recorded the no-match transition from 230 × 186 to 230 × 104 logical pixels, then stable geometry until dismissal. This does not support a continuing app placement loop in that capture. The owner reported visual improvement with the temporary `GSK_DEBUG=full-redraw` launch; the additional capture was truncated. Neither the photo nor these captures establish a rendering root cause.
+
+The owner approved the fixed-size Search change, then accepted its appearance and explicitly confirmed the jitter was gone, including searches with no matches. The popup retains its existing width request and full-list height by reserving the 128-pixel results viewport for every query. The no-match/create action appears at the top of that same region, with unused space below. The existing CSS, focus/opening order, scrolling, keyboard actions and outside-click dismissal remain. Query-dependent results-height calculation is removed. Full redraw is not enabled in production code. After that confirmation, temporary diagnostic code, file writing, environment-variable handling, passive popup hooks and trace call sites were removed. Saved capture files were left untouched. No full-redraw override is enabled by the app.
+
+The fixed-size implementation passed formatting, locked offline compilation, Clippy with `-D warnings -A deprecated`, and targeted diff inspection before owner review. Compilation reported 24 known GTK deprecation warnings; Clippy allowed them and reported no additional warnings. After diagnostic removal, formatting, locked offline compilation, Clippy with `-D warnings -A deprecated`, and focused diff checks passed. Compilation still reported 24 known GTK deprecation warnings; Clippy allowed those and reported no additional warnings. Inspection confirmed all temporary logging code and environment-variable support were removed, leaving the approved fixed-size change intact. The agent ran no tests or app sessions and changed no tests.
+
+Owner acceptance establishes the appearance and no-match jitter result on that desktop. It does not establish all-edge, multi-monitor, unsupported-protocol or other unchecked behavior. The cleanup build itself has only static verification. When tests are separately authorized, the existing Search layout regression should assert stable outer bounds across result counts. Additional scrolling, navigation, creation and dismissal regressions remain useful future checks; no new pass is inferred here.
+
+## October 16 rebuilt-binary recheck and temporary diagnostic
+
+The owner fully quit Stickies, ran `cargo build --locked --offline`, and launched `./target/debug/stickies`. Both manual checks **failed again** after the layout follow-up: resolution changes left the strip incorrectly positioned, and Quick Search still jittered with no matches. Neither defect is resolved. The previous static hypotheses did not produce a working fix. Focus previously passed; multi-monitor behavior remains unverified. Resolution changes with Search open remain unexercised because desktop settings dismisses Search normally.
+
+Temporary opt-in geometry logging was added with owner approval to distinguish notifications, requested placement, actual allocations and native popup results. It logged no note identifiers, titles, bodies, search text or monitor names. Background writes, bounded nonblocking sends, a 200-record cap and explicit terminal markers kept tracing optional. Formatting, locked offline compilation, Clippy and static inspection passed with the 24 known GTK deprecation warnings. No agent-run tests, app sessions or benchmarks ran.
+
+The saved captures are under `/tmp/stickies-layout.SU5R6m`. `resolution.log` and `search-full-redraw.log` reached the cap; `search.log` ended normally. The observations and owner confirmation above led to the approved fixed-size layout. The rendering root cause remains unestablished. The temporary instrumentation and `STICKIES_LAYOUT_DIAG` support have now been removed; these capture files remain historical evidence, not an active interface. App geometry alone cannot establish compositor-global placement.
+
+## October 16 resolution and Search follow-up
+
+Owner verification of the uncommitted monitor change found two failures: after a resolution change, the strip and docked note remained away from the edge until a click; Quick Search jittered with no matches. Focus behavior passed the owner's check. Multi-monitor behavior remains unverified because no second monitor was available. Changing resolution through desktop settings dismisses Search normally, so resolution changes with Search remaining open were not exercised. Preserve that dismissal behavior.
+
+The follow-up observes native layout and final widget allocation on both layer windows. Actual dimension changes schedule one coalesced placement pass. Recovery and pending Search opening use those events rather than repeating frame callbacks. Search measures list content with the existing 128-pixel cap, caches the panel request, and updates popup placement only when bounds change. Active CSS classes are retained during placement instead of removed and reapplied. Closing Search clears pending opening/selection work; no-output and shutdown guards prevent queued layout from reviving hidden content. All Notes sizing is unchanged: its 720 × 500 logical default occupies a different fraction of the screen when resolution changes. No incorrect scaling has been established.
+
+Static verification passed: `cargo fmt --all`, `cargo check --locked --offline`, `cargo clippy --locked --offline -- -D warnings -A deprecated`, and targeted diff inspection. Compilation reported 24 known GTK deprecation warnings; Clippy allowed those deprecations and reported no additional warnings. Inspection covered both native/allocation observers, conditional sizing/presentation, dismissal/no-output guards and handler cleanup. The subsequent rebuilt-binary recheck above failed both cases. Monitor recovery is not complete. The following checklist remains open:
+
+- Change resolution in both directions with the strip dormant, revealed and with a docked note. It must return to the correct edge without clicking, on all four edges.
+- Type through matching, unmatched and blank Search queries, including repeated unmatched edits. Check compact height, stable position, keyboard navigation and creation.
+- Dismiss Search with Escape or outside clicks while content is changing. It must stay closed; reopening must accept typing normally. Desktop settings may dismiss it normally.
+- Confirm focus still behaves correctly and pending docked edits survive. Multi-monitor checks remain deferred to suitable hardware.
+
+No tests, test edits, app sessions, benchmarks or desktop configuration changes were performed by the agent. Earlier passing Search results do not establish correctness of this follow-up.
+
+## October 16 monitor safety implementation
+
+The owner approved shared-output selection, monitor lifecycle/geometry/scale recovery and a Layer Shell v4+ startup check, while retaining existing minimum sizes. This pass changes no tests and runs no tests, app sessions, compositor sessions, display simulations or benchmarks. Earlier runtime results do not verify this change.
+
+Static checks passed: `cargo fmt --all`, `cargo check --locked --offline`, `cargo clippy --locked --offline -- -D warnings -A deprecated`, and focused diff inspection. Compilation reported the same 24 known GTK deprecation warnings. Clippy explicitly allowed those deprecations and reported no additional warnings. Inspection covered output-local geometry, no-output visibility gates, retained editor/Search state, callback cancellation and handler disconnection. Compilation does not establish runtime or compositor correctness.
+
+The owner subsequently reported the failures and partial results above. The remaining manual checklist is:
+
+- On all four edges, change resolution and normal/fractional scale. Confirm both windows, input regions, docked controls and Search remain aligned on the selected output. Outputs below the existing layout minimum can clip controls; there is no compact layout.
+- Add/reorder monitors and move the pointer between them. The single strip should stay on its selected monitor. Remove it and confirm one strip resumes on the first valid remaining output.
+- Unplug with unsaved docked edits, selection/history and a Search query/result selection. Confirm retained state, save guards, typing, dismissal and subsequent reopening. Check with another app focused to detect focus stealing.
+- Temporarily remove all outputs, trigger ordinary visibility refreshes, then restore one. Check retained edits/Search, recovery, inactivity resumption and absence of duplicate strips or stale callbacks.
+- Check missing Layer Shell and versions below v4 for a clear startup diagnostic and no edge windows. Separate-note placement/recovery remains compositor-owned.
+
+Later regression coverage should cover selection retention/fallback, no-output visibility gating, cancellation of pending Search/recovery work and protocol rejection. Existing Search allocation/focus regressions should be rerun only with separate authorization.
+
 ## October 16 owner desktop confirmation
 
 The owner explicitly answered "All listed checks passed" for the following normal-desktop Search checks:
@@ -137,8 +188,8 @@ For each authorized check, record the commit/diff, compositor and version, nativ
 
 ## Wayland, accessibility and release
 
-- Follow the staged environments in [implementation.md](implementation.md). Record Layer Shell availability/version and native dependencies. Verify unsupported-protocol startup handling after its separate implementation. Protocol support alone is not app support.
-- Verify both layer surfaces and geometry use the same output after the monitor follow-up. Cover laptop-only, external-only, hotplug, resolution changes and mixed scale; notes and controls must stay reachable without lost edits or duplicate strips. Cursor-following is deferred.
+- Follow the staged environments in [implementation.md](implementation.md). Record Layer Shell availability/version and native dependencies. Verify the implemented missing/older-than-v4 protocol startup rejection. Protocol support alone is not app support.
+- Verify both layer surfaces and geometry use the same output after the monitor implementation. Cover laptop-only, external-only, hotplug, resolution changes and mixed scale; notes and controls must stay reachable without lost edits or duplicate strips. Cursor-following is deferred.
 - Verify current focus, toplevel movement/resizing and default/minimum sizes at normal, fractional and high scale. Separate-note floating must not depend on the development machine's rules. Test fullscreen Top/Overlay policy. Omarchy DND is the only current provider; other desktops leave the strip visible.
 - Check keyboard traversal, actual accessible names/roles/states and readable focus in editors, Settings, menus and Search. No design change is implied by a verification request.
 - Verify one running instance and all four CLI/D-Bus actions through the README commands. Repeated Search retains its query; actions respect save guards and Toggle strip cancels Reposition.
