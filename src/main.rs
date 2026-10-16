@@ -17,7 +17,9 @@ mod storage;
 mod text_editing;
 mod ui_assets;
 
-use app::{Action, AppState, NoteColor, NoteId};
+#[cfg(test)]
+use app::NoteColor;
+use app::{Action, AppState, NoteId};
 use config::Config;
 #[cfg(test)]
 use config::ScreenEdge;
@@ -138,11 +140,7 @@ impl Ui {
             return;
         }
         let draft = title.trim().is_empty();
-        let created = if draft {
-            self.storage.create_draft(NoteColor::Yellow)
-        } else {
-            self.storage.create_note(title, "", NoteColor::Yellow)
-        };
+        let created = self.storage.create_new_note(title);
         match created {
             Ok(note) => {
                 if !draft {

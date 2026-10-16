@@ -2,6 +2,8 @@
 
 The UI/UX is accepted. Verify correctness against [SPEC.md](SPEC.md) without redesigning it or restoring retired controls. This checklist requires separate execution authorization. No tests, benchmarks or app sessions run as part of the mechanical cleanup.
 
+The October 16 finishing tweaks are implemented but have no runtime verification. The owner reserves all tests and app sessions for a new session. Compilation/static checks do not establish the behaviors below.
+
 ## Isolation and reporting
 
 Use disposable XDG data/config/cache directories, an isolated Wayland display and a private session bus. Different XDG paths alone do not isolate a GApplication instance. Never use or alter the owner's saved notes or desktop configuration. Retain failure fixtures and stderr until investigated. Avoid historical review launchers that stamp schema 3 after applying all migrations.
@@ -18,6 +20,8 @@ For each authorized check, record the commit/diff, compositor and version, nativ
 ## Notes, drafts and saving
 
 - A fresh database stays empty. New drafts from either creation entry point stay out of tabs, markers, lists and search. Existing blank notes remain visible.
+- With no saved active or archived notes, All Notes hides the collection filters and offers the welcome message and Create your first note action. Publishing the first note reveals filters. Keep filters for an empty search result or empty Active/Archived collection when another collection contains notes. Deleting the last saved note hides filters; Delete Undo restores them. Use only empty/single-note and single-archived-note boundaries.
+- New notes from the strip, All Notes, CLI and nonblank unmatched search use the existing palette with a random stored color different from the most recently created note's stored color. Reopening/restarting preserves colors, and manual color changes remain intact. A few creations within the ordinary collection suffice; no distribution benchmark is required.
 - The first successful nonblank title/body save publishes a draft in normal order; failed saves keep it hidden and open. Style/color/pin alone do not publish it.
 - Closing the last view of a still-blank draft removes it. Another live view and pop-out transfer keep it available. Startup removes orphan drafts without removing old blank or published notes.
 - Edit a note in All Notes and a separate window. Both share title/body, formatting, style and one save owner. Closing one view preserves pending work in the other; reopening an existing separate note focuses it.
@@ -38,12 +42,14 @@ For each authorized check, record the commit/diff, compositor and version, nativ
 - Search literal title/body text, overflow notes and Unicode case variants. Recent/Title sorting and persistent ordering Pin agree between All Notes and the strip. Individual Always open does not reorder notes.
 - Archive/restore and Delete Undo preserve content, collection and pin state. Archived previews show read-only checkboxes; only Copy and Restore are enabled. Individual More has no Archive. All Notes More has canvas samples and Copy/Archive-or-Restore/Delete icons. Individual deletion shows the single replaceable six-second edge toast.
 - Color is eight columns by two rows. Aa has four font samples and S/M/L. Canvas samples and individual list actions are in More. Footer menus switch on the first click, open inward on each edge and keep writing space fixed. Native emoji uses the adjacent compact chooser. Do not expect a floating selection bubble, whole-note weight control, Find, previews or title tooltips.
+- Pick several emojis in the title and body without reopening the chooser manually. Check each inserts once at the advancing caret, search/scroll remain usable, and native recents, skin-tone variants and keyboard selection still work. Escape/outside click closes the chooser without reopening it or closing the note. Check undo/redo and save/reopen through the existing history path; watch for remapping flicker or focus loss.
 
 ## Edge, focus and timeout
 
 - Check Left/Right vertical titles and Top/Bottom horizontal titles, Classic/Stacked, Pills/Bar and four/five slots, including few/empty notes and long titles. Strip order follows the active sort and excludes drafts/archived/deleted notes.
 - Verify the 140 ms reveal dwell, 350 ms leave grace, common 160/110 ms reveal/collapse clock and current attached hover behavior. Reduced/system-disabled motion settles immediately. Geometry and input bounds remain stable through reversals, switches and fades.
-- Search stays open after focus loss/pointer departure. Its hidden scrollbar still permits wheel/arrow access to every result; Enter opens the selected note or creates from a nonblank unmatched title. Empty query never creates. Escape/control actions dismiss Search explicitly.
+- Quick Search stays open on pointer departure, including focus-following pointer movement, and dismisses on an outside click through native popup behavior. The owner accepts that a first outside click may only dismiss search and require another click in the underlying app. Check clicks on the desktop, another app and strip controls, plus Escape, result activation and reopening with an empty query. Its hidden scrollbar still permits wheel/arrow access to every result; Enter opens the selected note or creates from a nonblank unmatched title. Empty query never creates. Check all four edge placements and reduced-motion behavior without changing the ordinary workload. Hover-to-reveal and marker-click behavior remain unchanged.
+- Open Quick Search through CLI/D-Bus in a running process and at fresh startup. Confirm the native popup maps, receives typing and dismisses correctly without a stale input grab or focus warning. These launch paths may have different input serials from clicking the strip Search button.
 - Clicking another tab saves and switches directly. The sheet crossfades and moves only as needed for its arrow. Manual Close reveals tabs; a successful inactivity close collapses to the marker. Failed saves retain editor and tabs.
 - Escape dismisses footer popovers or clears body selection before closing an individual note. Check the native context menu/emoji handoff, keyboard focus transfer and transparent-area click-through.
 - Off/1/2/5-minute choices persist. Only docked notes time out. Pointer-enter/motion, keys, clicks, scroll and controls restart activity. Always open cancels the timer; turning it off or changing the interval starts the appropriate fresh interval. Separate windows and All Notes never auto-close.

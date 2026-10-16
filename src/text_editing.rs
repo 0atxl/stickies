@@ -315,6 +315,62 @@ pub fn bind_emoji_placement(
             chooser.add_css_class("note-popover");
             chooser.add_css_class("note-emoji");
             compact_emoji_contents(chooser.upcast_ref());
+            let picked = Rc::new(std::cell::Cell::new(false));
+            let selected = picked.clone();
+            chooser.connect_emoji_picked(move |_, _| {
+                selected.set(true);
+                let selected = selected.clone();
+                // Ctrl-selection already keeps GTK's chooser open.
+                gtk::glib::idle_add_local_once(move || selected.set(false));
+            });
+            let source = source_weak.clone();
+            chooser.connect_closed(move |chooser| {
+                // GTK hides after emoji-picked. Restore only that closure, leaving
+                // Escape and outside-click dismissal to the native popover.
+                if !picked.replace(false)
+                    || !source
+                        .upgrade()
+                        .is_some_and(|source| source.is_mapped() && text_is_editable(&source))
+                {
+                    return;
+                }
+                let mut widgets = vec![chooser.clone().upcast::<gtk::Widget>()];
+                let mut entries = Vec::new();
+                let mut scrolls = Vec::new();
+                while let Some(widget) = widgets.pop() {
+                    if let Ok(entry) = widget.clone().dynamic_cast::<gtk::Editable>() {
+                        entries.push((entry.clone(), entry.text()));
+                    }
+                    if let Some(scroll) = widget.downcast_ref::<gtk::ScrolledWindow>() {
+                        let adjustment = scroll.vadjustment();
+                        scrolls.push((adjustment.clone(), adjustment.value()));
+                    }
+                    let mut child = widget.first_child();
+                    while let Some(widget) = child {
+                        child = widget.next_sibling();
+                        widgets.push(widget);
+                    }
+                }
+                chooser.popup();
+                for (entry, query) in entries {
+                    entry.set_text(&query);
+                }
+                for (adjustment, value) in &scrolls {
+                    adjustment.set_value(*value);
+                }
+                let weak = chooser.downgrade();
+                gtk::glib::idle_add_local_once(move || {
+                    if let Some(chooser) = weak.upgrade()
+                        && chooser.is_visible()
+                    {
+                        // GTK's popdown returns focus to the editor after closed.
+                        chooser.child_focus(gtk::DirectionType::TabForward);
+                        for (adjustment, value) in scrolls {
+                            adjustment.set_value(value);
+                        }
+                    }
+                });
+            });
             let sheet = sheet.clone();
             let source = source_weak.clone();
             let footer = footer.clone();

@@ -315,6 +315,8 @@ pub(super) struct Strip {
     pub(super) marker: gtk::Box,
     pub(super) tabs: gtk::Box,
     pub(super) edge_search: gtk::SearchEntry,
+    search_popover: gtk::Popover,
+    search_panel: gtk::Box,
     pub(super) search_results: gtk::ListBox,
     search_scroll: gtk::ScrolledWindow,
     pub(super) search_ids: RefCell<Vec<NoteId>>,
@@ -425,7 +427,24 @@ impl Strip {
         let search_create = gtk::Button::with_label("No active notes");
         search_create.add_css_class("edge-create-result");
         search_panel.append(&search_create);
-        stack.add_named(&search_panel, Some("search"));
+        // Keep the existing panel geometry and motion clock. The native popup
+        // supplies outside-click dismissal without treating pointer focus as a click.
+        let search_anchor = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        stack.add_named(&search_anchor, Some("search"));
+        let search_popover = gtk::Popover::builder()
+            .has_arrow(false)
+            .autohide(true)
+            .position(gtk::PositionType::Bottom)
+            .halign(gtk::Align::Center)
+            .valign(gtk::Align::Start)
+            .child(&search_panel)
+            .build();
+        search_popover.add_css_class("edge-search-popover");
+        root.add_overlay(&search_popover);
+        stack
+            .bind_property("opacity", &search_popover, "opacity")
+            .sync_create()
+            .build();
         let reposition_panel = gtk::Box::new(gtk::Orientation::Vertical, 12);
         reposition_panel.add_css_class("edge-search");
         reposition_panel.set_width_request(240);
@@ -486,6 +505,8 @@ impl Strip {
             marker,
             tabs,
             edge_search,
+            search_popover,
+            search_panel,
             search_results,
             search_scroll: scroll,
             search_ids: RefCell::new(Vec::new()),
@@ -551,6 +572,11 @@ impl Strip {
             self.stack.set_visible_child_name(panel);
         }
         let outgoing = self.outgoing_panel.borrow().is_some();
+        let retiring_search =
+            self.outgoing_panel.borrow().as_ref() == self.stack.child_by_name("search").as_ref();
+        if effects.panel != Some("search") && !retiring_search {
+            self.search_popover.popdown();
+        }
         self.stack.set_visible(effects.panel.is_some() || outgoing);
         self.pointer
             .set_visible(effects.pointer_visible || outgoing);
@@ -958,6 +984,9 @@ impl Ui {
         self.edge.stack.set_opacity(opacity);
         self.edge.pointer.set_opacity(opacity);
         self.edge.stack.set_visible(effects.panel.is_some());
+        if !self.edge.state().is_searching() {
+            self.edge.search_popover.popdown();
+        }
         self.edge.pointer.set_visible(effects.pointer_visible);
         self.edge.root.queue_draw();
     }
@@ -1085,6 +1114,15 @@ impl Ui {
             }
         });
         let weak = Rc::downgrade(ui);
+        ui.edge.search_popover.connect_closed(move |_| {
+            if let Some(ui) = weak.upgrade()
+                && ui.edge.state().is_searching()
+            {
+                ui.close_edge_search();
+                ui.schedule_hide();
+            }
+        });
+        let weak = Rc::downgrade(ui);
         ui.edge.search_create.connect_clicked(move |_| {
             if let Some(ui) = weak.upgrade() {
                 ui.activate_edge_search();
@@ -1118,8 +1156,8 @@ impl Ui {
                 {
                     ui.transition_edge(event);
                 }
-                // Search stays open across focus changes, including focus-following
-                // pointer movement and the handoff from the strip to its panel.
+                // Native popup dismissal handles outside clicks. Pointer focus
+                // changes and the strip/panel handoff do not dismiss search.
             });
         }
         let weak = Rc::downgrade(ui);
@@ -1220,7 +1258,11 @@ impl Ui {
             });
         }
         strip_root.add_controller(drag);
-        for target in [&window, &strip_window] {
+        for target in [
+            window.upcast_ref::<gtk::Widget>(),
+            strip_window.upcast_ref(),
+            ui.edge.search_popover.upcast_ref(),
+        ] {
             let keys = gtk::EventControllerKey::new();
             keys.set_propagation_phase(gtk::PropagationPhase::Capture);
             {
@@ -1721,8 +1763,8 @@ impl Ui {
         self.transition_edge(EdgeEvent::Search);
         self.edge.edge_search.set_text("");
         self.refresh_edge_search();
-        self.place_edge();
         self.transition_edge(EdgeEvent::FocusWindow);
+        self.edge.search_popover.popup();
         self.edge.edge_search.grab_focus();
     }
 
@@ -1798,6 +1840,7 @@ impl Ui {
             } else {
                 "No matches. Create note"
             });
+        self.place_edge();
         // Rebuilt rows need their first allocation before scrolling to them.
         let weak = Rc::downgrade(self);
         self.edge.search_results.add_tick_callback(move |_, _| {
@@ -2196,6 +2239,14 @@ impl Ui {
                     _ => gtk::gdk::SurfaceEdge::SouthEast,
                 });
                 editor.docked_size()
+            } else if self.edge.state().is_searching() {
+                let size = measure(self.edge.search_panel.upcast_ref());
+                self.edge
+                    .stack
+                    .child_by_name("search")
+                    .unwrap()
+                    .set_size_request(size.0, size.1);
+                size
             } else {
                 measure(self.edge.stack.child_by_name(panel).unwrap().upcast_ref())
             };
@@ -2237,6 +2288,14 @@ impl Ui {
             };
             position(self.edge.stack.upcast_ref(), x, y);
             self.edge.panel_bounds.set((x, y, width, height));
+            if self.edge.state().is_searching() {
+                self.edge
+                    .search_popover
+                    .set_pointing_to(Some(&gtk::gdk::Rectangle::new(x + width / 2, y - 1, 1, 1)));
+                if self.edge.search_popover.is_visible() {
+                    self.edge.search_popover.present();
+                }
+            }
         }
         if self.edge.toast_note.get().is_some() {
             let (width, height) = measure(self.edge.delete_toast.upcast_ref());

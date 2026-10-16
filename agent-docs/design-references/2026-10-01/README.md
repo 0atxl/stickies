@@ -2,13 +2,13 @@
 
 Unchanged copies of the updated [UI/UX spec](stickies-uiux-spec.md) and [Settings image](settings.png) supplied from `/home/rinzler/Downloads`. The September 30 reference set remains preserved separately. No new SVG pack or Rust border reference was supplied with this update.
 
-Use [the implementation plan](../../ui-implementation-plan.md) for the current agreed behavior and implementation status. The attachment's recipes and its claim to supersede older documents do not authorize implementation or override the user's direct clarifications. The user requested reference storage and documentation updates only, with no implementation started.
+Use the [current specification](../../SPEC.md) for accepted behavior and the [finishing roadmap](../../implementation.md) for remaining work. The commentary below records the original reference checkpoint. The attachment's recipes and its claim to supersede older documents do not authorize implementation or override the user's direct clarifications. The user requested reference storage and documentation updates only, with no implementation started.
 
 ## Changes from the September 30 spec
 
 Only sections 3.1 and 3.3 changed. The rest of the document is unchanged.
 
-| Area | Updated text | Current status |
+| Area | Updated text | Status at the reference checkpoint |
 |---|---|---|
 | Individual tools | A floating popover replaces the permanent rail that widened the card. | Implemented in the stage 1 preview. Opening tools preserves note dimensions. |
 | Infinity and Pin | Infinity is retired and Pin belongs in the individual panel. | Implemented. Individual Pin means Always open; All Notes Pin controls ordering. |
@@ -31,4 +31,4 @@ The image shows Theme, global Font, Paper pattern, Reduce motion; strip enableme
 - Shortcut badges are examples. Exact defaults, registration and whether they are editable remain unresolved. Do not display example combinations as active bindings.
 - Settings host/width and the Reposition mode's visual treatment, save/cancel behavior and exit controls still need settling. The portrait image is not a required pixel size.
 
-The implementation plan contains the proposed next steps and acceptance checks. Original source files in this directory stay unchanged so future updates can be compared.
+Current next steps and acceptance checks are in the [roadmap](../../implementation.md) and [verification checklist](../../manual-testing.md). Original source files in this directory stay unchanged so future updates can be compared.

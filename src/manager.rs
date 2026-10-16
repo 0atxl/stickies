@@ -76,6 +76,8 @@ struct ManagerUi {
     save_state: gtk::Label,
     save_indicator: gtk::Stack,
     filters: Vec<(gtk::Button, NoteCollection)>,
+    filter_row: gtk::Box,
+    has_saved_notes: Cell<bool>,
     pages: gtk::Stack,
     empty_title: gtk::Label,
     empty_text: gtk::Label,
@@ -133,6 +135,20 @@ impl ManagerUi {
             }
             self.search.set_text("");
             preferred = Some(id);
+        }
+        match self.storage.has_notes() {
+            Ok(has_notes) => {
+                self.has_saved_notes.set(has_notes);
+                self.filter_row.set_visible(has_notes);
+                if !has_notes {
+                    self.collection.set(NoteCollection::Active);
+                }
+            }
+            Err(error) => {
+                self.message(&format!("Could not load notes: {error}"));
+                self.busy.set(false);
+                return;
+            }
         }
         for (button, collection) in &self.filters {
             if self.collection.get() == *collection {
@@ -307,8 +323,10 @@ impl ManagerUi {
             "No matching notes"
         } else if archived {
             "Archive is empty"
+        } else if !self.has_saved_notes.get() {
+            "Welcome to Stickies"
         } else {
-            "A little space for your thoughts"
+            "No active notes"
         });
         self.empty_text.set_text(if has_notes {
             "Select a note from the list to view or edit it."
@@ -316,8 +334,10 @@ impl ManagerUi {
             "Try another word or clear your search."
         } else if archived {
             "Notes you archive will appear here."
+        } else if !self.has_saved_notes.get() {
+            "Create your first note. Click the edge marker to reach your notes anytime."
         } else {
-            "Capture an idea, a list, or something to remember."
+            "Create a note or switch to All to see your archived notes."
         });
         self.empty_action.set_label(if has_notes {
             "Create a note"
@@ -325,6 +345,8 @@ impl ManagerUi {
             "Clear search"
         } else if archived {
             "Back to notes"
+        } else if !self.has_saved_notes.get() {
+            "Create your first note"
         } else {
             "Create a note"
         });
@@ -503,7 +525,7 @@ impl ManagerUi {
         if !self.release_editor() {
             return;
         }
-        match self.storage.create_draft(NoteColor::Yellow) {
+        match self.storage.create_new_note("") {
             Ok(note) => {
                 let row_id = self.list.selected_row().and_then(|row| {
                     self.notes
@@ -902,6 +924,8 @@ pub fn build_window(
         save_state,
         save_indicator,
         filters,
+        filter_row,
+        has_saved_notes: Cell::new(true),
         pages,
         empty_title,
         empty_text,

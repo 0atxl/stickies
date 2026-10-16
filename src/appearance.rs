@@ -142,6 +142,7 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .tab-title {{ font-family: Inter, sans-serif; font-size: 11px; font-weight: 600; }}
         .edge-result-color {{ min-width: 8px; min-height: 8px; border-radius: 50%; margin: 0; }}
         .edge-search {{ font-family: Inter, sans-serif; font-size: 13px; background: {bg}; color: {fg}; border: 1px solid {line}; border-radius: 10px; padding: 8px; }}
+        popover.edge-search-popover, popover.edge-search-popover > contents {{ background: transparent; padding: 0; margin: 0; border: none; box-shadow: none; }}
         .edge-search searchentry {{ min-height: 30px; background: transparent; color: {fg}; border: 1px solid {line}; border-radius: 8px; box-shadow: none; }}
         .edge-search list {{ background: transparent; }}
         .edge-search row {{ background: transparent; color: {fg}; min-height: 24px; padding: 2px 6px; border-radius: 6px; }}

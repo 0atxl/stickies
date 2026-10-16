@@ -16,6 +16,8 @@ Stickies is a small, native Linux scratchpad. It uses Rust, GTK4/libadwaita, Way
 
 ## Implemented work
 
+The owner approved the October 16 finishing tweaks: a welcome message and hidden collection filters when no saved notes exist, varied persistent colors on creation, continued native emoji selection, and native outside-click dismissal for Quick Search. Hover-to-reveal stays unchanged. Native popup dismissal may consume the first outside click, a tradeoff the owner accepted. These changes require focused runtime verification in a new session; no tests or app sessions are authorized in this implementation task. The current checklist records the small boundary cases.
+
 | Category | Evidence and limit |
 |---|---|
 | Implemented and verified | UI design accepted by the owner. Current static/compile checks belong in the milestone. Acceptance does not establish every runtime or compositor behavior. |

@@ -2,6 +2,8 @@
 
 The owner accepts the current UI/UX and design choices. UI design is complete. The active work is reliability, Wayland compatibility and finishing a simple sticky-notes app. Remaining behavioral verification does not reopen design decisions.
 
+The owner subsequently approved four finishing tweaks on October 16: the empty-app welcome and conditional collection filters, random persistent colors for new notes, continued emoji selection, and Quick Search outside-click dismissal. Hover-to-reveal remains unchanged. The owner accepted native popup behavior, where the dismissing outside click may require a second click to activate another application. Implementation and formatting/compile/static checks are authorized; all tests, benchmarks and app sessions are reserved for a new session. These changes do not authorize commits or pushes.
+
 [SPEC.md](SPEC.md) describes the implementation. [implementation.md](implementation.md) classifies remaining work, dependencies and completion conditions, including [focused follow-ups](implementation.md#focused-follow-ups). [manual-testing.md](manual-testing.md) describes future verification; it is not authorization to run it. These current documents are tracked in Git.
 
 ## Current scope
@@ -28,9 +30,9 @@ The owner accepts the current UI/UX and design choices. UI design is complete. T
 
 The approved cleanup removes unused resources and creation notifications, simplifies control types and identical theme branches, corrects stale comments/test expectations, completes CI dependencies and font notices, and updates current documentation. Monitor, performance, state and lifetime refactors are separate proposals.
 
-No tests, benchmarks or app sessions are authorized for the agent in this cleanup. Allowed checks are formatting, locked offline compilation/build, Clippy with the existing GTK deprecation allowance, desktop-entry validation and static resource/reference checks. Test code may compile; it must not execute. The owner has authorized a local commit of the reviewed cleanup and documentation. Push remains unauthorized.
+No tests, benchmarks or app sessions are authorized for the agent in this cleanup. Allowed checks are formatting, locked offline compilation/build, Clippy with the existing GTK deprecation allowance, desktop-entry validation and static resource/reference checks. Test code may compile; it must not execute. The reviewed mechanical cleanup and documentation were committed locally as `8750f23`. The later historical removals are not yet committed. Further commits and pushes require explicit owner instruction.
 
-Completed checks on the final source:
+Completed checks on the mechanical cleanup source at `8750f23`:
 
 - `cargo fmt --all` and `cargo fmt --all -- --check` passed.
 - `cargo check --locked --offline --all-targets` passed, compiling test code without running it.
@@ -45,4 +47,10 @@ The owner subsequently performed manual review. Private D-Bus launches logged ac
 
 Current documentation no longer links to ignored/untracked audit files: useful findings and historical measurements are consolidated in the tracked roadmap. Git-aware static link inspection checks tracked destinations and heading anchors in the proposed contents, rather than local existence alone. No fresh checkout was created.
 
-Historical document, screenshot and tooling deletion still requires approval of the exact list in [cleanup-review.md](cleanup-review.md), included as a tracked current document with this commit. All 28 historical candidates remain in place, including ignored/untracked material. No historical files were moved into HISTORY.md.
+The owner subsequently approved all 28 original historical deletion candidates and the 2,848 images and 38 videos from five associated review galleries, and declined backups. All approved files were removed; retained reference indexes and galleries were updated. No deletion candidates remain pending from [this review](cleanup-review.md). Other gallery media, supplied reference images/specifications/SVG packs, runtime source/assets and saved notes remain unchanged. The later historical removals remain uncommitted.
+
+## October 16 finishing tweaks
+
+The four approved tweaks are implemented and remain uncommitted. Formatting, locked offline all-target compilation and Clippy with the existing deprecation allowance passed. Compilation reported the same 24 existing GTK deprecation warnings; Clippy reported no additional warnings. Static documentation links and whitespace were checked. Logs are `/tmp/stickies-tweaks-check.log` and `/tmp/stickies-tweaks-clippy.log`.
+
+No tests, benchmarks or app sessions were run. The [verification checklist](manual-testing.md) records empty/single/archived-note boundaries, all creation paths and color persistence, repeated title/body emoji insertion with native remapping/focus/variants/history, and native search dismissal/placement/keyboard behavior. Include CLI/D-Bus search on both a running process and fresh startup because native popup grabs depend on desktop input delivery. Runtime correctness, visual placement and cross-compositor behavior remain unverified. Hover preferences, saved-data encoding, migrations, formatting and shortcuts are unchanged.

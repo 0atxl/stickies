@@ -1,56 +1,58 @@
-# Historical cleanup awaiting approval
+# Historical cleanup completed
 
-No file below has been deleted or changed during mechanical cleanup. This is the exact proposed deletion list, not authorization to execute it. No directory wildcard is approved. It covers superseded UI plans/status/checklists, the obsolete October 1 tools preview, one duplicate image and obsolete live-input review scripts. Unique current requirements, failure details and completion conditions are consolidated in the tracked SPEC and roadmap. No material was moved into HISTORY.md.
+The owner approved all 28 original historical deletion candidates and the images/videos associated with the nine obsolete documents and live-input scripts. All approved files have been removed. No deletion candidates remain pending from this review. The owner declined backups; no backup archive is retained.
 
-## Recovery and deletion risk
+Current behavior, requirements, useful failure details and historical performance measurements are consolidated in the tracked SPEC and finishing roadmap. Runtime source, application assets, migrations, saved notes, supplied reference images/specifications and SVG packs remain unchanged. Reference index links and retained galleries were updated for the removals.
 
-Git inspection compared current bytes with HEAD and every blob reachable from local refs, including the existing comparison worktree's commit. `a2105f2` is the pre-cleanup HEAD. All 18 tracked candidates match HEAD exactly and have no local changes. The `agent-docs` ignore rule also covers tracked files but does not untrack them. The other 10 candidates are ignored/untracked, with no exact Git copy; one has the identical retained image noted below.
+## Removed original candidates
 
-**Deleting the nine ignored/untracked documents and scripts with no retained exact copy would lose their current contents.** Approval must explicitly include that loss, or those files must be preserved separately first. This report is explicitly tracked with the current documentation despite the directory ignore rule. Original references, licences and runtime source are not deletion candidates.
+The 18 tracked files matched their Git contents before removal and remain recoverable at `a2105f2`. Nine ignored/untracked documents/scripts had no exact Git copy. The ignored duplicate image matched the retained local image byte for byte.
 
-References below come from Markdown/HTML destinations and explicit script paths. References inside another candidate disappear only if that candidate is also approved. For retained historical galleries, update links and version-specific launch guidance before deletion. Dynamic image-name construction also needs review of the listed gallery script; do not invent a replacement launcher.
+| Original row | Removed file | Recovery |
+|---|---|---|
+| 1 | `agent-docs/ui-implementation-plan.md` | Exact copy in Git at `a2105f2` |
+| 2 | `agent-docs/stickies-redo-plan.md` | No Git copy; no backup retained |
+| 3 | `agent-docs/audit-2026-10-08.md` | No Git copy; no backup retained |
+| 4 | `agent-docs/HISTORY.md` | No Git copy; no backup retained |
+| 5 | `plans/README.md` | Exact copy in Git at `a2105f2` |
+| 6 | `agent-docs/design-previews/2026-10-01-tools/README.md` | Exact copy in Git at `a2105f2` |
+| 7 | `agent-docs/design-previews/2026-10-01-tools/minimal-dark-tools.png` | Exact copy in Git at `a2105f2` |
+| 8 | `agent-docs/design-previews/2026-10-01-tools/minimal-light-tools.png` | Exact copy in Git at `a2105f2` |
+| 9 | `agent-docs/design-previews/2026-10-01-tools/paper-18.png` | Exact copy in Git at `a2105f2` |
+| 10 | `agent-docs/design-previews/2026-10-01-tools/paper-21.png` | Exact copy in Git at `a2105f2` |
+| 11 | `agent-docs/design-previews/2026-10-01-tools/paper-24.png` | Exact copy in Git at `a2105f2` |
+| 12 | `agent-docs/design-previews/2026-10-01-tools/paper-bold.png` | Exact copy in Git at `a2105f2` |
+| 13 | `agent-docs/design-previews/2026-10-01-tools/paper-main-18.png` | Exact copy in Git at `a2105f2` |
+| 14 | `agent-docs/design-previews/2026-10-01-tools/paper-main-21.png` | Exact copy in Git at `a2105f2` |
+| 15 | `agent-docs/design-previews/2026-10-01-tools/paper-main-24.png` | Exact copy in Git at `a2105f2` |
+| 16 | `agent-docs/design-previews/2026-10-01-tools/paper-main-bold.png` | Exact copy in Git at `a2105f2` |
+| 17 | `agent-docs/design-previews/2026-10-01-tools/paper-pinned-tools.png` | Exact copy in Git at `a2105f2` |
+| 18 | `agent-docs/design-previews/2026-10-01-tools/paper-tools.png` | Exact copy in Git at `a2105f2` |
+| 19 | `agent-docs/design-previews/2026-10-01-tools/playful-tools.png` | Exact copy in Git at `a2105f2` |
+| 20 | `agent-docs/design-previews/2026-10-01-tools/text-size-preview.png` | Exact copy in Git at `a2105f2` |
+| 21 | `agent-docs/design-previews/2026-10-01-tools/tools-overview.png` | Exact copy in Git at `a2105f2` |
+| 22 | `agent-docs/design-previews/2026-10-01-paper-followup/tools.png` | Identical local image retained at `2026-10-01-paper/tools.png` |
+| 23 | `agent-docs/design-previews/2026-10-01-edge-strip/correction-2026-10-03/launch-review.py` | No Git copy; no backup retained |
+| 24 | `agent-docs/design-previews/2026-10-07-lightweight-edge/native-review.py` | No Git copy; no backup retained |
+| 25 | `agent-docs/design-previews/2026-10-07-lightweight-edge/native-theme-check.py` | No Git copy; no backup retained |
+| 26 | `agent-docs/design-previews/2026-10-09-edge-hover/record.py` | No Git copy; no backup retained |
+| 27 | `agent-docs/design-previews/2026-10-09-edge-motion/record.py` | No Git copy; no backup retained |
+| 28 | `agent-docs/design-previews/2026-10-09-edge-motion-fixes/record.py` | No Git copy; no backup retained |
 
-| # | Exact file | Why it can leave the working tree | Local state | Exact-content recovery | References requiring review/update |
-|---|---|---|---|---|---|
-| 1 | `agent-docs/ui-implementation-plan.md` | Superseded UI stages and pending decisions; current accepted behavior is in SPEC and current scope in the roadmap. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/ui-implementation-plan.md` | `agent-docs/HISTORY.md:15` [also proposed for deletion]<br>`agent-docs/HISTORY.md:64` [also proposed for deletion]<br>`agent-docs/design-references/2026-09-30/README.md:5`<br>`agent-docs/design-references/2026-10-01/README.md:5` |
-| 2 | `agent-docs/stickies-redo-plan.md` | Old executable prompt sequence contradicts the accepted controls and title-only edge. No unique current requirement remains. | Ignored and untracked | NO exact copy in reachable Git history | No literal local references found |
-| 3 | `agent-docs/audit-2026-10-08.md` | Audit of a superseded source snapshot. Remaining monitor/performance/lifetime issues are consolidated in the tracked roadmap. | Ignored and untracked | NO exact copy in reachable Git history | `agent-docs/HISTORY.md:79` [also proposed for deletion]<br>`agent-docs/HISTORY.md:81` [also proposed for deletion] |
-| 4 | `agent-docs/HISTORY.md` | Duplicate milestone/UI chronology. Concise rationale stays in ADRs; useful failure/verification limits stay in the tracked roadmap and retained evidence. | Ignored and untracked | NO exact copy in reachable Git history | No literal local references found |
-| 5 | `plans/README.md` | October 10 implementation checklist and status report. Its unique performance measurements are retained in the tracked roadmap, alongside current work. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:plans/README.md` | No literal local references found |
-| 6 | `agent-docs/design-previews/2026-10-01-tools/README.md` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/README.md` | `agent-docs/ui-implementation-plan.md:152` [also proposed for deletion]<br>`agent-docs/HISTORY.md:89` [also proposed for deletion] |
-| 7 | `agent-docs/design-previews/2026-10-01-tools/minimal-dark-tools.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/minimal-dark-tools.png` | No literal local references found |
-| 8 | `agent-docs/design-previews/2026-10-01-tools/minimal-light-tools.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/minimal-light-tools.png` | No literal local references found |
-| 9 | `agent-docs/design-previews/2026-10-01-tools/paper-18.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/paper-18.png` | No literal local references found |
-| 10 | `agent-docs/design-previews/2026-10-01-tools/paper-21.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/paper-21.png` | No literal local references found |
-| 11 | `agent-docs/design-previews/2026-10-01-tools/paper-24.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/paper-24.png` | `agent-docs/design-previews/2026-10-01-tools/README.md:7` [also proposed for deletion] |
-| 12 | `agent-docs/design-previews/2026-10-01-tools/paper-bold.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/paper-bold.png` | `agent-docs/design-previews/2026-10-01-tools/README.md:7` [also proposed for deletion] |
-| 13 | `agent-docs/design-previews/2026-10-01-tools/paper-main-18.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/paper-main-18.png` | No literal local references found |
-| 14 | `agent-docs/design-previews/2026-10-01-tools/paper-main-21.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/paper-main-21.png` | No literal local references found |
-| 15 | `agent-docs/design-previews/2026-10-01-tools/paper-main-24.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/paper-main-24.png` | `agent-docs/design-previews/2026-10-01-tools/README.md:7` [also proposed for deletion] |
-| 16 | `agent-docs/design-previews/2026-10-01-tools/paper-main-bold.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/paper-main-bold.png` | `agent-docs/design-previews/2026-10-01-tools/README.md:7` [also proposed for deletion] |
-| 17 | `agent-docs/design-previews/2026-10-01-tools/paper-pinned-tools.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/paper-pinned-tools.png` | `agent-docs/design-previews/2026-10-01-tools/README.md:5` [also proposed for deletion] |
-| 18 | `agent-docs/design-previews/2026-10-01-tools/paper-tools.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/paper-tools.png` | No literal local references found |
-| 19 | `agent-docs/design-previews/2026-10-01-tools/playful-tools.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/playful-tools.png` | No literal local references found |
-| 20 | `agent-docs/design-previews/2026-10-01-tools/text-size-preview.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/text-size-preview.png` | `agent-docs/design-previews/2026-10-01-tools/README.md:7` [also proposed for deletion] |
-| 21 | `agent-docs/design-previews/2026-10-01-tools/tools-overview.png` | Retired global-font, Regular/Bold and floating-tools preview. It has no current behavior or regression requirement; exact historical contents remain in Git. | Tracked, unchanged from HEAD | Exact bytes in `a2105f2:agent-docs/design-previews/2026-10-01-tools/tools-overview.png` | `agent-docs/design-previews/2026-10-01-tools/README.md:5` [also proposed for deletion] |
-| 22 | `agent-docs/design-previews/2026-10-01-paper-followup/tools.png` | Byte-identical to retained 2026-10-01-paper/tools.png; update the follow-up gallery to that retained copy. | Ignored and untracked | NO exact copy in reachable Git history; identical local copy retained at `2026-10-01-paper/tools.png` | `agent-docs/design-previews/2026-10-01-paper-followup/preview.html:1` |
-| 23 | `agent-docs/design-previews/2026-10-01-edge-strip/correction-2026-10-03/launch-review.py` | Applies all migrations then stamps schema 3; incompatible with migration 4. The current isolated verification procedure replaces its launch guidance. | Ignored and untracked | NO exact copy in reachable Git history | `agent-docs/design-previews/2026-10-07-lightweight-edge/README.md:36`<br>`agent-docs/design-previews/2026-10-07-lightweight-edge/README.md:39`<br>`agent-docs/design-previews/2026-10-07-lightweight-edge/native-review.py:17` [also proposed for deletion]<br>`agent-docs/design-previews/2026-10-07-lightweight-edge/native-theme-check.py:17` [also proposed for deletion]<br>`agent-docs/design-previews/2026-10-09-edge-motion/record.py:34` [also proposed for deletion]<br>`agent-docs/design-previews/2026-10-09-edge-motion-fixes/record.py:42` [also proposed for deletion]<br>`agent-docs/design-previews/2026-10-09-edge-hover/record.py:44` [also proposed for deletion]<br>`agent-docs/design-previews/2026-10-01-edge-strip/correction-2026-10-03/README.md:52`<br>`agent-docs/design-previews/2026-10-01-edge-strip/correction-2026-10-03/README.md:53`<br>`agent-docs/design-previews/2026-10-01-edge-strip/correction-2026-10-03/README.md:54`<br>`agent-docs/design-previews/2026-10-01-edge-strip/correction-2026-10-03/README.md:55`<br>`agent-docs/design-previews/2026-10-01-edge-strip/correction-2026-10-03/README.md:58` |
-| 24 | `agent-docs/design-previews/2026-10-07-lightweight-edge/native-review.py` | Version-specific live-input recorder depends on the obsolete launcher, old coordinates and missing /tmp helpers. Keep recordings and offline frame extractors as useful diagnostics. | Ignored and untracked | NO exact copy in reachable Git history | No literal local references found |
-| 25 | `agent-docs/design-previews/2026-10-07-lightweight-edge/native-theme-check.py` | Version-specific live-input recorder depends on the obsolete launcher, old coordinates and missing /tmp helpers. Keep recordings and offline frame extractors as useful diagnostics. | Ignored and untracked | NO exact copy in reachable Git history | No literal local references found |
-| 26 | `agent-docs/design-previews/2026-10-09-edge-hover/record.py` | Version-specific live-input recorder depends on the obsolete launcher, old coordinates and missing /tmp helpers. Keep recordings and offline frame extractors as useful diagnostics. | Ignored and untracked | NO exact copy in reachable Git history | No literal local references found |
-| 27 | `agent-docs/design-previews/2026-10-09-edge-motion/record.py` | Version-specific live-input recorder depends on the obsolete launcher, old coordinates and missing /tmp helpers. Keep recordings and offline frame extractors as useful diagnostics. | Ignored and untracked | NO exact copy in reachable Git history | No literal local references found |
-| 28 | `agent-docs/design-previews/2026-10-09-edge-motion-fixes/record.py` | Version-specific live-input recorder depends on the obsolete launcher, old coordinates and missing /tmp helpers. Keep recordings and offline frame extractors as useful diagnostics. | Ignored and untracked | NO exact copy in reachable Git history | No literal local references found |
+## Associated gallery media removed
 
-## Material retained
+The following five gallery trees contained 2,848 images and 38 videos, totaling 359,175,120 bytes, removed with owner approval. The original candidate list above adds 16 PNGs: 15 obsolete tools previews and one duplicate image.
 
-- Migrations 1-4, all runtime compatibility parsing, licences and original design-reference packs.
-- Current storage/session/history/native regression source and tests/probe_shutdown.py. They are not run in cleanup.
-- Concise architectural decisions and domain definitions.
-- Unique before/after regression screenshots, videos, logs and offline frame-extraction scripts. The obsolete tools preview above is the only complete screenshot set proposed for removal. Other captures are not part of this approval request.
-- `2026-10-01-stage1/paper-closed.png` is byte-identical to proposed `paper-21.png`. `2026-10-01-paper/tools.png` is byte-identical to proposed `2026-10-01-paper-followup/tools.png`. Both surviving copies remain untouched.
+| Gallery tree | Images | Videos |
+|---|---:|---:|
+| `agent-docs/design-previews/2026-10-01-edge-strip/correction-2026-10-03` | 180 | 12 |
+| `agent-docs/design-previews/2026-10-07-lightweight-edge` | 259 | 5 |
+| `agent-docs/design-previews/2026-10-09-edge-hover` | 311 | 7 |
+| `agent-docs/design-previews/2026-10-09-edge-motion` | 1380 | 4 |
+| `agent-docs/design-previews/2026-10-09-edge-motion-fixes` | 718 | 10 |
 
-A hash inventory found further duplicate PNG bytes across generated captures. That does not establish that every path is dispensable; frame order and gallery roles can matter. No bulk screenshot deletion or regeneration is proposed.
+Historical logs, event/analysis metadata and offline extraction source remain. Retained galleries identify their retired media, and the October 1 paper follow-up uses the identical retained tools image. Other gallery media outside the approved groups remain in place.
 
-## Approval scope
+## Verification and boundary
 
-Approve specific numbered rows, or all rows with explicit acknowledgement of ignored/untracked content that Git cannot recover. After approval, update retained references first, then delete only approved paths. Recheck current contents/recovery if any file changes. The eight unused runtime icons were already approved and are not in this pending list.
+Static file-integrity and reference checks cover the approved paths, retained duplicate, current tracked documentation links and protected runtime/reference files. No tests, benchmarks or app sessions were run for historical removal. These changes remain uncommitted; further commits and pushes require explicit owner instruction. The eight unused runtime icons were approved and removed in the earlier mechanical cleanup commit `8750f23`.

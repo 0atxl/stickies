@@ -126,6 +126,38 @@ impl Storage {
         self.insert_note("", "", color, true)
     }
 
+    pub fn create_new_note(&self, title: &str) -> Result<Note, StorageError> {
+        let previous: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT color FROM notes ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let previous = previous.as_deref().map(parse_color).transpose()?;
+        let choices = NoteColor::ALL.len() - usize::from(previous.is_some());
+        let index = gtk::glib::random_int_range(0, choices as i32) as usize;
+        let color = NoteColor::ALL
+            .into_iter()
+            .filter(|color| Some(*color) != previous)
+            .nth(index)
+            .expect("the note palette contains another color");
+        if title.trim().is_empty() {
+            self.create_draft(color)
+        } else {
+            self.create_note(title, "", color)
+        }
+    }
+
+    pub fn has_notes(&self) -> Result<bool, StorageError> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM notes WHERE deleted_at IS NULL AND created_at != ?1)",
+            [DRAFT_CREATED_AT],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn is_draft(&self, id: NoteId) -> Result<bool, StorageError> {
         Ok(self.connection.query_row(
             "SELECT created_at = ?2 FROM notes WHERE id = ?1",
