@@ -59,10 +59,7 @@ pub fn is_pointer_in_window(_window: &gtk::ApplicationWindow) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-pub fn connect_hover_fallback(
-    _window: &gtk::ApplicationWindow,
-    _on_tick: impl Fn(bool) + 'static,
-) {
+pub fn connect_hover_fallback(_window: &gtk::ApplicationWindow, _on_tick: impl Fn(bool) + 'static) {
 }
 
 #[cfg(target_os = "linux")]
@@ -109,7 +106,7 @@ mod imp_windows {
             WindowsAndMessaging::{
                 ASFW_ANY, AllowSetForegroundWindow, GWL_EXSTYLE, GetCursorPos, GetSystemMetrics,
                 GetWindowLongPtrW, GetWindowRect, HWND_NOTOPMOST, HWND_TOPMOST, SM_SWAPBUTTON,
-                SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
+                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
                 SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, WS_EX_APPWINDOW,
                 WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
                 WS_EX_TRANSPARENT,
@@ -380,18 +377,17 @@ mod imp_windows {
         while i < bytes.len() {
             if bytes[i] == 0x01 {
                 i += 1;
-                while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'p' || bytes[i] == b'x') {
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_digit() || bytes[i] == b'p' || bytes[i] == b'x')
+                {
                     out.push(bytes[i] as char);
                     i += 1;
                 }
                 continue;
             }
             let start = i;
-            let prev_ok = start == 0
-                || matches!(
-                    bytes[start - 1],
-                    b' ' | b'\t' | b'\n' | b':' | b'(' | b','
-                );
+            let prev_ok =
+                start == 0 || matches!(bytes[start - 1], b' ' | b'\t' | b'\n' | b':' | b'(' | b',');
             if prev_ok {
                 let mut j = start;
                 if j < bytes.len() && bytes[j] == b'-' {
@@ -483,9 +479,7 @@ mod imp_windows {
         let Some(hwnd) = window_hwnd(window) else {
             return;
         };
-        let scale = window
-            .surface()
-            .map_or(1, |s| s.scale_factor().max(1));
+        let scale = window.surface().map_or(1, |s| s.scale_factor().max(1));
         let (mon_x, mon_y) = monitor
             .map(|m| {
                 let g = m.geometry();
@@ -543,9 +537,7 @@ mod imp_windows {
         let Some(hwnd) = hwnd_opt else {
             return;
         };
-        let scale = window
-            .surface()
-            .map_or(1, |s| s.scale_factor().max(1));
+        let scale = window.surface().map_or(1, |s| s.scale_factor().max(1));
         let make_rgn = |(x, y, w, h): (i32, i32, i32, i32), pad: i32| unsafe {
             let left = ((x - pad).max(0)) * scale;
             let top = ((y - pad).max(0)) * scale;
@@ -783,11 +775,7 @@ mod imp_windows {
         }
 
         fn layer(&self) -> Layer {
-            STATES.with(|map| {
-                map.borrow()
-                    .get(&key(self))
-                    .map_or(Layer::Top, |s| s.layer)
-            })
+            STATES.with(|map| map.borrow().get(&key(self)).map_or(Layer::Top, |s| s.layer))
         }
 
         fn margin(&self, _edge: Edge) -> i32 {

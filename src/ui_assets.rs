@@ -26,9 +26,7 @@ fn register_font_path(path: &Path, name: &str) -> Result<(), Box<dyn std::error:
         unsafe { AddFontResourceExW(wide.as_ptr(), FR_PRIVATE, std::ptr::null()) > 0 }
     };
 
-    let pango_ok = pangocairo::FontMap::default()
-        .add_font_file(path)
-        .is_ok();
+    let pango_ok = pangocairo::FontMap::default().add_font_file(path).is_ok();
 
     #[cfg(target_os = "linux")]
     {
