@@ -244,6 +244,7 @@
 .management .segments button { padding: 5px 6px; min-height: 22px; }
 .management .reposition-button { padding: 5px 12px; min-height: 22px; background: var(--selected); border: 1px solid var(--hairline); border-radius: 6px; }
 .management .appearance-panel button:hover { background-color: alpha(var(--ink), .08); }
+.management .appearance-panel .github-footer { color: var(--muted); font-size: 12px; padding: 6px 8px; }
 
 /* Shared note controls keep the same chrome in both editors. */
 .management { --rail-bg: #fbf8f0; --note-ink: #2d2c29; --rail-line: #e3e0d8; --rail-selected: #ffe4c4; }

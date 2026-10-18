@@ -4,6 +4,14 @@ The owner accepts the current UI/UX. Design is complete; the active milestone is
 
 [SPEC.md](SPEC.md) describes current behavior. [implementation.md](implementation.md) owns remaining roadmap work. The [detailed verification record](manual-testing.md) contains results, fixtures, evidence and the remaining checklist. Further test execution requires separate authorization under [AGENTS.md](../AGENTS.md).
 
+## Integration checkpoint, October 19
+
+Settings now ends with Quit Stickies on Linux and Windows and a separate Star on GitHub footer link to `https://github.com/0atxl/stickies`, derived from the configured origin. Settings Quit and Windows tray Quit use the same application action and save-safe coordinator. Every open shared note session is flushed before exit; any failure retains the application and edits and shows the existing error dialog. Successful saves need no confirmation. All Notes' × remains a window-close operation with its existing editor save guard.
+
+Inherited Rust formatting in `src/edge_surface.rs` and `src/ui_assets.rs` was corrected separately. Formatting and Git whitespace checks passed. `cargo check --frozen --bin stickies` and `cargo clippy --frozen --bin stickies -- -D warnings -A deprecated` passed on Linux with Rust/Cargo 1.99.1. Compilation reports 35 GTK deprecation warnings, including the existing Quit error dialog now compiled on Linux. Static review covered shared action wiring, all-session save attempts, failure retention and footer placement. No tests, app sessions, dependency installation, CI changes or package regeneration ran. Commits skip the existing push-triggered CI because it runs tests outside this authorization.
+
+Runtime behavior on Linux and Windows, Windows compilation and a fresh Windows package remain unverified. The old Windows ZIP remains unchanged and predates the review fixes. Manual acceptance should cover successful Quit with edits in multiple views, failed-save retention and visible error/retry, All Notes × keeping the app running, Windows tray Quit using the same guard, and the footer link opening the repository in the default browser.
+
 ## Checkout consolidation, October 19
 
 The owner authorized preserving and consolidating both checkouts. Linux `main` is preserved at `3550263c5956ac0202a5e3dbb1d88f9da6818fa2`, containing the shared checklist repair and All Notes refinements. The Windows checkout reused that shared commit without changing its working files, then committed the port and five review fixes as `d6183d2c5d41e1057e72cce237181c773beca1d1` on `windows`. That branch was pushed to the verified `git@github.com:0atxl/stickies.git` remote and fetched into the main repository.

@@ -10,7 +10,7 @@ Installation-free does not mean that data travels with the ZIP. Notes use GLib's
 
 Launch at login is optional and uses the current user's Windows Run registry key with a quoted executable path. Disable it before moving/removing the bundle, or re-enable it from the new location. Saved note bodies, formatting offsets and schema migrations remain the same as on Linux.
 
-The tray offers strip toggling, New Note, Quick Search, All Notes and Quit. Quit flushes all shared sessions and stays open with a visible, editor-owned error dialog if a save fails. Explorer taskbar recreation re-registers the existing icon. These fixes have no Windows runtime acceptance yet.
+The tray offers strip toggling, New Note, Quick Search, All Notes and Quit. Settings also offers Quit Stickies on Linux and Windows through the same application action. Quit flushes all shared sessions and stays open with a visible, editor-owned error dialog if a save fails. Closing All Notes with × does not quit the app. Explorer taskbar recreation re-registers the existing icon. These fixes have no Windows runtime acceptance yet.
 
 On Windows, the existing hide-in-DND preference responds to explicit Presentation Mode only. `SHQueryUserNotificationState` does not expose the modern Windows DND switch here. First-login/upgrade quiet time no longer hides the strip. Fullscreen policy retains the existing polling heuristic and needs runtime verification.
 

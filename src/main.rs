@@ -104,7 +104,6 @@ impl Ui {
         }
     }
 
-    #[cfg(target_os = "windows")]
     fn request_quit(&self) {
         let errors = self.flush_sessions();
         let Some((id, _)) = errors.first() else {
@@ -167,7 +166,6 @@ impl Ui {
             });
             self.application.add_action(&action);
         }
-        #[cfg(target_os = "windows")]
         {
             let action = gtk::gio::SimpleAction::new("quit", None);
             let weak = Rc::downgrade(self);
