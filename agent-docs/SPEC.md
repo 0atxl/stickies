@@ -196,3 +196,14 @@ Sources: [storage.rs](../src/storage.rs), [note_session.rs](../src/note_session.
 The owner accepts the current UI design. The [verification record](manual-testing.md) documents scoped editing/saving, history, input, timeout, shutdown and Search passes, plus owner-confirmed resolution recovery and fixed-size Search acceptance. The final monitor/layout and diagnostic-removal changes have static checks and those owner reports only. Multi-monitor behavior, broader compositor compatibility, ordinary-use resource observations, installed login/session-end delivery and packaging remain unverified. Further verification requires separate execution authorization.
 
 Keep migrations 1-4 and compatibility parsing. Legacy whole-note bold, font/canvas defaults, shape overrides, Glass and adjacent/overlapping aliases are saved-data concerns even when the old controls are absent. Retired designs, prompts and old verification results are historical material pending explicit deletion review, not current requirements.
+
+
+## Windows branch behavior
+
+The Windows port retains shared sessions, autosave/save guards, anchor-based checklist serialization, formatting/history and schema 4. It emulates the edge hosts through Win32 rather than Layer Shell. Linux continues using Layer Shell, including ordinary pointer-leave collapse handling. Pango 1.56+ is required on both platforms by font-file registration.
+
+Windows adds a tray-only `quit` action beyond the four CLI actions above. It flushes every shared session and quits only when all flushes succeed. A failed flush retains every view and presents a modal error owned by the failed editor's window. OS-requested shutdown retains the existing best-effort flush/log/exit policy. Explorer taskbar recreation re-adds the existing tray icon.
+
+Windows hide-in-DND currently follows explicit Presentation Mode only. First-login/upgrade quiet time is ignored; the modern DND switch is not detected by this implementation. Fullscreen detection and window/DPI/focus behavior remain subject to Windows verification.
+
+The [Windows ZIP guide](../packaging/windows.md) owns packaging and storage details. The ZIP is installation-free, with normal user-directory storage, normally `%LOCALAPPDATA%\stickies` for notes/configuration. There is no adjacent-data mode and no saved-format migration introduced by this port. Source/build manifests and original distribution notices accompany a newly packaged binary. The old repository-root ZIP has not been regenerated for these fixes.

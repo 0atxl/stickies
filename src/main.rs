@@ -1,3 +1,8 @@
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 mod app;
 mod appearance;
 mod autostart;
@@ -5,6 +10,7 @@ mod checklist;
 mod cli;
 mod config;
 mod edge;
+mod edge_surface;
 mod edit_history;
 mod editor;
 mod manager;
@@ -16,8 +22,12 @@ mod platform;
 mod settings;
 mod storage;
 mod text_editing;
+#[cfg(target_os = "windows")]
+mod tray_windows;
 mod ui_assets;
 
+#[cfg(test)]
+use crate::edge_surface::{Layer, LayerShell};
 #[cfg(test)]
 use app::NoteColor;
 use app::{Action, AppState, NoteId};
@@ -26,8 +36,6 @@ use config::Config;
 use config::ScreenEdge;
 use edge::{EdgeEvent, EdgeState};
 use gtk::{glib, prelude::*};
-#[cfg(test)]
-use gtk4_layer_shell::{Layer, LayerShell};
 #[cfg(test)]
 use std::time::Duration;
 use std::{
@@ -53,7 +61,9 @@ struct Ui {
     config: Rc<RefCell<Config>>,
     config_valid: bool,
     dnd: Cell<bool>,
-    dnd_monitor: RefCell<Option<gtk::gio::FileMonitor>>,
+    dnd_monitor: RefCell<Option<platform::DndWatch>>,
+    #[cfg(target_os = "windows")]
+    tray: RefCell<Option<tray_windows::TrayIcon>>,
     provider: gtk::CssProvider,
     storage: Rc<Storage>,
     sessions: RefCell<HashMap<NoteId, Weak<note_session::NoteSession>>>,
@@ -63,7 +73,7 @@ struct Ui {
 }
 
 impl Ui {
-    fn flush_sessions_on_shutdown(&self) {
+    fn flush_sessions(&self) -> Vec<(NoteId, String)> {
         // Saving refreshes the UI, so release the registry borrow before flushing.
         let sessions: Vec<_> = self
             .sessions
@@ -71,17 +81,65 @@ impl Ui {
             .values()
             .filter_map(Weak::upgrade)
             .collect();
+        let mut errors = Vec::new();
         for session in sessions {
             if !session.flush() {
-                eprintln!(
-                    "Stickies could not save note {} on shutdown: {}",
-                    session.id().value(),
+                errors.push((
+                    session.id(),
                     session
                         .error()
-                        .unwrap_or_else(|| "Unknown save error".into())
-                );
+                        .unwrap_or_else(|| "Unknown save error".into()),
+                ));
             }
         }
+        errors
+    }
+
+    fn flush_sessions_on_shutdown(&self) {
+        for (id, error) in self.flush_sessions() {
+            eprintln!(
+                "Stickies could not save note {} on shutdown: {error}",
+                id.value()
+            );
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn request_quit(&self) {
+        let errors = self.flush_sessions();
+        let Some((id, _)) = errors.first() else {
+            self.application.quit();
+            return;
+        };
+        // Keep all sessions and views alive. Own the dialog with the failed
+        // editor so a topmost docked note cannot cover the save failure.
+        let parent: gtk::Window = if self.edge.state().docked_id() == Some(*id) {
+            self.edge.window.clone().upcast()
+        } else if let Some(note) = self.separate.borrow().get(id) {
+            note.window.clone().upcast()
+        } else if let Some(manager) = self.manager.borrow().as_ref() {
+            manager.window().clone().upcast()
+        } else {
+            self.edge.window.clone().upcast()
+        };
+        let details = errors
+            .into_iter()
+            .map(|(id, error)| format!("Note {}: {error}", id.value()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let dialog = gtk::MessageDialog::builder()
+            .application(&self.application)
+            .transient_for(&parent)
+            .modal(true)
+            .message_type(gtk::MessageType::Error)
+            .buttons(gtk::ButtonsType::Close)
+            .text("Stickies could not save your notes")
+            .secondary_text(format!(
+                "Your edits are still open. Retry Quit after resolving the save error.\n\n{details}"
+            ))
+            .build();
+        dialog.connect_response(|dialog, _| dialog.close());
+        dialog.present();
     }
 
     fn register_actions(self: &Rc<Self>) {
@@ -105,6 +163,17 @@ impl Ui {
                         "show-all-notes" => ui.show_manager(),
                         _ => unreachable!(),
                     }
+                }
+            });
+            self.application.add_action(&action);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let action = gtk::gio::SimpleAction::new("quit", None);
+            let weak = Rc::downgrade(self);
+            action.connect_activate(move |_, _| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.request_quit();
                 }
             });
             self.application.add_action(&action);
@@ -341,51 +410,86 @@ impl Ui {
         if is_docked && !self.close_docked() {
             return;
         }
+        let s = edge_surface::scale_px;
         let window = gtk::ApplicationWindow::builder()
             .application(&self.application)
             .title("Stickies · Note")
-            .default_width(editor::WIDTH)
-            .default_height(editor::HEIGHT)
+            .default_width(s(editor::WIDTH))
+            .default_height(s(editor::HEIGHT))
             .decorated(false)
             .resizable(false)
             .build();
         window.add_css_class("note-window");
         window.set_child(Some(&editor.root));
-        // Present as a fixed-size note first so the compositor keeps it floating.
-        // Allow resizing once the mapped surface enters its initial monitor.
-        window.connect_realize(|window| {
-            if let Some(surface) = window.surface() {
-                let weak = window.downgrade();
-                surface.connect_enter_monitor(move |_, _| {
-                    if let Some(window) = weak.upgrade() {
-                        window.set_resizable(true);
+        #[cfg(target_os = "linux")]
+        {
+            // Present as a fixed-size note first so the compositor keeps it floating.
+            // Allow resizing once the mapped surface enters its initial monitor.
+            window.connect_realize(|window| {
+                if let Some(surface) = window.surface() {
+                    let weak = window.downgrade();
+                    surface.connect_enter_monitor(move |_, _| {
+                        if let Some(window) = weak.upgrade() {
+                            window.set_resizable(true);
+                        }
+                    });
+                }
+            });
+            let resize = gtk::GestureClick::new();
+            resize.set_button(1);
+            resize.set_propagation_phase(gtk::PropagationPhase::Capture);
+            let weak = window.downgrade();
+            resize.connect_pressed(move |gesture, _, _, _| {
+                if let Some(window) = weak.upgrade()
+                    && let Some(surface) = window.surface()
+                    && let Ok(toplevel) = surface.downcast::<gtk::gdk::Toplevel>()
+                    && let Some(event) = gesture.current_event()
+                    && let Some((x, y)) = event.position()
+                {
+                    toplevel.begin_resize(
+                        gtk::gdk::SurfaceEdge::SouthEast,
+                        gesture.current_event_device().as_ref(),
+                        1,
+                        x,
+                        y,
+                        gesture.current_event_time(),
+                    );
+                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                }
+            });
+            editor.resize.add_controller(resize);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            window.set_resizable(true);
+            let cur_size = Rc::new(Cell::new((s(editor::WIDTH), s(editor::HEIGHT))));
+            let begin_size = cur_size.clone();
+            let begin_window = window.downgrade();
+            let update_size = cur_size;
+            let update_window = window.downgrade();
+            edge_surface::connect_resize_drag(
+                &editor.resize,
+                &window,
+                move || {
+                    if let Some(win) = begin_window.upgrade() {
+                        let w = win.width();
+                        let h = win.height();
+                        if w >= s(editor::MIN_WIDTH) && h >= s(editor::MIN_HEIGHT) {
+                            begin_size.set((w, h));
+                        }
                     }
-                });
-            }
-        });
-        let resize = gtk::GestureClick::new();
-        resize.set_button(1);
-        resize.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let weak = window.downgrade();
-        resize.connect_pressed(move |gesture, _, _, _| {
-            if let Some(window) = weak.upgrade()
-                && let Some(surface) = window.surface()
-                && let Ok(toplevel) = surface.downcast::<gtk::gdk::Toplevel>()
-                && let Some(event) = gesture.current_event()
-                && let Some((x, y)) = event.position()
-            {
-                toplevel.begin_resize(
-                    gtk::gdk::SurfaceEdge::SouthEast,
-                    gesture.current_event_device().as_ref(),
-                    1,
-                    x,
-                    y,
-                    gesture.current_event_time(),
-                );
-                gesture.set_state(gtk::EventSequenceState::Claimed);
-            }
-        });
-        editor.resize.add_controller(resize);
+                    begin_size.get()
+                },
+                move |w, h, dx, dy| {
+                    if let Some(window) = update_window.upgrade() {
+                        let new_w = (w + dx).max(s(editor::MIN_WIDTH));
+                        let new_h = (h + dy).max(s(editor::MIN_HEIGHT));
+                        update_size.set((new_w, new_h));
+                        edge_surface::resize_window(&window, new_w, new_h);
+                    }
+                },
+            );
+        }
         let weak = Rc::downgrade(self);
         window.connect_close_request(move |window| {
             if let Some(ui) = weak.upgrade() {
@@ -620,6 +724,7 @@ fn apply_motion_preference(reduced_motion: bool) {
 }
 
 fn main() -> glib::ExitCode {
+    edge_surface::init_dpi_awareness();
     let application = gtk::Application::builder()
         .application_id(APPLICATION_ID)
         .flags(gtk::gio::ApplicationFlags::HANDLES_COMMAND_LINE)
@@ -636,13 +741,14 @@ fn main() -> glib::ExitCode {
     });
     application.connect_activate(|application| {
         if application.windows().is_empty() {
-            if let Err(error) = ui_assets::register() {
-                eprintln!("Could not load UI assets: {error}");
+            if let Err(error) = adw::init() {
+                eprintln!("Could not initialize the desktop UI: {error}");
                 application.quit();
                 return;
             }
-            if let Err(error) = adw::init() {
-                eprintln!("Could not initialize the desktop UI: {error}");
+            edge_surface::configure_display_dpi();
+            if let Err(error) = ui_assets::register() {
+                eprintln!("Could not load UI assets: {error}");
                 application.quit();
                 return;
             }
@@ -673,17 +779,8 @@ fn main() -> glib::ExitCode {
     application.run()
 }
 fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
-    if !gtk4_layer_shell::is_supported() {
-        eprintln!(
-            "Stickies requires Wayland with zwlr_layer_shell_v1 version 4 or newer; Layer Shell is unavailable on this display."
-        );
-        return None;
-    }
-    let protocol_version = gtk4_layer_shell::protocol_version();
-    if protocol_version < 4 {
-        eprintln!(
-            "Stickies requires zwlr_layer_shell_v1 version 4 or newer for on-demand keyboard focus; this display provides version {protocol_version}."
-        );
+    if let Err(message) = edge_surface::check_display_support() {
+        eprintln!("{message}");
         return None;
     }
     let storage = match Storage::open(&storage::database_path()) {
@@ -744,7 +841,9 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
     let edge_provider = gtk::CssProvider::new();
-    edge_provider.load_from_data(include_str!("../assets/edge-strip.css"));
+    edge_provider.load_from_data(&edge_surface::scale_css(include_str!(
+        "../assets/edge-strip.css"
+    )));
     gtk::style_context_add_provider_for_display(
         &gtk::gdk::Display::default().expect("GTK display"),
         &edge_provider,
@@ -760,6 +859,8 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
         config_valid: valid,
         dnd: Cell::new(false),
         dnd_monitor: RefCell::new(None),
+        #[cfg(target_os = "windows")]
+        tray: RefCell::new(tray_windows::TrayIcon::new(application)),
         provider,
         storage,
         deck: RefCell::new(AppState::new(Vec::new())),
@@ -769,6 +870,7 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
     apply_motion_preference(ui.config.borrow().reduced_motion);
     ui.connect_edge();
     ui.register_actions();
+    #[cfg(target_os = "linux")]
     let shutdown_signals = RefCell::new(
         [libc::SIGTERM, libc::SIGHUP, libc::SIGINT]
             .into_iter()
@@ -789,9 +891,13 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
         let ui = &shutdown_ui;
         ui.edge.disconnect_monitors();
         ui.flush_sessions_on_shutdown();
+        #[cfg(target_os = "linux")]
         for source in shutdown_signals.borrow_mut().drain(..) {
             source.remove();
         }
+        ui.dnd_monitor.borrow_mut().take();
+        #[cfg(target_os = "windows")]
+        ui.tray.borrow_mut().take();
         let manager = ui.manager.borrow().clone();
         if let Some(manager) = manager {
             manager.close_editor();

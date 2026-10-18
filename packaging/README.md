@@ -1,5 +1,7 @@
 # Arch packaging preparation
 
+The separate Windows branch uses the [Windows ZIP guide](windows.md). The Arch procedure below remains Linux-specific.
+
 Stickies is a Linux Wayland app requiring `zwlr_layer_shell_v1` v4+ and compatible native libraries. This pass prepares an Arch Linux x86_64 package recipe and source inputs. The owner-approved application icon is included. No package has been installed or verified on a clean runner.
 
 The GitHub binary download will be labelled **Arch Linux x86_64 only**, using the same `.pkg.tar.zst` produced by the PKGBUILD. It depends on Arch's native libraries. It is not a portable Linux binary, and no Kali or Ubuntu binary compatibility is claimed. Other package formats are outside this pass.
@@ -15,7 +17,9 @@ The GitHub binary download will be labelled **Arch Linux x86_64 only**, using th
 
 Use an up-to-date Arch x86_64 build environment with `base-devel`, `rust>=1:1.92`, `pkgconf` and `desktop-file-utils`. Python 3.11+ is needed only for the source-preparation script. The highest declared Rust requirement in the locked dependencies is 1.92; this is source metadata, not a verified minimum-toolchain build. Version constraints include Arch's package epochs, such as `1:`, separately from upstream versions.
 
-The recipe names the direct native runtime libraries as Arch packages: `cairo`, `fontconfig`, `gdk-pixbuf2`, `glib2`, `glibc`, `graphene`, `gtk4>=1:4.10`, `gtk4-layer-shell>=1.0`, `libadwaita>=1:1.7`, `libgcc`, `pango` and `sqlite`. `librsvg` supplies SVG support for the embedded UI icons. Their dependencies supply Wayland libraries and the rest of the native stack. `glib2` supplies `glib-compile-resources`, which `build.rs` invokes. Arch includes development files with these native packages; no system font packages are needed for the embedded fonts.
+The recipe names the direct native runtime libraries as Arch packages: `cairo`, `fontconfig`, `gdk-pixbuf2`, `glib2`, `glibc`, `graphene`, `gtk4>=1:4.10`, `gtk4-layer-shell>=1.0`, `libadwaita>=1:1.7`, `libgcc`, `pango>=1.56` and `sqlite`. `librsvg` supplies SVG support for the embedded UI icons. Their dependencies supply Wayland libraries and the rest of the native stack. `glib2` supplies `glib-compile-resources`, which `build.rs` invokes. Arch includes development files with these native packages; no system font packages are needed for the embedded fonts.
+
+Pango 1.56+ is required by the shared bundled-font registration API; PangoCairo is part of the Pango native stack.
 
 These are source/feature requirements, not a promise that a binary built with newer libraries runs against every older version. Adwaita and GTK must also satisfy their own transitive requirements. The recipe also depends on `dbus`; the desktop must supply a running session bus and Layer Shell v4+. A compiler does not need an active Wayland session. Do not make a particular compositor or Omarchy a package dependency.
 

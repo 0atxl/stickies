@@ -62,11 +62,11 @@ pub fn apply_note_font(
         crate::config::LegacyTextWeight::Regular => 400,
         crate::config::LegacyTextWeight::Bold => 700,
     };
-    provider.load_from_data(&format!(
+    provider.load_from_data(&crate::edge_surface::scale_css(&format!(
         ".editor-title, .editor-body, .editor-body text, .inline-title, .inline-body, .inline-body text {{ font-family: {font}; font-weight: {weight}; }}
          .editor-title, .inline-title {{ font-size: {title_size}px; }}
          .editor-body, .editor-body text, .inline-body, .inline-body text {{ font-size: {body_size}px; }}"
-    ));
+    )));
 }
 
 pub fn palette_css() -> String {
@@ -123,7 +123,7 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
             )
         })
         .collect::<String>();
-    provider.load_from_data(&format!(r#"
+    provider.load_from_data(&crate::edge_surface::scale_css(&format!(r#"
         /* No decorative focus/press rings. Value indicators are styled below. */
         * {{ outline: none; }}
         button, modelbutton {{ background: transparent; color: inherit; border-color: transparent; box-shadow: none; }}
@@ -239,7 +239,7 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .note-popover button {{ opacity: 1; }}
         .note-controls .color-swatch:disabled {{ opacity: .4; }}
 
-    "#));
+    "#)));
 }
 
 /// Draw only the paper decoration; text and controls remain native GTK widgets.

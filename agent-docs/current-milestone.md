@@ -4,6 +4,16 @@ The owner accepts the current UI/UX. Design is complete; the active milestone is
 
 [SPEC.md](SPEC.md) describes current behavior. [implementation.md](implementation.md) owns remaining roadmap work. The [detailed verification record](manual-testing.md) contains results, fixtures, evidence and the remaining checklist. Further test execution requires separate authorization under [AGENTS.md](../AGENTS.md).
 
+## Windows review fixes, October 18
+
+The owner separately authorized five Windows review fixes on this checkout's existing `windows` branch: guard tray Quit on failed saves, restore Linux pointer-leave handling, complete Windows notices/source/build identification and dependency checks, recover the tray icon after Explorer recreation, and stop mapping quiet time to DND. This authorization includes related documentation, static checks and compilation only. No tests, app sessions, dependency installation, Git mutations or distributable ZIP regeneration are authorized. The Linux checkout at `/home/rinzler/projects/Stickies` must remain unchanged.
+
+The fixes retain the accepted UI, shared anchor-based checklist repair, user-directory storage and saved-data compatibility. The [Windows ZIP guide](../packaging/windows.md) describes the frozen build, exact application source snapshot, runtime dependency checks and original notices. Missing native notices require explicit original inputs and stop packaging. Pango 1.56+ is now documented for both platforms and declared by the Arch recipe in this Windows checkout.
+
+Static verification passed: `cargo check --frozen --bin stickies` and `cargo clippy --frozen --bin stickies -- -D warnings -A deprecated` used a temporary target directory outside both checkouts. The Linux compilation reported the existing 24 GTK deprecation warnings. Rustfmt passed for the four touched Rust files, the Arch recipe passed Bash syntax checking, the Windows packaging script parsed without errors using the available PowerShell tree-sitter grammar, and Git whitespace checks passed. Frozen Windows dependency metadata resolved locally; all 81 selected registry normal/build dependencies have original notice files in the local Cargo cache. No tests or app sessions ran. Windows type-checking/linking and native PowerShell packaging execution remain unverified because this host has no Windows Rust target/toolchain or PowerShell executable. Native notice completeness must be checked against the actual MSYS2 packages during a separately authorized packaging run.
+
+File hashes confirm the existing ZIP, checklist/editing implementation and Linux checkout contents are unchanged. The old ZIP predates these fixes and remains unsuitable as evidence for the revised packaging. Single-instance failure handling, mixed-DPI coordinates and general focus behavior remain outside the implementation authorization; no additional concrete defects in those areas were established in this pass.
+
 ## Committed work
 
 - Mechanical cleanup and documentation were committed as `8750f23`.
