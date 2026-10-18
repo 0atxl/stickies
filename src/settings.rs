@@ -300,7 +300,10 @@ pub fn build(
             Rc::new(Cell::new(1)),
         );
         samples.push((sample, paper.clone()));
-        paper.set_size_request(50, 48);
+        paper.set_size_request(
+            crate::edge_surface::scale_px(50),
+            crate::edge_surface::scale_px(48),
+        );
         overlay.set_child(Some(&paper));
         let badge = gtk::Label::new(Some("✓"));
         badge.add_css_class("selection-badge");

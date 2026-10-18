@@ -53,8 +53,9 @@ impl Editor {
         docked: bool,
         on_timeout: impl Fn() + 'static,
     ) -> Rc<Self> {
+        let s = crate::edge_surface::scale_px;
         let root = gtk::Overlay::new();
-        root.set_size_request(MIN_WIDTH, MIN_HEIGHT);
+        root.set_size_request(s(MIN_WIDTH), s(MIN_HEIGHT));
         root.set_hexpand(true);
         root.set_vexpand(true);
         root.add_css_class("individual");
@@ -70,9 +71,9 @@ impl Editor {
         sheet.set_hexpand(true);
         sheet.set_vexpand(true);
         sheet.set_child(Some(&background));
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, s(8));
         content.add_css_class("editor-card");
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, s(4));
         let title = gtk::Entry::new();
         title.add_css_class("editor-title");
         title.set_hexpand(true);
@@ -89,12 +90,12 @@ impl Editor {
         body.add_css_class("editor-body");
         connect_checklist_backspace(&body);
         body.set_wrap_mode(gtk::WrapMode::WordChar);
-        body.set_top_margin(6);
-        body.set_bottom_margin(8);
-        body.set_pixels_above_lines(4);
-        body.set_pixels_below_lines(4);
+        body.set_top_margin(s(6));
+        body.set_bottom_margin(s(8));
+        body.set_pixels_above_lines(s(4));
+        body.set_pixels_below_lines(s(4));
         body.set_left_margin(0);
-        body.set_right_margin(4);
+        body.set_right_margin(s(4));
         session.attach_view(&body);
         let scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -148,15 +149,15 @@ impl Editor {
             handle.add_css_class("note-drag-handle");
             handle.set_halign(gtk::Align::Center);
             handle.set_valign(gtk::Align::Start);
-            handle.set_margin_top(9);
-            handle.set_size_request(40, 14);
+            handle.set_margin_top(s(9));
+            handle.set_size_request(s(40), s(14));
             handle.set_cursor_from_name(Some("grab"));
             handle.set_tooltip_text(Some("Drag to move note"));
             handle.update_property(&[gtk::accessible::Property::Label("Drag to move note")]);
             let grip = gtk::Box::new(gtk::Orientation::Horizontal, 0);
             grip.add_css_class("note-drag-grip");
             grip.set_can_target(false);
-            grip.set_size_request(24, 3);
+            grip.set_size_request(s(24), s(3));
             grip.set_halign(gtk::Align::Center);
             grip.set_valign(gtk::Align::Center);
             handle.set_child(Some(&grip));
@@ -165,14 +166,14 @@ impl Editor {
 
         // Keep the native resize input unchanged; its grip is decorative.
         let resize = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        resize.set_size_request(16, 16);
-        resize.set_margin_end(2);
-        resize.set_margin_bottom(2);
+        resize.set_size_request(s(16), s(16));
+        resize.set_margin_end(s(2));
+        resize.set_margin_bottom(s(2));
         resize.set_halign(gtk::Align::End);
         resize.set_valign(gtk::Align::End);
         resize.set_cursor_from_name(Some("se-resize"));
         let mark = gtk::DrawingArea::new();
-        mark.set_size_request(16, 16);
+        mark.set_size_request(s(16), s(16));
         mark.set_can_target(false);
         mark.add_css_class("note-resize-grip");
         mark.set_draw_func(|area, cr, w, h| {
@@ -225,7 +226,7 @@ impl Editor {
             separate,
             keep,
             resize,
-            docked_size: Cell::new((WIDTH, HEIGHT)),
+            docked_size: Cell::new((s(WIDTH), s(HEIGHT))),
             syncing_style: Cell::new(false),
             session: session.clone(),
             subscription: RefCell::new(None),
@@ -439,7 +440,8 @@ impl Editor {
         self.docked_size.get()
     }
     pub fn set_docked_size(&self, width: i32, height: i32) {
-        let size = (width.max(MIN_WIDTH), height.max(MIN_HEIGHT));
+        let s = crate::edge_surface::scale_px;
+        let size = (width.max(s(MIN_WIDTH)), height.max(s(MIN_HEIGHT)));
         self.docked_size.set(size);
         self.root.set_size_request(size.0, size.1);
     }

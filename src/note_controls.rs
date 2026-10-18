@@ -63,23 +63,24 @@ fn menu(label: &str) -> gtk::MenuButton {
 
 impl NoteControls {
     pub fn new(surface: Surface) -> Self {
-        let root = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let s = crate::edge_surface::scale_px;
+        let root = gtk::Box::new(gtk::Orientation::Horizontal, s(8));
         root.add_css_class("note-footer");
         root.set_widget_name("note-footer");
-        root.set_height_request(44);
+        root.set_height_request(s(44));
         root.set_halign(gtk::Align::Center);
         let pages = gtk::Stack::new();
         pages.set_transition_type(gtk::StackTransitionType::None);
         pages.set_hhomogeneous(true);
         pages.set_vhomogeneous(true);
-        let normal = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let normal = gtk::Box::new(gtk::Orientation::Horizontal, s(8));
         pages.add_named(&normal, Some("settings"));
         root.append(&pages);
         let color = menu("Color");
         let color_dot = {
             let dot = gtk::Box::new(gtk::Orientation::Vertical, 0);
             dot.add_css_class("current-color-dot");
-            dot.set_size_request(12, 12);
+            dot.set_size_request(s(12), s(12));
             dot.set_halign(gtk::Align::Center);
             dot.set_valign(gtk::Align::Center);
             color.set_child(Some(&dot));
@@ -118,7 +119,7 @@ impl NoteControls {
         let mut sizes = Vec::new();
         let mut fonts = Vec::new();
         let text_popover = {
-            let typography = gtk::Box::new(gtk::Orientation::Vertical, 8);
+            let typography = gtk::Box::new(gtk::Orientation::Vertical, s(8));
             typography.add_css_class("note-controls");
             let size_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
             size_row.add_css_class("text-controls");
@@ -137,7 +138,7 @@ impl NoteControls {
                 sizes.push((button, size));
             }
             typography.append(&size_row);
-            let families = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+            let families = gtk::Box::new(gtk::Orientation::Horizontal, s(4));
             families.add_css_class("font-choices");
             for (font, name) in [
                 (Font::Handwritten, "Virgil"),
@@ -154,7 +155,9 @@ impl NoteControls {
                     } else {
                         name
                     });
-                description.set_absolute_size(19. * gtk::pango::SCALE as f64);
+                description.set_absolute_size(
+                    19. * crate::edge_surface::ui_scale() * gtk::pango::SCALE as f64,
+                );
                 let attributes = gtk::pango::AttrList::new();
                 attributes.insert(gtk::pango::AttrFontDesc::new(&description));
                 if let Some(label) = button.child().and_downcast::<gtk::Label>() {
@@ -489,8 +492,8 @@ fn action(icon: &str, label: &str, accessible: &str) -> gtk::Button {
 
 fn pattern_sample(paper: Paper) -> gtk::DrawingArea {
     let sample = gtk::DrawingArea::new();
-    sample.set_content_width(28);
-    sample.set_content_height(22);
+    sample.set_content_width(crate::edge_surface::scale_px(28));
+    sample.set_content_height(crate::edge_surface::scale_px(22));
     sample.set_draw_func(move |area, cr, width, height| {
         let ink = area.color();
         cr.set_source_rgba(

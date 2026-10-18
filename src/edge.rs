@@ -1,5 +1,6 @@
 #[cfg(test)]
 use crate::app::NoteColor;
+use crate::edge_surface::{Edge, KeyboardMode, Layer, LayerShell};
 use crate::{
     Ui,
     app::{Action, NoteId},
@@ -10,7 +11,6 @@ use crate::{
     ui_assets,
 };
 use gtk::{glib, prelude::*, subclass::prelude::ObjectSubclassIsExt};
-use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
@@ -352,6 +352,9 @@ pub(super) struct Strip {
     pub(super) done_reposition: gtk::Button,
     state: Cell<EdgeState>,
     generation: Cell<u64>,
+    reveal_armed: Cell<bool>,
+    hide_armed: Cell<bool>,
+    pointer_inside_edge: Cell<bool>,
     preview_offset: Cell<f64>,
     strip_phase: Cell<StripPhase>,
     pending_motion: Cell<Option<EdgeState>>,
@@ -478,12 +481,13 @@ impl Strip {
         stack.set_transition_type(gtk::StackTransitionType::None);
         stack.set_transition_duration(0);
         stack.set_visible(initial.panel.is_some());
-        let tabs = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        let s = crate::edge_surface::scale_px;
+        let tabs = gtk::Box::new(gtk::Orientation::Vertical, s(10));
         tabs.set_visible(initial.tabs_visible);
         root.add_overlay(&stack);
-        let search_panel = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let search_panel = gtk::Box::new(gtk::Orientation::Vertical, s(6));
         search_panel.add_css_class("edge-search");
-        search_panel.set_width_request(224);
+        search_panel.set_width_request(s(224));
         let edge_search = gtk::SearchEntry::new();
         edge_search.set_placeholder_text(Some("Search active notes"));
         edge_search.set_hexpand(true);
@@ -494,8 +498,8 @@ impl Strip {
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::External)
             .propagate_natural_height(false)
-            .min_content_height(128)
-            .max_content_height(128)
+            .min_content_height(s(128))
+            .max_content_height(s(128))
             .child(&search_results)
             .build();
         // Reserve the full results area for every query. The create action
@@ -525,9 +529,9 @@ impl Strip {
             .bind_property("opacity", &search_popover, "opacity")
             .sync_create()
             .build();
-        let reposition_panel = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        let reposition_panel = gtk::Box::new(gtk::Orientation::Vertical, s(12));
         reposition_panel.add_css_class("edge-search");
-        reposition_panel.set_width_request(240);
+        reposition_panel.set_width_request(s(240));
         let instruction = gtk::Label::new(Some("Drag the strip along the edge."));
         instruction.set_wrap(true);
         reposition_panel.append(&instruction);
@@ -537,7 +541,7 @@ impl Strip {
         reposition_error.add_css_class("save-error");
         reposition_error.set_visible(false);
         reposition_panel.append(&reposition_error);
-        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, s(8));
         let cancel_reposition = gtk::Button::with_label("Cancel");
         let done_reposition = gtk::Button::with_label("Done");
         for button in [&cancel_reposition, &done_reposition] {
@@ -546,13 +550,13 @@ impl Strip {
         }
         reposition_panel.append(&actions);
         stack.add_named(&reposition_panel, Some("reposition"));
-        let marker = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let marker = gtk::Box::new(gtk::Orientation::Vertical, s(6));
         marker.add_css_class("edge-marker");
 
         marker.set_can_target(false);
         strip_root.add_overlay(&marker);
         strip_root.add_overlay(&tabs);
-        let delete_toast = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        let delete_toast = gtk::Box::new(gtk::Orientation::Horizontal, s(10));
         delete_toast.add_css_class("edge-delete-toast");
         delete_toast.set_halign(gtk::Align::Start);
         delete_toast.set_valign(gtk::Align::Start);
@@ -583,7 +587,7 @@ impl Strip {
             search_popup_request: Cell::new(None),
             search_size_dirty: Cell::new(true),
             search_selection_pending: Cell::new(false),
-            search_size: Cell::new((224, 1)),
+            search_size: Cell::new((s(224), 1)),
             search_placement: Cell::new(None),
             remapping: Cell::new(false),
             monitor_layout_dirty: Cell::new(false),
@@ -622,6 +626,9 @@ impl Strip {
             done_reposition,
             state: Cell::new(EdgeState::Dormant),
             generation: Cell::new(0),
+            reveal_armed: Cell::new(false),
+            hide_armed: Cell::new(false),
+            pointer_inside_edge: Cell::new(false),
             preview_offset: Cell::new(0.),
             strip_phase: Cell::new(StripPhase::Settled),
             pending_motion: Cell::new(None),
@@ -645,6 +652,8 @@ impl Strip {
             .then(|| self.preview_offset.get())
     }
     pub(super) fn cancel_timers(&self) -> u64 {
+        self.reveal_armed.set(false);
+        self.hide_armed.set(false);
         let generation = self.generation.get().wrapping_add(1);
         self.generation.set(generation);
         generation
@@ -1086,6 +1095,18 @@ impl Ui {
         self.edge.pointer.set_visible(effects.pointer_visible);
         self.edge.root.queue_draw();
     }
+    fn clear_tab_hover(self: &Rc<Self>) {
+        if let Some(fixed) = self.edge.tabs.first_child().and_downcast::<TabLayout>()
+            && fixed.imp().pointer.get().is_finite()
+        {
+            fixed.imp().pointer.set(f64::NAN);
+            fixed.queue_draw();
+            let count = self.edge.tab_hover.borrow().len();
+            for i in 0..count {
+                self.animate_tab_hover(i, 0.);
+            }
+        }
+    }
     pub(super) fn finish_edge_motion(self: &Rc<Self>) {
         self.edge.pending_motion.set(None);
         self.finish_strip_motion();
@@ -1093,50 +1114,92 @@ impl Ui {
         self.finish_panel_motion();
     }
     pub(super) fn configure_docked_editor(self: &Rc<Self>, editor: &Rc<editor::Editor>) {
-        editor.set_docked_size(editor::WIDTH, editor::HEIGHT);
-        let drag = gtk::GestureDrag::new();
-        drag.set_button(1);
-        drag.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let start = Rc::new(Cell::new((editor::WIDTH, editor::HEIGHT)));
-        let pointer_start = Rc::new(Cell::new((0., 0.)));
-        let initial = start.clone();
-        let initial_pointer = pointer_start.clone();
-        let weak = Rc::downgrade(self);
-        let weak_editor = Rc::downgrade(editor);
-        drag.connect_drag_begin(move |gesture, _, _| {
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            if let Some(editor) = weak_editor.upgrade()
-                && let Some(ui) = weak.upgrade()
-                && let Some(pointer) = ui.docked_pointer(gesture)
-            {
-                initial.set(editor.docked_size());
-                initial_pointer.set(pointer);
-                editor.activity();
-            }
-        });
-        let weak = Rc::downgrade(self);
-        let weak_editor = Rc::downgrade(editor);
-        drag.connect_drag_update(move |gesture, _, _| {
-            if let Some(ui) = weak.upgrade()
-                && let Some(editor) = weak_editor.upgrade()
-                && let Some((x, y)) = ui.docked_pointer(gesture)
-            {
-                let (start_x, start_y) = pointer_start.get();
-                let (dx, dy) = (x - start_x, y - start_y);
-                let edge = ui.config.borrow().edge;
-                let (width, height) = start.get();
-                let dx = if edge == ScreenEdge::Right { -dx } else { dx };
-                let dy = if edge == ScreenEdge::Bottom { -dy } else { dy };
-                let (max_width, max_height) = ui.note_limits();
-                editor.set_docked_size(
-                    (width + dx as i32).clamp(editor::MIN_WIDTH, max_width.max(editor::MIN_WIDTH)),
-                    (height + dy as i32)
-                        .clamp(editor::MIN_HEIGHT, max_height.max(editor::MIN_HEIGHT)),
-                );
-                ui.place_edge();
-            }
-        });
-        editor.resize.add_controller(drag);
+        let s = crate::edge_surface::scale_px;
+        editor.set_docked_size(s(editor::WIDTH), s(editor::HEIGHT));
+        #[cfg(target_os = "linux")]
+        {
+            let drag = gtk::GestureDrag::new();
+            drag.set_button(1);
+            drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+            let start = Rc::new(Cell::new((s(editor::WIDTH), s(editor::HEIGHT))));
+            let pointer_start = Rc::new(Cell::new((0., 0.)));
+            let initial = start.clone();
+            let initial_pointer = pointer_start.clone();
+            let weak = Rc::downgrade(self);
+            let weak_editor = Rc::downgrade(editor);
+            drag.connect_drag_begin(move |gesture, _, _| {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                if let Some(editor) = weak_editor.upgrade()
+                    && let Some(ui) = weak.upgrade()
+                    && let Some(pointer) = ui.docked_pointer(gesture)
+                {
+                    initial.set(editor.docked_size());
+                    initial_pointer.set(pointer);
+                    editor.activity();
+                }
+            });
+            let weak = Rc::downgrade(self);
+            let weak_editor = Rc::downgrade(editor);
+            drag.connect_drag_update(move |gesture, _, _| {
+                if let Some(ui) = weak.upgrade()
+                    && let Some(editor) = weak_editor.upgrade()
+                    && let Some((x, y)) = ui.docked_pointer(gesture)
+                {
+                    let (start_x, start_y) = pointer_start.get();
+                    let (dx, dy) = (x - start_x, y - start_y);
+                    let edge = ui.config.borrow().edge;
+                    let (width, height) = start.get();
+                    let dx = if edge == ScreenEdge::Right { -dx } else { dx };
+                    let dy = if edge == ScreenEdge::Bottom { -dy } else { dy };
+                    let (max_width, max_height) = ui.note_limits();
+                    editor.set_docked_size(
+                        (width + dx as i32)
+                            .clamp(s(editor::MIN_WIDTH), max_width.max(s(editor::MIN_WIDTH))),
+                        (height + dy as i32)
+                            .clamp(s(editor::MIN_HEIGHT), max_height.max(s(editor::MIN_HEIGHT))),
+                    );
+                    ui.place_edge();
+                }
+            });
+            editor.resize.add_controller(drag);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let begin_editor = Rc::downgrade(editor);
+            let update_ui = Rc::downgrade(self);
+            let update_editor = Rc::downgrade(editor);
+            crate::edge_surface::connect_resize_drag(
+                &editor.resize,
+                &self.edge.window,
+                move || {
+                    if let Some(editor) = begin_editor.upgrade() {
+                        editor.activity();
+                        editor.docked_size()
+                    } else {
+                        (s(editor::WIDTH), s(editor::HEIGHT))
+                    }
+                },
+                move |width, height, dx, dy| {
+                    if let (Some(ui), Some(editor)) = (update_ui.upgrade(), update_editor.upgrade())
+                    {
+                        let edge = ui.config.borrow().edge;
+                        let dx = if edge == ScreenEdge::Right { -dx } else { dx };
+                        let dy = if edge == ScreenEdge::Bottom { -dy } else { dy };
+                        let (max_width, max_height) = ui.note_limits();
+                        editor.set_docked_size(
+                            (width + dx)
+                                .clamp(s(editor::MIN_WIDTH), max_width.max(s(editor::MIN_WIDTH))),
+                            (height + dy).clamp(
+                                s(editor::MIN_HEIGHT),
+                                max_height.max(s(editor::MIN_HEIGHT)),
+                            ),
+                        );
+                        editor.activity();
+                        ui.place_edge();
+                    }
+                },
+            );
+        }
         let weak = Rc::downgrade(self);
         editor.connect_size_changed(move || {
             if let Some(ui) = weak.upgrade() {
@@ -1499,28 +1562,85 @@ impl Ui {
         });
         ui.place_edge();
         ui.refresh_tabs();
-        for area in [&root, &strip_root] {
+        for (area, target_window) in [(&root, &window), (&strip_root, &strip_window)] {
             let motion = gtk::EventControllerMotion::new();
             {
                 let weak = Rc::downgrade(ui);
+                let enter_window = target_window.clone();
                 motion.connect_enter(move |_, _, _| {
+                    if cfg!(target_os = "windows")
+                        && !crate::edge_surface::is_pointer_in_window(&enter_window)
+                    {
+                        return;
+                    }
                     if let Some(ui) = weak.upgrade()
                         && ui.config.borrow().edge_hover_enabled
                         && ui.edge.toast_note.get().is_none()
                     {
+                        ui.edge.pointer_inside_edge.set(true);
                         ui.schedule_reveal();
                     }
                 });
             }
             {
                 let weak = Rc::downgrade(ui);
+                let leave_window = target_window.clone();
                 motion.connect_leave(move |_| {
+                    if cfg!(target_os = "windows")
+                        && crate::edge_surface::is_pointer_in_window(&leave_window)
+                    {
+                        return;
+                    }
                     if let Some(ui) = weak.upgrade() {
                         ui.schedule_hide();
                     }
                 });
             }
             area.add_controller(motion);
+        }
+        {
+            let weak = Rc::downgrade(ui);
+            crate::edge_surface::connect_hover_fallback(&strip_window, move |in_strip| {
+                let Some(ui) = weak.upgrade() else {
+                    return;
+                };
+                let in_panel = crate::edge_surface::is_pointer_in_window(&ui.edge.window);
+                if !in_strip {
+                    ui.clear_tab_hover();
+                }
+                if in_strip || in_panel {
+                    ui.edge.pointer_inside_edge.set(true);
+                    if ui.edge.hide_armed.get() || ui.edge.deferred_hide.get().is_some() {
+                        ui.edge.cancel_timers();
+                        ui.edge.deferred_hide.set(None);
+                    }
+                    if in_strip
+                        && ui.config.borrow().edge_hover_enabled
+                        && ui.edge.toast_note.get().is_none()
+                        && (ui.edge.state() == EdgeState::Dormant
+                            || ui.edge.strip_phase.get() == StripPhase::Collapsing)
+                        && !ui.edge.reveal_armed.get()
+                    {
+                        ui.schedule_reveal();
+                    }
+                } else {
+                    if ui.edge.reveal_armed.get() {
+                        ui.edge.cancel_timers();
+                    }
+                    if ui.edge.pointer_inside_edge.get() {
+                        if ui.edge.state() == EdgeState::Tabs {
+                            if ui.edge.strip_phase.get() != StripPhase::Collapsing
+                                && !ui.edge.hide_armed.get()
+                                && ui.edge.deferred_hide.get().is_none()
+                            {
+                                ui.schedule_hide();
+                            }
+                        } else {
+                            ui.edge.pointer_inside_edge.set(false);
+                        }
+                    }
+                }
+            });
         }
         let click = gtk::GestureClick::new();
         {
@@ -1801,9 +1921,13 @@ impl Ui {
         };
         self.edge.tabs.set_orientation(orientation);
         self.edge.marker.set_orientation(orientation);
+        let s = crate::edge_surface::scale_px;
+        let depth = s(24);
         // Measure the upright titles, but cap their contribution so a long title
         // cannot widen the whole strip. Both orientations use a slim 24px depth.
         let tab_width = if horizontal {
+            let font_desc =
+                gtk::pango::FontDescription::from_string(&format!("Inter Semi-Bold {}px", s(11)));
             let title_width = notes
                 .iter()
                 .map(|note| {
@@ -1811,9 +1935,7 @@ impl Ui {
                         .edge
                         .tabs
                         .create_pango_layout(Some(&note.title.to_uppercase()));
-                    layout.set_font_description(Some(&gtk::pango::FontDescription::from_string(
-                        "Inter Semi-Bold 11px",
-                    )));
+                    layout.set_font_description(Some(&font_desc));
                     layout.pixel_size().0
                 })
                 .max()
@@ -1823,33 +1945,33 @@ impl Ui {
             let reserved = (count - 1) * tab_gap(&config)
                 + 2 * TAB_INSET
                 + self.edge.tabs.spacing()
-                + 3 * 24
+                + 3 * depth
                 + 2 * motion::HOVER_PAD;
-            let available = ((screen_width - reserved) / count).max(24);
+            let available = ((screen_width - reserved) / count).max(depth);
             let width =
                 if self.edge.state().is_revealed() && self.edge.horizontal_tab_width.get() > 0 {
                     self.edge.horizontal_tab_width.get()
                 } else {
-                    (title_width + 20).clamp(80, 112)
+                    (title_width + s(20)).clamp(s(80), s(112))
                 }
                 .min(available);
             self.edge.horizontal_tab_width.set(width);
             width
         } else {
             self.edge.horizontal_tab_width.set(0);
-            24
+            depth
         };
         let tab_height = if horizontal {
-            24
+            depth
         } else {
             let (_, screen_height) = self.note_limits();
             let count = config.visible_notes as i32;
             let reserved = (count - 1) * tab_gap(&config)
                 + 2 * TAB_INSET
                 + self.edge.tabs.spacing()
-                + 3 * 24
+                + 3 * depth
                 + 2 * motion::HOVER_PAD;
-            ((screen_height - reserved) / count).clamp(24, 80)
+            ((screen_height - reserved) / count).clamp(depth, s(80))
         };
         let fixed = glib::Object::new::<TabLayout>().upcast::<gtk::Fixed>();
         fixed
@@ -1894,28 +2016,36 @@ impl Ui {
             label.set_max_width_chars(1);
             label.set_xalign(0.5);
             if horizontal {
-                label.set_margin_start(9);
-                label.set_margin_end(9);
+                label.set_margin_start(s(9));
+                label.set_margin_end(s(9));
                 tab.set_child(Some(&label));
             } else {
-                label.set_size_request(tab_height - 20, 16);
+                let lh = s(16);
+                let tw = s(22);
+                label.set_size_request(tab_height - s(20), lh);
                 let text = gtk::Fixed::new();
-                text.set_size_request(22, tab_height - 2);
+                text.set_size_request(tw, tab_height - s(2));
                 text.put(&label, 0., 0.);
                 let transform = if config.edge == ScreenEdge::Right {
                     gtk::gsk::Transform::new()
-                        .translate(&gtk::graphene::Point::new(19., 9.))
+                        .translate(&gtk::graphene::Point::new(
+                            (tw + lh) as f32 / 2.0,
+                            s(9) as f32,
+                        ))
                         .rotate(90.)
                 } else {
                     gtk::gsk::Transform::new()
-                        .translate(&gtk::graphene::Point::new(3., (tab_height - 11) as f32))
+                        .translate(&gtk::graphene::Point::new(
+                            (tw - lh) as f32 / 2.0,
+                            (tab_height - s(11)) as f32,
+                        ))
                         .rotate(-90.)
                 };
                 text.set_child_transform(&label, Some(&transform));
                 tab.set_child(Some(&text));
             }
             let extension = if config.tab_layout == config::TabLayout::Classic {
-                6
+                s(6)
             } else {
                 0
             };
@@ -1956,7 +2086,7 @@ impl Ui {
         self.edge
             .marker
             .set_spacing(if config.marker_style == config::MarkerStyle::Dots {
-                5
+                s(5)
             } else {
                 0
             });
@@ -1965,8 +2095,8 @@ impl Ui {
                 let line = gtk::Box::new(orientation, 0);
                 line.add_css_class("marker-line");
                 line.set_size_request(
-                    if horizontal { 40 } else { 4 },
-                    if horizontal { 4 } else { 40 },
+                    if horizontal { s(40) } else { s(4) },
+                    if horizontal { s(4) } else { s(40) },
                 );
                 self.edge.marker.append(&line);
             }
@@ -1976,8 +2106,8 @@ impl Ui {
                     let dot = gtk::Box::new(orientation, 0);
                     dot.add_css_class("marker-pill");
                     dot.set_size_request(
-                        if horizontal { 14 } else { 5 },
-                        if horizontal { 5 } else { 14 },
+                        if horizontal { s(14) } else { s(5) },
+                        if horizontal { s(5) } else { s(14) },
                     );
                     if let Some(note) = notes.get(index) {
                         dot.add_css_class("edge-result-color");
@@ -1996,6 +2126,9 @@ impl Ui {
                 let (Some(ui), Some(fixed)) = (weak.upgrade(), weak_fixed.upgrade()) else {
                     return;
                 };
+                if !crate::edge_surface::is_pointer_in_window(&ui.edge.strip_window) {
+                    return;
+                }
                 if !ui.edge.state().is_revealed() || ui.edge.state().is_repositioning() {
                     return;
                 }
@@ -2089,7 +2222,7 @@ impl Ui {
             let button = ui_assets::edge_icon(name, label);
             button.set_widget_name(name);
             button.add_css_class("strip-control");
-            button.set_size_request(24, 24);
+            button.set_size_request(depth, depth);
             let weak = Rc::downgrade(self);
             button.connect_clicked(move |button| {
                 if let Some(ui) = weak.upgrade() {
@@ -2341,14 +2474,16 @@ impl Ui {
             self.reveal();
             return;
         }
+        self.edge.reveal_armed.set(true);
         let weak = Rc::downgrade(self);
         glib::timeout_add_local_once(Duration::from_millis(140), move || {
             if let Some(ui) = weak.upgrade()
                 && ui.edge.generation.get() == generation
-                && ui.config.borrow().edge_hover_enabled
-                && ui.edge.state() == EdgeState::Dormant
             {
-                ui.reveal();
+                ui.edge.reveal_armed.set(false);
+                if ui.config.borrow().edge_hover_enabled && ui.edge.state() == EdgeState::Dormant {
+                    ui.reveal();
+                }
             }
         });
     }
@@ -2391,11 +2526,13 @@ impl Ui {
         self.arm_hide(generation);
     }
     fn arm_hide(self: &Rc<Self>, generation: u64) {
+        self.edge.hide_armed.set(true);
         let weak = Rc::downgrade(self);
         glib::timeout_add_local_once(Duration::from_millis(350), move || {
             if let Some(ui) = weak.upgrade()
                 && ui.edge.generation.get() == generation
             {
+                ui.edge.hide_armed.set(false);
                 ui.dormant();
             }
         });
@@ -2564,6 +2701,12 @@ impl Ui {
                 root.set_size_request(screen_width, screen_height);
                 window.set_default_size(screen_width, screen_height);
             }
+            crate::edge_surface::sync_surface_geometry(
+                window,
+                self.edge.monitor.borrow().as_ref(),
+                screen_width,
+                screen_height,
+            );
         }
         let measure = |widget: &gtk::Widget| {
             let visible = widget.get_visible();
@@ -2690,6 +2833,7 @@ impl Ui {
                     ScreenEdge::Bottom => gtk::gdk::SurfaceEdge::NorthEast,
                     _ => gtk::gdk::SurfaceEdge::SouthEast,
                 });
+                crate::edge_surface::sync_resize_grip(&editor.resize);
                 editor.docked_size()
             } else if self.edge.state().is_searching() {
                 let size = self.edge.search_size.get();
@@ -2865,6 +3009,7 @@ impl Ui {
             .unwrap_or((720, 500))
     }
 
+    #[cfg(target_os = "linux")]
     pub(super) fn docked_pointer(&self, gesture: &gtk::GestureDrag) -> Option<(f64, f64)> {
         // The panel surface has a fixed screen origin, including during resize.
         gesture.current_event()?.position()
@@ -2891,22 +3036,30 @@ impl Ui {
     }
     pub(super) fn set_input(&self) {
         let effects = self.edge.effects(&self.config.borrow(), self.dnd.get());
-        for (window, bounds) in [
-            (&self.edge.strip_window, Some(self.strip_input_bounds())),
-            (
-                &self.edge.window,
-                effects.panel_input.then(|| self.edge.panel_bounds.get()),
-            ),
-        ] {
-            if let Some(surface) = window.surface() {
-                let region = gtk::cairo::Region::create();
-                if let Some((x, y, width, height)) = bounds {
-                    let _ =
-                        region.union_rectangle(&gtk::cairo::RectangleInt::new(x, y, width, height));
-                }
-                surface.set_input_region(Some(&region));
-            }
-        }
+        let strip_extra = self
+            .edge
+            .toast_note
+            .get()
+            .is_some()
+            .then(|| self.edge.strip_bounds.get());
+        let panel_passthrough = (!effects.panel_input
+            && self.edge.outgoing_panel.borrow().is_some())
+        .then(|| self.edge.panel_bounds.get());
+
+        crate::edge_surface::apply_input_region(
+            &self.edge.strip_window,
+            Some(self.strip_input_bounds()),
+            strip_extra,
+            12,
+            None,
+        );
+        crate::edge_surface::apply_input_region(
+            &self.edge.window,
+            effects.panel_input.then(|| self.edge.panel_bounds.get()),
+            None,
+            18,
+            panel_passthrough,
+        );
     }
 
     pub(super) fn draw_pointer(&self, cr: &gtk::cairo::Context) {

@@ -12,7 +12,7 @@ The interaction is simple. Recent or pinned notes sit at the screen edge. Hoveri
 - Plain-text notes and checklists with optional inline formatting, undo/redo and Copy text.
 - Target Wayland broadly. Hyprland is the development reference; scoped isolated Sway checks and owner desktop confirmations are recorded separately. KDE Plasma Wayland and other Layer Shell desktops are intended targets whose support must be verified. These results do not certify the final build across desktops.
 
-The edge implementation requires Wayland with `zwlr_layer_shell_v1` version 4 or newer for on-demand keyboard focus. Startup checks support before creating the edge windows and prints a diagnostic if it is unavailable or too old. GNOME Wayland without Layer Shell cannot run that edge implementation; no fallback is implemented. This is a protocol limitation, not a Hyprland-only product scope. X11, Windows and macOS are outside this release.
+The edge implementation requires Wayland with `zwlr_layer_shell_v1` version 4 or newer for on-demand keyboard focus. Startup checks support before creating the edge windows and prints a diagnostic if it is unavailable or too old. GNOME Wayland without Layer Shell cannot run that edge implementation; no fallback is implemented. This is a protocol limitation, not a Hyprland-only product scope. X11 and macOS are outside this release. The separate Windows port and its installation-free ZIP are described in [Windows packaging](packaging/windows.md); Windows release verification remains outstanding.
 
 ## Status
 
@@ -38,7 +38,7 @@ Current project documentation: [specification](agent-docs/SPEC.md), [milestone](
 
 - A Wayland compositor with `zwlr_layer_shell_v1` version 4 or newer. Protocol availability alone is not verified Stickies support.
 - Rust and Cargo 1.92 or newer for the current locked dependencies. A minimum-toolchain build remains unverified.
-- GTK4 4.10 or newer, libadwaita 1.7 or newer, and gtk4-layer-shell 1.0 or newer development libraries, with mutually compatible transitive dependencies.
+- GTK4 4.10 or newer, libadwaita 1.7 or newer, Pango 1.56 or newer, PangoCairo, and gtk4-layer-shell 1.0 or newer development libraries, with mutually compatible transitive dependencies.
 - Fontconfig and `glib-compile-resources`. Bundled fonts and their licenses are in `assets/fonts`.
 - SQLite development library.
 - `pkg-config`.
@@ -48,11 +48,14 @@ Confirm the native libraries are available:
 ```bash
 pkg-config --modversion gtk4
 pkg-config --modversion libadwaita-1
+pkg-config --modversion pango pangocairo
 pkg-config --modversion gtk4-layer-shell-0
 pkg-config --modversion sqlite3
 ```
 
 ## Packaging
+
+The separate [Windows ZIP guide](packaging/windows.md) documents user-directory storage, build inputs, notices and source/build identification. It does not add an adjacent-data portable mode.
 
 The [packaging guide](packaging/README.md) prepares an Arch Linux x86_64 PKGBUILD, matching source and checksums. The planned GitHub binary download is **Arch Linux x86_64 only**, using that same native package. No Kali or Ubuntu binary compatibility is claimed; other package formats are outside this pass. Source builds require compatible native libraries and a Layer Shell v4+ Wayland desktop.
 

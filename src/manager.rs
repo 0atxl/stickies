@@ -634,13 +634,14 @@ pub fn build_window(
     config: Rc<RefCell<Config>>,
     callbacks: Callbacks,
 ) -> ManagerWindow {
+    let s = crate::edge_surface::scale_px;
     let display = gtk::gdk::Display::default().expect("GTK display");
     let css = gtk::CssProvider::new();
-    css.load_from_data(&format!(
+    css.load_from_data(&crate::edge_surface::scale_css(&format!(
         "{}\n{}",
         include_str!("../assets/all-notes.css"),
         appearance::palette_css()
-    ));
+    )));
     gtk::style_context_add_provider_for_display(
         &display,
         &css,
@@ -649,29 +650,29 @@ pub fn build_window(
     let window = adw::ApplicationWindow::builder()
         .application(application)
         .title("All Notes")
-        .default_width(720)
-        .default_height(500)
-        .width_request(680)
-        .height_request(480)
+        .default_width(s(720))
+        .default_height(s(500))
+        .width_request(s(680))
+        .height_request(s(480))
         .build();
     window.add_css_class("management");
     window.connect_destroy(move |_| {
         gtk::style_context_remove_provider_for_display(&display, &css);
     });
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, s(8));
     header.add_css_class("main-header");
     let heading = gtk::Label::new(Some("All Notes"));
     heading.add_css_class("panel-title");
     heading.set_xalign(0.);
-    heading.set_width_request(112);
+    heading.set_width_request(s(112));
     let search = gtk::SearchEntry::new();
     search.add_css_class("search-field");
     search.set_placeholder_text(Some("Search notes"));
     search.set_hexpand(true);
     let search_clamp = adw::Clamp::builder()
         .valign(gtk::Align::Center)
-        .maximum_size(380)
+        .maximum_size(s(380))
         .child(&search)
         .hexpand(true)
         .build();
@@ -713,9 +714,9 @@ pub fn build_window(
         .child(&list)
         .build();
     let list_column = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    list_column.set_width_request(240);
+    list_column.set_width_request(s(240));
     list_column.add_css_class("list-column");
-    let filter_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    let filter_row = gtk::Box::new(gtk::Orientation::Horizontal, s(4));
     filter_row.add_css_class("collection-filters");
     for (button, _) in &filters {
         filter_row.append(button);
@@ -727,7 +728,7 @@ pub fn build_window(
     pages.set_vexpand(true);
     pages.set_hhomogeneous(false);
     pages.set_vhomogeneous(false);
-    let editor = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    let editor = gtk::Box::new(gtk::Orientation::Vertical, s(6));
     editor.add_css_class("editor-region");
     let resolved = Rc::new(RefCell::new(config.borrow().clone()));
     let color = Rc::new(Cell::new(NoteColor::Yellow));
@@ -736,7 +737,7 @@ pub fn build_window(
     let sheet = gtk::Overlay::new();
     sheet.set_child(Some(&background));
     sheet.set_vexpand(true);
-    let paper_content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    let paper_content = gtk::Box::new(gtk::Orientation::Vertical, s(8));
     paper_content.add_css_class("inline-content");
     let title = gtk::Entry::new();
     title.add_css_class("inline-title");
@@ -747,10 +748,10 @@ pub fn build_window(
     crate::editor::connect_checklist_backspace(&body);
     body.add_css_class("inline-body");
     body.set_wrap_mode(gtk::WrapMode::WordChar);
-    body.set_pixels_above_lines(3);
-    body.set_pixels_below_lines(5);
-    body.set_top_margin(6);
-    body.set_bottom_margin(8);
+    body.set_pixels_above_lines(s(3));
+    body.set_pixels_below_lines(s(5));
+    body.set_top_margin(s(6));
+    body.set_bottom_margin(s(8));
     let body_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
@@ -761,15 +762,15 @@ pub fn build_window(
     paper_content.append(&body_scroll);
     sheet.add_overlay(&paper_content);
     sheet.set_measure_overlay(&paper_content, true);
-    body_scroll.set_min_content_height(48);
+    body_scroll.set_min_content_height(s(48));
     let vertical = adw::Clamp::builder()
         .orientation(gtk::Orientation::Vertical)
-        .maximum_size(420)
+        .maximum_size(s(420))
         .child(&sheet)
         .build();
     let clamp = adw::Clamp::builder()
-        .maximum_size(420)
-        .tightening_threshold(360)
+        .maximum_size(s(420))
+        .tightening_threshold(s(360))
         .child(&vertical)
         .vexpand(true)
         .build();
@@ -778,7 +779,7 @@ pub fn build_window(
     let dates = gtk::Label::new(None);
     dates.add_css_class("metadata");
     dates.set_wrap(true);
-    dates.set_margin_top(8);
+    dates.set_margin_top(s(8));
     editor.append(&dates);
     let save_state = gtk::Label::new(None);
     save_state.add_css_class("save-state");
@@ -789,7 +790,7 @@ pub fn build_window(
     save_indicator.set_halign(gtk::Align::Center);
     save_indicator.add_css_class("save-indicator");
     save_indicator.add_named(&save_state, Some("error"));
-    let dots = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+    let dots = gtk::Box::new(gtk::Orientation::Horizontal, s(3));
     dots.set_halign(gtk::Align::Center);
     for i in 0..3 {
         let dot = gtk::Label::new(Some("•"));
@@ -815,7 +816,7 @@ pub fn build_window(
     let checklist = controls.checklist.clone();
     editor.append(&controls.root);
     pages.add_named(&editor, Some("editor"));
-    let empty = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    let empty = gtk::Box::new(gtk::Orientation::Vertical, s(12));
     empty.add_css_class("empty-page");
     empty.set_valign(gtk::Align::Center);
     empty.set_halign(gtk::Align::Center);
@@ -838,8 +839,8 @@ pub fn build_window(
     content.append(&pages);
     let drawer = adw::OverlaySplitView::new();
     drawer.set_sidebar_position(gtk::PackType::End);
-    drawer.set_min_sidebar_width(260.);
-    drawer.set_max_sidebar_width(260.);
+    drawer.set_min_sidebar_width(f64::from(s(260)));
+    drawer.set_max_sidebar_width(f64::from(s(260)));
     drawer.set_sidebar_width_unit(adw::LengthUnit::Px);
     drawer.set_pin_sidebar(true);
     let workspace = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -850,9 +851,9 @@ pub fn build_window(
     drawer.set_vexpand(true);
     let appearance_drawer = gtk::Box::new(gtk::Orientation::Vertical, 0);
     appearance_drawer.add_css_class("appearance-drawer");
-    let appearance_header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let appearance_header = gtk::Box::new(gtk::Orientation::Horizontal, s(8));
     appearance_header.add_css_class("appearance-header");
-    appearance_header.set_height_request(44);
+    appearance_header.set_height_request(s(44));
     let appearance_title = gtk::Label::new(Some("Settings"));
     appearance_title.set_xalign(0.);
     appearance_title.set_hexpand(true);
