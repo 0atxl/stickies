@@ -36,8 +36,29 @@ pub fn dark(config: &Config) -> bool {
     }
 }
 
+pub fn note_font_provider(
+    owner: &impl IsA<gtk::Widget>,
+    title: &gtk::Entry,
+    body: &gtk::TextView,
+    priority: u32,
+) -> (gtk::CssProvider, String) {
+    // Display providers need a per-view class to keep different notes isolated.
+    let class = format!("note-font-{}", gtk::glib::uuid_string_random());
+    title.add_css_class(&class);
+    body.add_css_class(&class);
+    let provider = gtk::CssProvider::new();
+    let display = owner.display();
+    gtk::style_context_add_provider_for_display(&display, &provider, priority);
+    let cleanup = provider.clone();
+    owner.connect_destroy(move |_| {
+        gtk::style_context_remove_provider_for_display(&display, &cleanup);
+    });
+    (provider, class)
+}
+
 pub fn apply_note_font(
     provider: &gtk::CssProvider,
+    class: &str,
     config: &Config,
     style: &crate::config::NoteStyle,
 ) {
@@ -63,9 +84,9 @@ pub fn apply_note_font(
         crate::config::LegacyTextWeight::Bold => 700,
     };
     provider.load_from_data(&crate::edge_surface::scale_css(&format!(
-        ".editor-title, .editor-body, .editor-body text, .inline-title, .inline-body, .inline-body text {{ font-family: {font}; font-weight: {weight}; }}
-         .editor-title, .inline-title {{ font-size: {title_size}px; }}
-         .editor-body, .editor-body text, .inline-body, .inline-body text {{ font-size: {body_size}px; }}"
+        ".{class}.editor-title, .{class}.editor-body, .{class}.editor-body text, .{class}.inline-title, .{class}.inline-body, .{class}.inline-body text {{ font-family: {font}; font-weight: {weight}; }}
+         .{class}.editor-title, .{class}.inline-title {{ font-size: {title_size}px; }}
+         .{class}.editor-body, .{class}.editor-body text, .{class}.inline-body, .{class}.inline-body text {{ font-size: {body_size}px; }}"
     )));
 }
 

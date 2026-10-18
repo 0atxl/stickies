@@ -34,6 +34,7 @@ pub struct Editor {
     config: Rc<RefCell<Config>>,
     resolved: Rc<RefCell<Config>>,
     font_provider: gtk::CssProvider,
+    font_class: String,
     background: gtk::DrawingArea,
     color: Rc<Cell<NoteColor>>,
     toast: adw::ToastOverlay,
@@ -211,13 +212,13 @@ impl Editor {
             move || weak_session.upgrade(),
             &controls.popovers(),
         );
-        let font_provider = gtk::CssProvider::new();
-        appearance::apply_note_font(&font_provider, &resolved.borrow(), &style);
-        title
-            .style_context()
-            .add_provider(&font_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
-        body.style_context()
-            .add_provider(&font_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+        let (font_provider, font_class) = appearance::note_font_provider(
+            &root,
+            &title,
+            &body,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+        );
+        appearance::apply_note_font(&font_provider, &font_class, &resolved.borrow(), &style);
         let editor = Rc::new(Self {
             root,
             title,
@@ -233,6 +234,7 @@ impl Editor {
             config,
             resolved,
             font_provider,
+            font_class,
             background,
             color,
             toast,
@@ -511,7 +513,12 @@ impl Editor {
         self.syncing_style.set(false);
         self.controls.sync_checklist(&self.body);
         self.resolved.replace(style.resolve(&self.config.borrow()));
-        appearance::apply_note_font(&self.font_provider, &self.resolved.borrow(), &style);
+        appearance::apply_note_font(
+            &self.font_provider,
+            &self.font_class,
+            &self.resolved.borrow(),
+            &style,
+        );
         crate::note_session::style_checklists(&self.body.buffer(), &self.resolved.borrow());
         self.color.set(self.session.color());
         self.background.queue_draw();

@@ -96,7 +96,7 @@ Launch at login stays optional and app-managed. On valid startup, Stickies creat
 
 ## Remaining verification
 
-This preparation is not release-ready. The application artwork is approved and included; the release version/tag decision and clean Arch build remain outstanding. Installed icon lookup, package installation, removal, login and app behavior remain unverified by this preparation. Keep the separate reliability/Wayland gaps in the current project record; packaging does not resolve them. The 24 recorded GTK deprecation warnings remain maintenance debt.
+This preparation is not release-ready. The application artwork is approved and included; the release version/tag decision and clean Arch build remain outstanding. Installed icon lookup, package installation, removal, login and app behavior remain unverified by this preparation. Keep the separate reliability/Wayland gaps in the current project record; packaging does not resolve them. The [October 19 source maintenance pass](../agent-docs/manual-testing.md#october-19-gtk-deprecation-maintenance) reports zero application warnings on Linux, down from the integrated 35. Existing packages predate those replacements; no package was regenerated or verified in that pass.
 
 The smallest later, separately authorized installation check is:
 

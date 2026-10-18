@@ -126,19 +126,26 @@ impl Ui {
             .map(|(id, error)| format!("Note {}: {error}", id.value()))
             .collect::<Vec<_>>()
             .join("\n");
-        let dialog = gtk::MessageDialog::builder()
-            .application(&self.application)
-            .transient_for(&parent)
+        let dialog = gtk::AlertDialog::builder()
             .modal(true)
-            .message_type(gtk::MessageType::Error)
-            .buttons(gtk::ButtonsType::Close)
-            .text("Stickies could not save your notes")
-            .secondary_text(format!(
+            .message("Stickies could not save your notes")
+            .detail(format!(
                 "Your edits are still open. Retry Quit after resolving the save error.\n\n{details}"
             ))
             .build();
-        dialog.connect_response(|dialog, _| dialog.close());
-        dialog.present();
+        let hold = self.application.hold();
+        let cancellable = gtk::gio::Cancellable::new();
+        let cancel = cancellable.clone();
+        let destroy = parent.connect_destroy(move |_| cancel.cancel());
+        let weak_parent = parent.downgrade();
+        // Close, Escape and cancellation only dismiss this alert. Quit must be
+        // requested again and every save must succeed before we can exit.
+        dialog.choose(Some(&parent), Some(&cancellable), move |_| {
+            if let Some(parent) = weak_parent.upgrade() {
+                parent.disconnect(destroy);
+            }
+            drop(hold);
+        });
     }
 
     fn register_actions(self: &Rc<Self>) {
@@ -700,14 +707,18 @@ impl Ui {
     }
 
     fn error(&self, message: &str) {
-        let dialog = gtk::MessageDialog::builder()
-            .application(&self.application)
-            .message_type(gtk::MessageType::Error)
-            .buttons(gtk::ButtonsType::Close)
-            .text(message)
+        let dialog = gtk::AlertDialog::builder()
+            .modal(false)
+            .message(message)
             .build();
-        dialog.connect_response(|dialog, _| dialog.close());
-        dialog.present();
+        let hold = self.application.hold();
+        dialog.choose(
+            None::<&gtk::Window>,
+            None::<&gtk::gio::Cancellable>,
+            move |_| {
+                drop(hold);
+            },
+        );
     }
 }
 
@@ -737,8 +748,12 @@ fn main() -> glib::ExitCode {
             std::ops::ControlFlow::Continue(())
         }
     });
-    application.connect_activate(|application| {
-        if application.windows().is_empty() {
+    // AlertDialog does not register an application window. Keep startup from
+    // running again while an unparented storage error is awaiting dismissal.
+    let startup_error_pending = Rc::new(Cell::new(false));
+    let pending = startup_error_pending.clone();
+    application.connect_activate(move |application| {
+        if application.windows().is_empty() && !pending.get() {
             if let Err(error) = adw::init() {
                 eprintln!("Could not initialize the desktop UI: {error}");
                 application.quit();
@@ -750,10 +765,10 @@ fn main() -> glib::ExitCode {
                 application.quit();
                 return;
             }
-            build(application);
+            build(application, &pending);
         }
     });
-    application.connect_command_line(|application, command_line| {
+    application.connect_command_line(move |application, command_line| {
         let action = match cli::requested_action(&command_line.options_dict()) {
             Ok(action) => action,
             Err(error) => {
@@ -769,14 +784,14 @@ fn main() -> glib::ExitCode {
                 return glib::ExitCode::FAILURE;
             }
             application.activate_action(name, None);
-        } else if application.windows().is_empty() {
+        } else if application.windows().is_empty() && !startup_error_pending.get() {
             return glib::ExitCode::FAILURE;
         }
         glib::ExitCode::SUCCESS
     });
     application.run()
 }
-fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
+fn build(application: &gtk::Application, startup_error_pending: &Rc<Cell<bool>>) -> Option<Rc<Ui>> {
     if let Err(message) = edge_surface::check_display_support() {
         eprintln!("{message}");
         return None;
@@ -784,14 +799,22 @@ fn build(application: &gtk::Application) -> Option<Rc<Ui>> {
     let storage = match Storage::open(&storage::database_path()) {
         Ok(storage) => Rc::new(storage),
         Err(error) => {
-            let dialog = gtk::MessageDialog::builder()
-                .application(application)
-                .text("Stickies could not open your notes")
-                .secondary_text(error.to_string())
-                .buttons(gtk::ButtonsType::Close)
+            let dialog = gtk::AlertDialog::builder()
+                .modal(false)
+                .message("Stickies could not open your notes")
+                .detail(error.to_string())
                 .build();
-            dialog.connect_response(|d, _| d.close());
-            dialog.present();
+            let hold = application.hold();
+            let pending = startup_error_pending.clone();
+            pending.set(true);
+            dialog.choose(
+                None::<&gtk::Window>,
+                None::<&gtk::gio::Cancellable>,
+                move |_| {
+                    pending.set(false);
+                    drop(hold);
+                },
+            );
             return None;
         }
     };
@@ -937,7 +960,7 @@ mod edge_tests {
             .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
             .build();
         app.register(None::<&gtk::gio::Cancellable>).unwrap();
-        let ui = build(&app).unwrap();
+        let ui = build(&app, &Rc::default()).unwrap();
         let mut config = ui.config.borrow().clone();
         config.reduced_motion = true;
         ui.change_settings(config).unwrap();
@@ -1108,7 +1131,7 @@ mod edge_tests {
             .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
             .build();
         app.register(None::<&gtk::gio::Cancellable>).unwrap();
-        let ui = build(&app).unwrap();
+        let ui = build(&app, &Rc::default()).unwrap();
         let settings = gtk::Settings::default().unwrap();
         assert!(!settings.is_gtk_enable_animations());
         let settle = || {
@@ -1167,7 +1190,7 @@ mod edge_tests {
             .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
             .build();
         app.register(None::<&gtk::gio::Cancellable>).unwrap();
-        let ui = build(&app).unwrap();
+        let ui = build(&app, &Rc::default()).unwrap();
         let sessions: Vec<_> = (0..3)
             .map(|_| {
                 let note = ui
@@ -1236,7 +1259,7 @@ mod edge_tests {
             .unwrap()
             .id;
         let existing_blank = storage.create_note("", "", NoteColor::Yellow).unwrap().id;
-        let ui = build(&app).unwrap();
+        let ui = build(&app, &Rc::default()).unwrap();
         let settle = || {
             let end = std::time::Instant::now() + Duration::from_millis(200);
             let deadline = end + Duration::from_secs(2);
@@ -1505,7 +1528,7 @@ mod edge_tests {
                 .unwrap();
         }
         storage.set_note_pinned(id, true).unwrap();
-        let ui = build(&app).unwrap();
+        let ui = build(&app, &Rc::default()).unwrap();
         let settle = || {
             let end = std::time::Instant::now() + Duration::from_millis(220);
             let deadline = end + Duration::from_secs(2);
@@ -1839,7 +1862,7 @@ mod edge_tests {
             .create_note("Escape", "Keep", NoteColor::Blue)
             .unwrap()
             .id;
-        let ui = build(&app).unwrap();
+        let ui = build(&app, &Rc::default()).unwrap();
         let settle = || {
             let end = std::time::Instant::now() + Duration::from_millis(180);
             while std::time::Instant::now() < end {
@@ -2033,7 +2056,7 @@ mod edge_tests {
         }
         .save(&config::config_path())
         .unwrap();
-        let ui = build(&application).unwrap();
+        let ui = build(&application, &Rc::default()).unwrap();
         let settle = || {
             let end = std::time::Instant::now() + Duration::from_millis(180);
             let deadline = end + Duration::from_secs(2);
@@ -2404,7 +2427,7 @@ mod edge_tests {
             )
             .unwrap()
             .id;
-        let ui = build(&app).unwrap();
+        let ui = build(&app, &Rc::default()).unwrap();
         let settle = || {
             let end = std::time::Instant::now() + Duration::from_millis(240);
             while std::time::Instant::now() < end {

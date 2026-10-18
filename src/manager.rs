@@ -89,6 +89,7 @@ struct ManagerUi {
     seed: Rc<Cell<u64>>,
     background: gtk::DrawingArea,
     font: gtk::CssProvider,
+    font_class: String,
 }
 #[derive(Clone)]
 pub struct ManagerWindow(Rc<ManagerUi>);
@@ -495,7 +496,12 @@ impl ManagerUi {
         self.controls.set_editable(self.body.is_editable());
         self.controls.sync_checklist(&self.body);
         self.syncing_style.set(false);
-        appearance::apply_note_font(&self.font, &self.resolved.borrow(), &style);
+        appearance::apply_note_font(
+            &self.font,
+            &self.font_class,
+            &self.resolved.borrow(),
+            &style,
+        );
         crate::note_session::style_checklists(&self.body.buffer(), &self.resolved.borrow());
         self.seed
             .set(self.selected.get().map_or(0, |id| id.value()));
@@ -895,11 +901,12 @@ pub fn build_window(
     let toast = adw::ToastOverlay::new();
     toast.set_child(Some(&root));
     window.set_content(Some(&toast));
-    let font = gtk::CssProvider::new();
-    for w in [title.upcast_ref::<gtk::Widget>(), body.upcast_ref()] {
-        w.style_context()
-            .add_provider(&font, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2);
-    }
+    let (font, font_class) = appearance::note_font_provider(
+        &window,
+        &title,
+        &body,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
+    );
     let sort = callbacks.sort;
     // The getter follows whichever note the preview currently displays.
     let current_session = Rc::new(RefCell::new(None::<std::rc::Weak<ManagerUi>>));
@@ -961,6 +968,7 @@ pub fn build_window(
         seed,
         background,
         font,
+        font_class,
     });
     current_session.replace(Some(Rc::downgrade(&ui)));
     let weak_session = Rc::downgrade(&ui);

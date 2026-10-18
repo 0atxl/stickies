@@ -1,5 +1,36 @@
 # Current verification checklist
 
+## October 19 GTK deprecation maintenance
+
+The checkout began clean on `codex/integrate-windows` at `8802b930d7ef294d2860c57aa9eefac48188f19e`. The owner authorized focused deprecated-API replacements, documentation, formatting/whitespace checks, locked offline application compilation and Clippy, followed by a reviewed commit/push that skips CI. Tests, app sessions, benchmarks, dependency setup and package regeneration were excluded.
+
+`cargo check --locked --offline --bin stickies` reproduced 35 deprecation diagnostics from the locked dependencies. Repeated builder calls account for much of the count; there were 14 distinct compiler-reported symbols in these three families:
+
+| API family | Before | After | Replacement |
+|---|---:|---:|---|
+| `MessageDialog`, its builder and `DialogExt::connect_response` | 27 | 0 | Three `AlertDialog` calls with asynchronous completion |
+| `WidgetExt::style_context` and `StyleContextExt::add_provider` for fonts | 6 | 0 | Display providers with unique per-view CSS classes |
+| `WidgetExt::style_context` and `StyleContextExt::color` for icons | 2 | 0 | `WidgetExt::color` |
+| Total diagnostics | 35 | 0 | No warning suppression |
+
+`AlertDialog` and `WidgetExt::color` are available in the existing GTK 4.10 minimum. Display CSS providers/classes also fit that minimum. Cargo.toml and Cargo.lock are unchanged, including GTK's `v4_10`, libadwaita's `v1_7` and Pango's `v1_56` requirements. The locked GTK Rust binding is 0.11.4, and libadwaita is 0.9.2. Upstream documents the supported [alert API](https://docs.gtk.org/gtk4/class.AlertDialog.html), [foreground color lookup](https://docs.gtk.org/gtk4/method.Widget.get_color.html) and [class-based styling replacement](https://docs.gtk.org/gtk4/method.StyleContext.add_provider.html). GTK's [alert implementation](https://github.com/GNOME/gtk/blob/main/gtk/gtkalertdialog.c) uses the existing message-dialog layout and translated Close button. Its [message-type implementation](https://github.com/GNOME/gtk/blob/main/gtk/gtkmessagedialog.c) stores the type without changing rendering. This source/API review supports the intended preservation; it is not visual acceptance on either platform or a minimum-version build result.
+
+The save-safe coordinator and parent-selection logic are unchanged. Failed Quit remains modal to the failed docked, separate or All Notes editor. The alert callback only disconnects its parent-destruction handler and releases its application hold, regardless of completion result. Parent destruction cancels the asynchronous operation through `Gio::Cancellable`, without retaining the parent. No completion path retries saving, releases sessions, discards edits or requests shutdown. A new Quit request must flush every session successfully. Generic and startup errors retain their unparented, nonmodal presentation. Holds keep their asynchronous dialogs alive without application-owned windows; a shared startup-pending flag preserves activation/CLI handling until the storage error closes. Existing fixture call sites only received the new startup-state argument; no tests were compiled or run.
+
+Font family, size, legacy weight, platform CSS scaling and provider priorities remain unchanged. Each view owns a unique class on its title/body; font rules match that class and the body's text node. Providers are removed on editor-root or All Notes-window destruction. Switching the preview or opening another note cannot make that provider match another view. Icons still draw the supplied alpha mask using the current CSS foreground color. Visual appearance, keyboard/focus behavior and actual resource release require manual verification.
+
+Verification passed on Linux with Rust/Cargo 1.99.1, GTK 4.24.1, libadwaita 1.10.0, Pango/PangoCairo 1.58.2, gtk4-layer-shell 1.3.0 and SQLite 3.54.0:
+
+- `cargo fmt --all -- --check`
+- `git diff --check`
+- `cargo check --locked --offline --bin stickies`
+- `cargo build --locked --offline --bin stickies`, including native linking, without launching the binary
+- `cargo clippy --locked --offline --bin stickies -- -D warnings`, with no deprecation allowance
+
+Static Windows review covered the shared dialog/font/icon replacements, conditional callers in `main.rs` and `edge.rs`, `edge_surface.rs`, `tray_windows.rs`, `platform.rs`, `autostart.rs` and Windows font registration in `ui_assets.rs`. No additional deprecated GTK calls were identified in those Windows-only paths. This is not a Windows warning count or type-check result. `/usr/lib/rustlib` contains only the Linux target standard library; no Windows GNU cross-linker or PowerShell executable is available. Windows compilation/linking, MSYS2 library compatibility, native packaging and Azure/clean-machine launch remain unverified. Nothing was installed or downloaded. Existing CI remains unchanged and is skipped for the maintenance push because it runs tests. Previous packages remain unchanged and do not contain these replacements.
+
+The owner will manually verify the final source build on Linux and Azure Windows. Use disposable notes for save failures. Check failed Quit with dirty notes in multiple views, visible error ownership, Close/Escape/window dismissal retaining every edit, repair-and-retry, Windows tray Quit and ordinary All Notes close. Check startup-storage errors stay visible, repeated activation does not duplicate initialization, and dismissal permits exit. Compare per-note fonts/sizes, shared previews, theme/icon colors and focus/keyboard return across open/close cycles. No tests or app sessions were run in this pass, and no runtime acceptance is claimed.
+
 ## October 16 All Notes welcome and toast refinements
 
 After reinstalling the previous repaired package, the owner reported that checklists work without crashing, while noting that they cannot reproduce the exact original case. This is an ordinary-use report, not a claim that the original pointer sequence was repeated. Their screenshots requested a smaller All Notes deletion toast and removal of the unused left pane/divider from the welcome screen, followed by another package rebuild. These two UI refinements are the only new application changes in this pass; the checklist repair is preserved.

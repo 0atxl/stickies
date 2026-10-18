@@ -161,7 +161,7 @@ fn icon_mask(path: &str, px: i32) -> gtk::cairo::ImageSurface {
 fn set_icon(image: &gtk::DrawingArea, path: &str) {
     let path = path.to_owned();
     image.set_draw_func(move |widget, cr, width, height| {
-        let color = widget.style_context().color();
+        let color = widget.color();
         cr.set_source_rgba(
             color.red().into(),
             color.green().into(),
