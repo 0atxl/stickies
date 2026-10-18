@@ -1,6 +1,7 @@
 mod app;
 mod appearance;
 mod autostart;
+mod checklist;
 mod cli;
 mod config;
 mod edge;

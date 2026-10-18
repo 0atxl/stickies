@@ -1,5 +1,5 @@
 //! Inline formatting uses Unicode character offsets in the plain-text body.
-//! GTK child anchors belong to the view and never enter stored ranges or history.
+//! Checklist anchors expand to their existing textual prefixes in stored ranges.
 use crate::note_session::NoteSession;
 use gtk::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -46,21 +46,10 @@ pub struct Span {
 }
 
 pub fn offset(buffer: &gtk::TextBuffer, at: &gtk::TextIter) -> i32 {
-    buffer.text(&buffer.start_iter(), at, true).chars().count() as i32
+    crate::checklist::offset(buffer, at)
 }
 pub fn iter(buffer: &gtk::TextBuffer, offset: i32) -> gtk::TextIter {
-    let mut at = buffer.start_iter();
-    let mut remaining = offset;
-    while !at.is_end() {
-        if at.child_anchor().is_none() {
-            if remaining <= 0 {
-                break;
-            }
-            remaining -= 1;
-        }
-        at.forward_char();
-    }
-    at
+    crate::checklist::iter(buffer, offset)
 }
 pub fn spans(buffer: &gtk::TextBuffer) -> Vec<Span> {
     let mut spans = Vec::new();
@@ -72,28 +61,34 @@ pub fn spans(buffer: &gtk::TextBuffer) -> Vec<Span> {
         let mut position = 0;
         let mut start = None;
         loop {
-            if at.child_anchor().is_some() {
-                at.forward_char();
-                continue;
-            }
-            let tagged = !at.is_end() && at.has_tag(&tag);
-            match (start, tagged) {
-                (None, true) => start = Some(position),
-                (Some(begin), false) => {
-                    spans.push(Span {
-                        start: begin,
-                        end: position,
-                        mark,
-                    });
-                    start = None;
+            let flags = if at.is_end() {
+                vec![false]
+            } else if let Some(formats) = crate::checklist::formats(&at) {
+                formats.map(|bits| bits & (1 << mark as u8) != 0).to_vec()
+            } else if at.child_anchor().is_some() {
+                Vec::new()
+            } else {
+                vec![at.has_tag(&tag)]
+            };
+            for tagged in flags {
+                match (start, tagged) {
+                    (None, true) => start = Some(position),
+                    (Some(begin), false) => {
+                        spans.push(Span {
+                            start: begin,
+                            end: position,
+                            mark,
+                        });
+                        start = None;
+                    }
+                    _ => {}
                 }
-                _ => {}
+                position += 1;
             }
             if at.is_end() {
                 break;
             }
             at.forward_char();
-            position += 1;
         }
     }
     spans
@@ -103,6 +98,11 @@ pub fn apply(buffer: &gtk::TextBuffer, spans: &[Span]) {
         let tag = mark.tag(buffer);
         buffer.remove_tag(&tag, &buffer.start_iter(), &buffer.end_iter());
     }
+    let mut at = buffer.start_iter();
+    while !at.is_end() {
+        crate::checklist::set_formats(&at, [0; 6]);
+        at.forward_char();
+    }
     for span in spans {
         if span.start >= 0 && span.end > span.start {
             buffer.apply_tag(
@@ -110,8 +110,50 @@ pub fn apply(buffer: &gtk::TextBuffer, spans: &[Span]) {
                 &iter(buffer, span.start),
                 &iter(buffer, span.end),
             );
+            format_prefixes(buffer, span.start, span.end, span.mark, true);
         }
     }
+}
+
+// Prefix characters have no GTK text positions, but their existing saved
+// formatting must still round-trip, including spans ending inside a prefix.
+fn format_prefixes(buffer: &gtk::TextBuffer, start: i32, end: i32, mark: Mark, active: bool) {
+    let mut at = buffer.start_iter();
+    let mut position = 0;
+    while !at.is_end() {
+        if let Some(mut formats) = crate::checklist::formats(&at) {
+            for bits in &mut formats {
+                if (start..end).contains(&position) {
+                    if active {
+                        *bits |= 1 << mark as u8;
+                    } else {
+                        *bits &= !(1 << mark as u8);
+                    }
+                }
+                position += 1;
+            }
+            crate::checklist::set_formats(&at, formats);
+        } else if at.child_anchor().is_none() {
+            position += 1;
+        }
+        at.forward_char();
+    }
+}
+
+pub fn format_selection_prefixes(
+    buffer: &gtk::TextBuffer,
+    start: &gtk::TextIter,
+    end: &gtk::TextIter,
+    mark: Mark,
+    active: bool,
+) {
+    format_prefixes(
+        buffer,
+        offset(buffer, start),
+        offset(buffer, end),
+        mark,
+        active,
+    );
 }
 
 /// A mixed selection is inactive; anchors and hidden checklist markers don't count.
@@ -546,7 +588,51 @@ pub fn bind_title_history(
 pub fn copy_text(body: &gtk::TextView) {
     let buffer = body.buffer();
     let (start, end) = buffer.bounds();
-    body.clipboard().set_text(&buffer.text(&start, &end, true));
+    body.clipboard()
+        .set_text(&crate::checklist::text(&buffer, &start, &end));
+}
+
+/// Keep GTK's in-process formatting transfer while exporting canonical plain text.
+pub fn copy_selection(body: &gtk::TextView) -> Option<(gtk::TextIter, gtk::TextIter)> {
+    let buffer = body.buffer();
+    // GTK also supports copying/cutting from its keyboard "anchor" mark when
+    // there is no ordinary selection. Preserve that native range convention.
+    let (mut start, mut end) = buffer.selection_bounds().or_else(|| {
+        buffer.mark("anchor").map(|anchor| {
+            (
+                buffer.iter_at_mark(&buffer.get_insert()),
+                buffer.iter_at_mark(&anchor),
+            )
+        })
+    })?;
+    start.order(&mut end);
+    if start == end {
+        return None;
+    }
+    let first = offset(&buffer, &start);
+    let last = offset(&buffer, &end);
+    let contents = gtk::TextBuffer::new(Some(&buffer.tag_table()));
+    contents.set_text(&crate::checklist::text(&buffer, &start, &end));
+    let formatting = spans(&buffer)
+        .into_iter()
+        .filter_map(|span| {
+            let start = span.start.max(first);
+            let end = span.end.min(last);
+            (start < end).then_some(Span {
+                start: start - first,
+                end: end - first,
+                mark: span.mark,
+            })
+        })
+        .collect::<Vec<_>>();
+    apply(&contents, &formatting);
+    contents.select_range(&contents.start_iter(), &contents.end_iter());
+    body.clipboard()
+        .set_content(Some(&gtk::gdk::ContentProvider::for_value(
+            &contents.to_value(),
+        )))
+        .ok()?;
+    Some((start, end))
 }
 
 /// A fixed footer page follows the current buffer's selection, without a popup.

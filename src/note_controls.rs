@@ -470,7 +470,7 @@ fn sync_checklist_button(button: &gtk::ToggleButton, body: &gtk::TextView) {
     start.set_line_offset(0);
     let mut end = start;
     end.forward_to_line_end();
-    let line = buffer.text(&start, &end, true);
+    let line = crate::checklist::text(&buffer, &start, &end);
     button.set_active(line.starts_with("- [ ] ") || line.starts_with("- [x] "));
 }
 

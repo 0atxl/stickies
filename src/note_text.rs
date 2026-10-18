@@ -54,6 +54,28 @@ mod imp {
     }
     impl WidgetImpl for NoteText {}
     impl TextViewImpl for NoteText {
+        fn copy_clipboard(&self) {
+            let view = self.obj();
+            if crate::text_editing::copy_selection(view.upcast_ref()).is_none() {
+                self.parent_copy_clipboard();
+            }
+        }
+        fn cut_clipboard(&self) {
+            let view = self.obj();
+            if !view.is_editable() {
+                return;
+            }
+            let buffer = view.buffer();
+            if let Some((mut start, mut end)) =
+                crate::text_editing::copy_selection(view.upcast_ref())
+            {
+                buffer.begin_user_action();
+                buffer.delete_interactive(&mut start, &mut end, true);
+                buffer.end_user_action();
+            } else {
+                self.parent_cut_clipboard();
+            }
+        }
         fn snapshot_layer(&self, layer: gtk::TextViewLayer, snapshot: gtk::Snapshot) {
             self.parent_snapshot_layer(layer, snapshot.clone());
             if layer == gtk::TextViewLayer::AboveText {

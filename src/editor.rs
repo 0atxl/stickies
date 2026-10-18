@@ -580,10 +580,11 @@ pub fn toggle_checklist(body: &gtk::TextView) {
     if text.starts_with("- [ ] ") || text.starts_with("- [x] ") {
         let buffer = body.buffer();
         let mut end = start;
-        if end.child_anchor().is_some() {
+        if crate::checklist::checked(&end).is_some() {
             end.forward_char();
+        } else {
+            end.forward_chars(6);
         }
-        end.forward_chars(6);
         buffer.begin_user_action();
         buffer.delete(&mut start, &mut end);
         buffer.end_user_action();
@@ -600,15 +601,20 @@ pub fn connect_checklist_backspace(body: &gtk::TextView) {
         }
         let (mut start, _, text) = current_line(body);
         let cursor = buffer.cursor_position() - start.offset();
-        let prefix_len = if start.child_anchor().is_some() { 7 } else { 6 };
+        let prefix_len = if crate::checklist::checked(&start).is_some() {
+            1
+        } else {
+            6
+        };
         if (text.starts_with("- [ ] ") || text.starts_with("- [x] "))
             && (1..=prefix_len).contains(&cursor)
         {
             let mut end = start;
-            if end.child_anchor().is_some() {
+            if crate::checklist::checked(&end).is_some() {
                 end.forward_char();
+            } else {
+                end.forward_chars(6);
             }
-            end.forward_chars(6);
             buffer.begin_user_action();
             buffer.delete(&mut start, &mut end);
             buffer.end_user_action();
@@ -623,12 +629,20 @@ fn current_line(body: &gtk::TextView) -> (gtk::TextIter, gtk::TextIter, String) 
     start.set_line_offset(0);
     let mut end = start;
     end.forward_to_line_end();
-    let text = buffer.text(&start, &end, true).to_string();
+    let text = crate::checklist::text(&buffer, &start, &end);
     (start, end, text)
 }
 pub fn toggle_line(body: &gtk::TextView, prefix: &str) {
     let buffer = body.buffer();
     let (mut start, _, text) = current_line(body);
+    if prefix == "- [ ] "
+        && let Some(checked) = crate::checklist::checked(&start)
+    {
+        buffer.begin_user_action();
+        crate::checklist::set_checked(&buffer, &start, !checked);
+        buffer.end_user_action();
+        return;
+    }
     let replacement = if prefix == "- [ ] " && text.starts_with("- [ ] ") {
         text.replacen("- [ ] ", "- [x] ", 1)
     } else if prefix == "- [ ] " && text.starts_with("- [x] ") {
@@ -651,13 +665,15 @@ pub fn toggle_line(body: &gtk::TextView, prefix: &str) {
         .zip(new_chars.iter().rev())
         .take_while(|(a, b)| a == b)
         .count();
-    if start.child_anchor().is_some() {
-        start.forward_char();
-    }
-    let mut end = start;
-    end.forward_chars((old_chars.len() - common) as i32);
-    let prefix: String = new_chars[..new_chars.len() - common].iter().collect();
     buffer.begin_user_action();
+    let position = start.offset();
+    crate::checklist::expand(&buffer, &mut start);
+    start = buffer.iter_at_offset(position);
+    let mut end = crate::checklist::iter(
+        &buffer,
+        crate::checklist::offset(&buffer, &start) + (old_chars.len() - common) as i32,
+    );
+    let prefix: String = new_chars[..new_chars.len() - common].iter().collect();
     buffer.delete(&mut start, &mut end);
     buffer.insert(&mut start, &prefix);
     buffer.end_user_action();

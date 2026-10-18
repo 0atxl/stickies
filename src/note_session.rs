@@ -131,7 +131,7 @@ impl NoteSession {
                     let start = values[1].get::<gtk::TextIter>().unwrap();
                     if signal == "delete-range" {
                         let end = values[2].get::<gtk::TextIter>().unwrap();
-                        let removed = session.body.text(&start, &end, true);
+                        let removed = crate::checklist::text(&session.body, &start, &end);
                         if start.starts_line() && matches!(removed.as_str(), "- [ ] " | "- [x] ") {
                             session.isolate_next_edit();
                         }
@@ -212,10 +212,11 @@ impl NoteSession {
     fn edit_state(&self) -> EditState {
         EditState {
             title: self.title.text().to_string(),
-            body: self
-                .body
-                .text(&self.body.start_iter(), &self.body.end_iter(), true)
-                .to_string(),
+            body: crate::checklist::text(
+                &self.body,
+                &self.body.start_iter(),
+                &self.body.end_iter(),
+            ),
             spans: crate::text_editing::spans(&self.body),
             cursor: crate::text_editing::offset(
                 &self.body,
@@ -314,6 +315,7 @@ impl NoteSession {
         } else {
             self.body.apply_tag(&tag, &start, &end);
         }
+        crate::text_editing::format_selection_prefixes(&self.body, &start, &end, mark, !all);
         self.finish_isolated_edit();
         self.schedule_save();
     }
@@ -337,7 +339,10 @@ impl NoteSession {
 
     fn is_blank(&self) -> bool {
         let (start, end) = self.body.bounds();
-        self.title.text().trim().is_empty() && self.body.text(&start, &end, true).trim().is_empty()
+        self.title.text().trim().is_empty()
+            && crate::checklist::text(&self.body, &start, &end)
+                .trim()
+                .is_empty()
     }
 
     // Release only this view. A draft remains editable in any other window.
@@ -376,21 +381,10 @@ impl NoteSession {
         if self.body.has_selection() {
             return;
         }
-        let cursor = self.body.iter_at_mark(&self.body.get_insert());
-        let mut start = cursor;
-        start.set_line_offset(0);
-        let mut end = start;
-        end.forward_to_line_end();
-        let text = self.body.text(&start, &end, true);
-        if !text.starts_with("- [ ] ") && !text.starts_with("- [x] ") {
-            return;
-        }
-        if start.child_anchor().is_some() {
-            start.forward_char();
-        }
-        start.forward_chars(6);
-        if cursor < start {
-            self.body.place_cursor(&start);
+        let mut cursor = self.body.iter_at_mark(&self.body.get_insert());
+        if crate::checklist::checked(&cursor).is_some() {
+            cursor.forward_char();
+            self.body.place_cursor(&cursor);
         }
     }
 
@@ -398,54 +392,16 @@ impl NoteSession {
         if self.decorating.replace(true) {
             return;
         }
+        crate::checklist::normalize(&self.body);
         decorate_checklists(&self.body);
-        let hidden = self
-            .body
-            .tag_table()
-            .lookup("check-marker")
-            .unwrap_or_else(|| {
-                let tag = gtk::TextTag::builder()
-                    .name("check-marker")
-                    .invisible(true)
-                    .build();
-                self.body.tag_table().add(&tag);
-                tag
-            });
-        let (start, end) = self.body.bounds();
-        self.body.remove_tag(&hidden, &start, &end);
-        // Keep anchors before hidden markers so GTK lays them out correctly.
-        // Text markers remain the persisted state; anchors are presentation only.
         for line in 0..self.body.line_count() {
             let Some(start) = self.body.iter_at_line(line) else {
                 continue;
             };
-            let mut end = start;
-            end.forward_to_line_end();
-            let text = self.body.text(&start, &end, true);
-            let checklist = text.starts_with("- [ ] ") || text.starts_with("- [x] ");
-            let start_offset = start.offset();
-            let mut scan = end;
-            while scan.offset() > start_offset {
-                scan.backward_char();
-                if scan.child_anchor().is_some() && (!checklist || scan.offset() != start_offset) {
-                    let mut after = scan;
-                    after.forward_char();
-                    self.body.delete(&mut scan, &mut after);
-                }
-            }
-            if !checklist {
+            let Some(active) = crate::checklist::checked(&start) else {
                 continue;
-            }
-            let mut start = self.body.iter_at_line(line).unwrap();
-            let anchor = start
-                .child_anchor()
-                .unwrap_or_else(|| self.body.create_child_anchor(&mut start));
-            let mut marker_start = self.body.iter_at_child_anchor(&anchor);
-            marker_start.forward_char();
-            let mut marker_end = marker_start;
-            marker_end.forward_chars(6);
-            self.body.apply_tag(&hidden, &marker_start, &marker_end);
-            let active = text.starts_with("- [x] ");
+            };
+            let anchor = start.child_anchor().unwrap();
             for view in self
                 .views
                 .borrow()
@@ -474,32 +430,14 @@ impl NoteSession {
                     if session.decorating.get() || target.is_deleted() {
                         return;
                     }
-                    // Editing the hidden x/space must not leave the caret there.
-                    let cursor = session.body.cursor_position();
-                    let bound = session
-                        .body
-                        .iter_at_mark(&session.body.selection_bound())
-                        .offset();
-                    let mut at = session.body.iter_at_child_anchor(&target);
-                    at.forward_chars(4);
-                    let mut end = at;
-                    end.forward_char();
                     session.edit_action(|| {
-                        session.body.begin_user_action();
-                        session.decorating.set(true);
-                        session.body.delete(&mut at, &mut end);
-                        session
-                            .body
-                            .insert(&mut at, if b.is_active() { "x" } else { " " });
-                        session.decorating.set(false);
-                        session.body.end_user_action();
-                        session.body.select_range(
-                            &session.body.iter_at_offset(cursor),
-                            &session.body.iter_at_offset(bound),
+                        crate::checklist::set_checked(
+                            &session.body,
+                            &session.body.iter_at_child_anchor(&target),
+                            b.is_active(),
                         );
                         session.refresh_checklists();
                     });
-                    session.schedule_save();
                 });
                 view.add_child_at_anchor(&button, &anchor);
             }
@@ -628,7 +566,7 @@ impl NoteSession {
         let note = Note {
             id: self.id,
             title: self.title.text().to_string(),
-            body: self.body.text(&start, &end, true).to_string(),
+            body: crate::checklist::text(&self.body, &start, &end),
             color: self.color.get(),
             pinned: self.pinned.get(),
         };
@@ -679,17 +617,13 @@ pub fn decorate_checklists(buffer: &gtk::TextBuffer) {
     let (start, end) = buffer.bounds();
     buffer.remove_tag(&tag, &start, &end);
     for line in 0..buffer.line_count() {
-        if let Some(start) = buffer.iter_at_line(line) {
+        if let Some(mut start) = buffer.iter_at_line(line)
+            && crate::checklist::checked(&start) == Some(true)
+        {
             let mut end = start;
             end.forward_to_line_end();
-            if buffer.text(&start, &end, true).starts_with("- [x] ") {
-                let mut content = start;
-                if content.child_anchor().is_some() {
-                    content.forward_char();
-                }
-                content.forward_chars(6);
-                buffer.apply_tag(&tag, &content, &end);
-            }
+            start.forward_char();
+            buffer.apply_tag(&tag, &start, &end);
         }
     }
 }
@@ -710,30 +644,18 @@ pub fn style_checklists(buffer: &gtk::TextBuffer, config: &crate::config::Config
 
 pub fn readonly_checklists(view: &gtk::TextView) {
     let buffer = view.buffer();
-    let hidden = gtk::TextTag::builder()
-        .name("check-marker")
-        .invisible(true)
-        .build();
-    buffer.tag_table().add(&hidden);
+    crate::checklist::normalize(&buffer);
     for line in 0..buffer.line_count() {
-        let Some(mut start) = buffer.iter_at_line(line) else {
+        let Some(start) = buffer.iter_at_line(line) else {
             continue;
         };
-        let mut end = start;
-        end.forward_to_line_end();
-        let text = buffer.text(&start, &end, true);
-        if !text.starts_with("- [ ] ") && !text.starts_with("- [x] ") {
+        let Some(active) = crate::checklist::checked(&start) else {
             continue;
-        }
-        let anchor = buffer.create_child_anchor(&mut start);
-        let mut start = buffer.iter_at_child_anchor(&anchor);
-        start.forward_char();
-        let mut end = start;
-        end.forward_chars(6);
-        buffer.apply_tag(&hidden, &start, &end);
+        };
+        let anchor = start.child_anchor().unwrap();
         let check = gtk::CheckButton::new();
         check.add_css_class("inline-check");
-        check.set_active(text.starts_with("- [x] "));
+        check.set_active(active);
         check.set_can_target(false);
         check.set_focusable(false);
         check.update_property(&[gtk::accessible::Property::Label("Completed")]);
@@ -745,6 +667,526 @@ pub fn readonly_checklists(view: &gtk::TextView) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires a GTK display; uses a disposable database"]
+    fn checklist_pointer_mapping_after_edits() {
+        use glib::translate::{ToGlibPtr, ToGlibPtrMut};
+
+        gtk::init().unwrap();
+        crate::ui_assets::register().unwrap();
+        let config = crate::config::Config {
+            theme: crate::config::Theme::Playful,
+            ..Default::default()
+        };
+        let provider = gtk::CssProvider::new();
+        crate::appearance::apply(&provider, &config);
+        gtk::style_context_add_provider_for_display(
+            &gtk::gdk::Display::default().unwrap(),
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+        let root =
+            std::env::temp_dir().join(format!("stickies-checklist-hit-{}", std::process::id()));
+        let storage = Rc::new(Storage::open(&root.join("notes.db")).unwrap());
+        let note = storage
+            .create_note("Checklist", "", NoteColor::Yellow)
+            .unwrap();
+        let session = NoteSession::new(note, storage, || {});
+        let editor =
+            crate::editor::Editor::new(session.clone(), Rc::new(RefCell::new(config)), true, || {});
+        let window = gtk::Window::new();
+        window.set_default_size(320, 376);
+        window.set_child(Some(&editor.root));
+        window.present();
+        let settle = || {
+            let until = Instant::now() + Duration::from_millis(150);
+            while Instant::now() < until {
+                while glib::MainContext::default().iteration(false) {}
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        settle();
+        editor.body.grab_focus();
+        for ch in "- [ ] a checklist with enough words to wrap and end near the right side".chars()
+        {
+            session.body.begin_user_action();
+            editor.body.emit_insert_at_cursor(&ch.to_string());
+            session.body.end_user_action();
+            while glib::MainContext::default().iteration(false) {}
+        }
+        let second = crate::editor::Editor::new(
+            session.clone(),
+            Rc::new(RefCell::new(crate::config::Config::default())),
+            false,
+            || {},
+        );
+        assert_eq!(editor.body.buffer(), second.body.buffer());
+        let text = || {
+            crate::checklist::text(
+                &session.body,
+                &session.body.start_iter(),
+                &session.body.end_iter(),
+            )
+        };
+        let initial = "- [ ] a checklist with enough words to wrap and end near the right side";
+        assert_eq!(text(), initial);
+        for (stage, label) in ["wrapped ASCII", "Unicode", "completed", "selection"]
+            .into_iter()
+            .enumerate()
+        {
+            if stage == 1 {
+                session.body.place_cursor(&session.body.end_iter());
+                editor.body.emit_insert_at_cursor(" café 日本語");
+            } else if stage == 2 {
+                let anchor = session.body.start_iter().child_anchor().unwrap();
+                let check = anchor.widgets()[0]
+                    .clone()
+                    .downcast::<gtk::CheckButton>()
+                    .unwrap();
+                check.set_active(true);
+            }
+            settle();
+            let expected = if stage == 0 {
+                initial.to_string()
+            } else {
+                format!(
+                    "{} café 日本語",
+                    initial.replacen("[ ]", if stage >= 2 { "[x]" } else { "[ ]" }, 1)
+                )
+            };
+            assert_eq!(text(), expected, "{label}: buffer text");
+            assert_eq!(
+                session
+                    .body
+                    .text(&session.body.start_iter(), &session.body.end_iter(), true),
+                &expected[6..],
+                "{label}: GTK contains item text, without marker characters"
+            );
+            let mut scan = session.body.start_iter();
+            while !scan.is_end() {
+                assert!(!scan.tags().iter().any(|tag| tag.is_invisible()));
+                scan.forward_char();
+            }
+            let anchor = session.body.start_iter().child_anchor().unwrap();
+            for view in [&editor.body, &second.body] {
+                let check = anchor
+                    .widgets()
+                    .into_iter()
+                    .find(|widget| {
+                        widget.ancestor(gtk::TextView::static_type()).as_ref()
+                            == Some(view.upcast_ref())
+                    })
+                    .unwrap()
+                    .downcast::<gtk::CheckButton>()
+                    .unwrap();
+                assert_eq!(check.is_active(), stage >= 2, "{label}: shared checkbox");
+            }
+            let visible = editor.body.visible_rect();
+            assert!(visible.width() > 100 && visible.height() > 50);
+            // Prove that the fixture exercises soft wrapping.
+            assert!(
+                editor
+                    .body
+                    .cursor_locations(Some(&session.body.end_iter()))
+                    .0
+                    .y()
+                    > editor
+                        .body
+                        .cursor_locations(Some(&session.body.start_iter()))
+                        .0
+                        .y(),
+                "{label}: checklist wraps"
+            );
+            for y in visible.y()..visible.y() + visible.height() {
+                for x in [
+                    visible.x(),
+                    visible.x() + visible.width() / 2,
+                    visible.x() + visible.width() - 1,
+                ] {
+                    // An interior caret splits GTK's text segments. Without it,
+                    // an invalid visible-byte index can escape this regression.
+                    let interior = session.body.iter_at_offset(20);
+                    if stage == 3 {
+                        session
+                            .body
+                            .select_range(&interior, &session.body.end_iter());
+                    } else {
+                        session.body.place_cursor(&interior);
+                    }
+                    if let Some((at, _)) = editor.body.iter_at_position(x, y) {
+                        assert!(at.offset() <= session.body.char_count());
+                    }
+                }
+            }
+            // The safe wrapper discards the returned iterator outside text.
+            // Inspect the C out-parameter to verify below-paragraph mapping too.
+            for x in [visible.x(), visible.x() + visible.width() - 1] {
+                let mut at = session.body.start_iter();
+                let mut trailing = -1;
+                let inside = unsafe {
+                    gtk::ffi::gtk_text_view_get_iter_at_position(
+                        editor.body.to_glib_none().0,
+                        at.to_glib_none_mut().0,
+                        &mut trailing,
+                        x,
+                        visible.y() + visible.height() + 100,
+                    )
+                };
+                assert_eq!(inside, 0, "{label}: below paragraph");
+                assert_eq!(at.offset(), session.body.char_count(), "{label}: line end");
+                assert_eq!(trailing, 0, "{label}: trailing");
+            }
+            eprintln!(
+                "PASS {label}: text, shared checkboxes, pointer grid, below-paragraph end/trailing"
+            );
+        }
+        session.body.place_cursor(&session.body.end_iter());
+        session.edit_action(|| editor.body.emit_insert_at_cursor("!"));
+        assert!(
+            crate::checklist::text(
+                &session.body,
+                &session.body.start_iter(),
+                &session.body.end_iter()
+            )
+            .ends_with('!')
+        );
+        eprintln!("PASS edit: appended !");
+        session.undo(false);
+        assert!(
+            !crate::checklist::text(
+                &session.body,
+                &session.body.start_iter(),
+                &session.body.end_iter()
+            )
+            .ends_with('!')
+        );
+        eprintln!("PASS undo: removed !");
+        session.undo(true);
+        assert!(text().ends_with('!'), "redo restored !");
+        assert!(session.flush());
+        assert_eq!(
+            session.storage.load_note(session.id()).unwrap().body,
+            format!("{} café 日本語!", initial.replacen("[ ]", "[x]", 1)),
+            "saved checklist preserves completion and Unicode without anchors"
+        );
+        eprintln!(
+            "PASS redo/save: restored !, flush succeeded, exact completed Unicode body persisted"
+        );
+        window.destroy();
+        drop(second);
+        drop(editor);
+        drop(session);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires a GTK display; uses a disposable database and clipboard"]
+    fn checklist_anchors_preserve_editing_clipboard_and_saved_format() {
+        use crate::text_editing::{Mark, Span, iter, spans};
+
+        gtk::init().unwrap();
+        let root =
+            std::env::temp_dir().join(format!("stickies-anchor-repair-{}", std::process::id()));
+        let storage = Rc::new(Storage::open(&root.join("notes.db")).unwrap());
+        let original = "- [ ] café 日本語 👩🏽‍💻\n- [x] Second\nPlain";
+        let note = storage
+            .create_note("Anchors", original, NoteColor::Yellow)
+            .unwrap();
+        // Also preserve legacy formatting whose boundaries fall inside markers.
+        let formatting = vec![
+            Span {
+                start: 0,
+                end: 10,
+                mark: Mark::Bold,
+            },
+            Span {
+                start: 2,
+                end: 4,
+                mark: Mark::Italic,
+            },
+            Span {
+                start: 6,
+                end: 10,
+                mark: Mark::Underline,
+            },
+        ];
+        storage.update_formatted_note(&note, &formatting).unwrap();
+        let session = NoteSession::new(note, storage.clone(), || {});
+        let view = crate::note_text::view(Some(&session.body));
+        crate::editor::connect_checklist_backspace(&view);
+        session.attach_view(&view);
+        let weak = Rc::downgrade(&session);
+        crate::text_editing::bind_history(&view, move || weak.upgrade());
+        let second = crate::note_text::view(Some(&session.body));
+        session.attach_view(&second);
+        let text = || {
+            crate::checklist::text(
+                &session.body,
+                &session.body.start_iter(),
+                &session.body.end_iter(),
+            )
+        };
+        let settle = || {
+            while glib::MainContext::default().iteration(false) {}
+        };
+        let window = gtk::Window::new();
+        window.set_default_size(320, 376);
+        window.set_child(Some(&view));
+        window.present();
+        settle();
+        assert_eq!(text(), original);
+        assert_eq!(spans(&session.body), formatting);
+        assert_eq!(
+            session
+                .body
+                .text(&session.body.start_iter(), &session.body.end_iter(), true),
+            "café 日本語 👩🏽‍💻\nSecond\nPlain"
+        );
+        assert!(session.body.tag_table().lookup("check-marker").is_none());
+        assert_eq!(iter(&session.body, 6).offset(), 1);
+        for offset in [0, 6, 10, original.chars().count() as i32] {
+            assert_eq!(
+                crate::text_editing::offset(&session.body, &iter(&session.body, offset)),
+                offset
+            );
+        }
+        session
+            .body
+            .select_range(&iter(&session.body, 6), &iter(&session.body, 10));
+        let selection = session.body.selection_bounds().unwrap();
+        let anchor = session.body.start_iter().child_anchor().unwrap();
+        let checks: Vec<_> = anchor
+            .widgets()
+            .into_iter()
+            .map(|w| w.downcast::<gtk::CheckButton>().unwrap())
+            .collect();
+        assert_eq!(checks.len(), 2);
+        checks[0].set_active(true);
+        assert!(checks.iter().all(|check| check.is_active()));
+        assert_eq!(session.body.selection_bounds().unwrap(), selection);
+        assert_eq!(spans(&session.body), formatting);
+        session.undo(false);
+        assert_eq!(text(), original);
+        assert_eq!(spans(&session.body), formatting);
+        session.undo(true);
+        assert!(text().starts_with("- [x] café"));
+        session.undo(false);
+
+        // Preserve GTK's keyboard anchor copy/cut range without a selection.
+        session.body.place_cursor(&session.body.end_iter());
+        let keyboard_anchor =
+            session
+                .body
+                .create_mark(Some("anchor"), &session.body.start_iter(), true);
+        view.emit_by_name::<()>("copy-clipboard", &[]);
+        assert_eq!(
+            glib::MainContext::default()
+                .block_on(view.clipboard().read_text_future())
+                .unwrap()
+                .unwrap(),
+            original
+        );
+        view.emit_by_name::<()>("cut-clipboard", &[]);
+        assert_eq!(text(), "");
+        session.body.delete_mark(&keyboard_anchor);
+        session.undo(false);
+        assert_eq!(text(), original);
+        assert_eq!(spans(&session.body), formatting);
+
+        // Copy and cut carry canonical plain text, including selected anchors.
+        session
+            .body
+            .select_range(&session.body.start_iter(), &session.body.end_iter());
+        view.emit_by_name::<()>("copy-clipboard", &[]);
+        let copied = glib::MainContext::default()
+            .block_on(view.clipboard().read_text_future())
+            .unwrap()
+            .unwrap();
+        assert_eq!(copied, original);
+        view.emit_by_name::<()>("cut-clipboard", &[]);
+        assert_eq!(text(), "");
+        session.undo(false);
+        assert_eq!(text(), original);
+        assert_eq!(spans(&session.body), formatting);
+        // Same-session paste retains formatting as GTK did before the repair.
+        session.body.place_cursor(&session.body.end_iter());
+        session.edit_action(|| view.emit_insert_at_cursor("\n"));
+        view.emit_by_name::<()>("paste-clipboard", &[]);
+        let expected = format!("{original}\n{original}");
+        let until = Instant::now() + Duration::from_secs(2);
+        while text() != expected && Instant::now() < until {
+            settle();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        settle();
+        assert_eq!(text(), expected);
+        let shift = original.chars().count() as i32 + 1;
+        let mut duplicated = formatting.clone();
+        duplicated.extend(formatting.iter().map(|span| Span {
+            start: span.start + shift,
+            end: span.end + shift,
+            mark: span.mark,
+        }));
+        duplicated.sort_by_key(|span| (span.mark as u8, span.start));
+        assert_eq!(spans(&session.body), duplicated);
+        session.undo(false);
+        session.undo(false);
+        assert_eq!(text(), original);
+        assert_eq!(spans(&session.body), formatting);
+        session.body.place_cursor(&session.body.end_iter());
+        view.clipboard()
+            .set_text("\n- [ ] Pasted café 日本語\n- [x] Done");
+        view.emit_by_name::<()>("paste-clipboard", &[]);
+        let until = Instant::now() + Duration::from_secs(2);
+        while !text().ends_with("- [x] Done") && Instant::now() < until {
+            settle();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        settle();
+        assert_eq!(
+            text(),
+            format!("{original}\n- [ ] Pasted café 日本語\n- [x] Done")
+        );
+        assert!(
+            session
+                .body
+                .iter_at_line(3)
+                .unwrap()
+                .child_anchor()
+                .is_some()
+        );
+        assert_eq!(
+            crate::checklist::checked(&session.body.iter_at_line(4).unwrap()),
+            Some(true)
+        );
+        session.undo(false);
+        assert_eq!(text(), original);
+        assert_eq!(spans(&session.body), formatting);
+
+        // Removing a newline turns the joined checkbox into ordinary marker text.
+        let mut line = session.body.iter_at_line(1).unwrap();
+        let mut before = line;
+        before.backward_char();
+        session.edit_action(|| session.body.delete(&mut before, &mut line));
+        settle();
+        assert_eq!(text(), original.replacen('\n', "", 1));
+        assert!(
+            session
+                .body
+                .text(&session.body.start_iter(), &session.body.end_iter(), true)
+                .contains("- [x] Second")
+        );
+        session.undo(false);
+        assert_eq!(text(), original);
+        assert_eq!(spans(&session.body), formatting);
+
+        // Switching prefixes preserves formatting, including the old marker.
+        session.body.place_cursor(&iter(&session.body, 6));
+        session.edit_action(|| crate::editor::toggle_line(&view, "- "));
+        settle();
+        assert_eq!(text(), original.strip_prefix("- ").unwrap());
+        assert!(spans(&session.body).contains(&Span {
+            start: 0,
+            end: 2,
+            mark: Mark::Italic
+        }));
+        assert!(spans(&session.body).contains(&Span {
+            start: 4,
+            end: 8,
+            mark: Mark::Underline
+        }));
+        session.undo(false);
+        assert_eq!(text(), original);
+        assert_eq!(spans(&session.body), formatting);
+
+        // Footer removal and Backspace remove the checkbox, preserving item text.
+        session.body.place_cursor(&iter(&session.body, 6));
+        session.edit_action(|| crate::editor::toggle_checklist(&view));
+        settle();
+        assert_eq!(text(), original.replacen("- [ ] ", "", 1));
+        session.undo(false);
+        session.body.place_cursor(&iter(&session.body, 6));
+        view.emit_backspace();
+        settle();
+        assert_eq!(text(), original.replacen("- [ ] ", "", 1));
+        session.undo(false);
+        assert_eq!(text(), original);
+
+        // A completed item's continuation is unchecked; an empty item exits.
+        session.body.place_cursor(&session.body.end_iter());
+        session.edit_action(|| view.emit_insert_at_cursor("\n- [x] Continue"));
+        settle();
+        session.body.place_cursor(&session.body.end_iter());
+        assert!(session.edit_action(|| crate::editor::continue_list(&view)));
+        settle();
+        assert!(text().ends_with("- [x] Continue\n- [ ] "));
+        assert!(session.edit_action(|| crate::editor::continue_list(&view)));
+        settle();
+        assert!(text().ends_with("- [x] Continue\n"));
+        for _ in 0..3 {
+            session.undo(false);
+        }
+        assert_eq!(text(), original);
+        assert_eq!(spans(&session.body), formatting);
+        assert!(session.flush());
+        let saved = storage.load_note(session.id()).unwrap();
+        assert_eq!(saved.body, original);
+        assert_eq!(storage.load_formatting(session.id()).unwrap(), formatting);
+        let reopened = NoteSession::new(saved, storage.clone(), || {});
+        assert_eq!(
+            crate::checklist::text(
+                &reopened.body,
+                &reopened.body.start_iter(),
+                &reopened.body.end_iter()
+            ),
+            original
+        );
+        assert_eq!(spans(&reopened.body), formatting);
+
+        // Archived snapshots use the same anchor representation and formatting.
+        let archived = crate::note_text::view(None);
+        archived.buffer().set_text(original);
+        crate::text_editing::apply(&archived.buffer(), &formatting);
+        readonly_checklists(&archived);
+        archived.set_editable(false);
+        let buffer = archived.buffer();
+        assert_eq!(
+            crate::checklist::text(&buffer, &buffer.start_iter(), &buffer.end_iter()),
+            original
+        );
+        assert_eq!(spans(&buffer), formatting);
+        assert!(buffer.tag_table().lookup("check-marker").is_none());
+        for line in 0..2 {
+            let check = buffer
+                .iter_at_line(line)
+                .unwrap()
+                .child_anchor()
+                .unwrap()
+                .widgets()[0]
+                .clone()
+                .downcast::<gtk::CheckButton>()
+                .unwrap();
+            assert_eq!(check.is_active(), line == 1);
+            assert!(!check.can_target() && !check.is_focusable());
+        }
+        crate::text_editing::copy_text(&archived);
+        assert_eq!(
+            glib::MainContext::default()
+                .block_on(archived.clipboard().read_text_future())
+                .unwrap()
+                .unwrap(),
+            original
+        );
+        window.destroy();
+        drop(archived);
+        drop(reopened);
+        drop(second);
+        drop(view);
+        drop(session);
+        drop(storage);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     #[ignore = "requires a GTK display; uses a disposable database"]
@@ -783,10 +1225,11 @@ mod tests {
         wait(&|| window.is_mapped());
         body.grab_focus();
         let text = || {
-            session
-                .body
-                .text(&session.body.start_iter(), &session.body.end_iter(), true)
-                .to_string()
+            crate::checklist::text(
+                &session.body,
+                &session.body.start_iter(),
+                &session.body.end_iter(),
+            )
         };
         let type_body = |input: &str| {
             for c in input.chars() {
@@ -936,7 +1379,7 @@ mod tests {
         session.undo(false);
         assert_eq!(text(), "- [ ] Item");
         // A click/Home can leave the insertion mark before the checkbox anchor.
-        // The next native edit must start after the hidden marker, not split it.
+        // The next native edit must start after the serialized marker, not split it.
         session.body.place_cursor(&session.body.start_iter());
         // Match GTK's IM commit path, which begins the action before resolving
         // the insertion iter. insert-at-cursor alone resolves it too early.
@@ -1036,9 +1479,11 @@ mod tests {
         checks[1].set_active(true);
         assert!(checks.iter().all(|b| b.is_active()));
         assert_eq!(
-            session
-                .body
-                .text(&session.body.start_iter(), &session.body.end_iter(), true),
+            crate::checklist::text(
+                &session.body,
+                &session.body.start_iter(),
+                &session.body.end_iter()
+            ),
             "- [x] Shared body"
         );
 
@@ -1192,26 +1637,34 @@ mod tests {
         assert_eq!(storage.load_note(id).unwrap().body, "Must survive failure");
         assert_eq!(saves.get(), 2);
 
-        // Ordinary editing must preserve the hidden marker and remove it when
+        // Ordinary editing must preserve the serialized marker and remove it when
         // backspacing over the checkbox at the start of the visible line.
         session.body.set_text("- [ ] AB");
         while glib::MainContext::default().iteration(false) {}
-        session.body.place_cursor(&session.body.iter_at_offset(8));
+        session
+            .body
+            .place_cursor(&crate::text_editing::iter(&session.body, 7));
         second.body.emit_by_name::<()>("backspace", &[]);
         while glib::MainContext::default().iteration(false) {}
         assert_eq!(
-            session
-                .body
-                .text(&session.body.start_iter(), &session.body.end_iter(), true),
+            crate::checklist::text(
+                &session.body,
+                &session.body.start_iter(),
+                &session.body.end_iter()
+            ),
             "- [ ] B"
         );
-        session.body.place_cursor(&session.body.iter_at_offset(7));
+        session
+            .body
+            .place_cursor(&crate::text_editing::iter(&session.body, 6));
         second.body.emit_by_name::<()>("backspace", &[]);
         while glib::MainContext::default().iteration(false) {}
         assert_eq!(
-            session
-                .body
-                .text(&session.body.start_iter(), &session.body.end_iter(), true),
+            crate::checklist::text(
+                &session.body,
+                &session.body.start_iter(),
+                &session.body.end_iter()
+            ),
             "B"
         );
 

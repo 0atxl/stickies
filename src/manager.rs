@@ -59,6 +59,7 @@ struct ManagerUi {
     session: RefCell<Option<Rc<NoteSession>>>,
     subscription: RefCell<Option<Rc<dyn Fn()>>>,
     list: gtk::ListBox,
+    list_column: gtk::Box,
     search: gtk::SearchEntry,
     title: gtk::Entry,
     body: gtk::TextView,
@@ -140,6 +141,7 @@ impl ManagerUi {
             Ok(has_notes) => {
                 self.has_saved_notes.set(has_notes);
                 self.filter_row.set_visible(has_notes);
+                self.list_column.set_visible(has_notes);
                 if !has_notes {
                     self.collection.set(NoteCollection::Active);
                 }
@@ -335,7 +337,7 @@ impl ManagerUi {
         } else if archived {
             "Notes you archive will appear here."
         } else if !self.has_saved_notes.get() {
-            "Create your first note. Click the edge marker to reach your notes anytime."
+            "Create your first note.\nClick the edge marker to reach your notes anytime."
         } else {
             "Create a note or switch to All to see your archived notes."
         });
@@ -467,8 +469,7 @@ impl ManagerUi {
                     let buffer = &session.body;
                     let (start, end) = buffer.bounds();
                     snippet.set_text(
-                        &buffer
-                            .text(&start, &end, true)
+                        &crate::checklist::text(buffer, &start, &end)
                             .lines()
                             .collect::<Vec<_>>()
                             .join(" · "),
@@ -582,9 +583,19 @@ impl ManagerUi {
         (self.callbacks.changed)(id, change);
         self.refresh(None);
         if change == ManagerChange::Delete {
+            // Native action toasts have a hard-coded 450px natural width.
+            // A custom title keeps the native toast lifecycle at content width.
+            let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+            let label = gtk::Label::new(Some("Note deleted"));
+            label.add_css_class("heading");
+            let undo = gtk::Button::with_label("Undo");
+            undo.add_css_class("flat");
+            undo.set_focus_on_click(false);
+            content.append(&label);
+            content.append(&undo);
             let toast = adw::Toast::builder()
                 .title("Note deleted")
-                .button_label("Undo")
+                .custom_title(&content)
                 .timeout(6)
                 .build();
             let weak = Rc::downgrade(self);
@@ -599,6 +610,14 @@ impl ManagerUi {
                         }
                         Err(e) => ui.message(&format!("Could not undo deletion: {e}")),
                     }
+                }
+            });
+            let weak = toast.downgrade();
+            undo.connect_clicked(move |button| {
+                if let Some(toast) = weak.upgrade() {
+                    button.set_sensitive(false);
+                    toast.emit_by_name::<()>("button-clicked", &[]);
+                    gtk::glib::idle_add_local_once(move || toast.dismiss());
                 }
             });
             self.toast.add_toast(toast);
@@ -797,14 +816,18 @@ pub fn build_window(
     editor.append(&controls.root);
     pages.add_named(&editor, Some("editor"));
     let empty = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    empty.add_css_class("empty-page");
     empty.set_valign(gtk::Align::Center);
     empty.set_halign(gtk::Align::Center);
     let empty_title = gtk::Label::new(None);
     empty_title.add_css_class("empty-title");
     empty_title.set_wrap(true);
+    empty_title.set_justify(gtk::Justification::Center);
     let empty_text = gtk::Label::new(None);
     empty_text.add_css_class("metadata");
     empty_text.set_wrap(true);
+    empty_text.set_justify(gtk::Justification::Center);
+    empty_text.set_max_width_chars(42);
     let empty_action = gtk::Button::new();
     empty_action.add_css_class("empty-action");
     empty_action.set_halign(gtk::Align::Center);
@@ -907,6 +930,7 @@ pub fn build_window(
         session: RefCell::new(None),
         subscription: RefCell::new(None),
         list,
+        list_column,
         search,
         title,
         body,
