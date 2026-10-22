@@ -1,8 +1,16 @@
 [package]
 name = "stickies"
-version = "0.1.0"
+version = "0.10.0"
 edition = "2024"
-publish = false
+rust-version = "1.92"
+description = "Local sticky notes for Linux Wayland and Windows"
+license = "MPL-2.0"
+repository = "https://github.com/0atxl/stickies"
+readme = "README.md"
+keywords = ["notes", "gtk4", "wayland", "desktop"]
+categories = ["gui"]
+include = ["/src/**", "/assets/**", "/data/**", "/migrations/**", "/tests/**",
+           "/build.rs", "/Cargo.lock", "/LICENSE", "/README.md", "/packaging/windows.md"]
 
 [dependencies]
 adw = { version = "0.9", package = "libadwaita", features = ["v1_7"] }

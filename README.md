@@ -1,6 +1,6 @@
 # Stickies
 
-Stickies is a local scratchpad for Linux Wayland desktops with Layer Shell v4+ and compatible native libraries. It lives at the screen edge for thoughts that are too small to justify opening a full notes application.
+Stickies is a local scratchpad for Windows and Linux Wayland desktops with Layer Shell v4+ and compatible native libraries. It lives at the screen edge for thoughts that are too small to justify opening a full notes application.
 
 The interaction is simple. Recent or pinned notes sit at the screen edge. Hovering reveals title-only tabs, clicking a title opens the full note, and closing returns it to the edge.
 
@@ -12,7 +12,7 @@ The interaction is simple. Recent or pinned notes sit at the screen edge. Hoveri
 - Plain-text notes and checklists with optional inline formatting, undo/redo and Copy text.
 - Target Wayland broadly. Hyprland is the development reference; scoped isolated Sway checks and owner desktop confirmations are recorded separately. KDE Plasma Wayland and other Layer Shell desktops are intended targets whose support must be verified. These results do not certify the final build across desktops.
 
-The edge implementation requires Wayland with `zwlr_layer_shell_v1` version 4 or newer for on-demand keyboard focus. Startup checks support before creating the edge windows and prints a diagnostic if it is unavailable or too old. GNOME Wayland without Layer Shell cannot run that edge implementation; no fallback is implemented. This is a protocol limitation, not a Hyprland-only product scope. X11 and macOS are outside this release. The separate Windows port and its installation-free ZIP are described in [Windows packaging](packaging/windows.md); Windows release verification remains outstanding.
+The edge implementation requires Wayland with `zwlr_layer_shell_v1` version 4 or newer for on-demand keyboard focus. Startup checks support before creating the edge windows and prints a diagnostic if it is unavailable or too old. GNOME Wayland without Layer Shell cannot run that edge implementation; no fallback is implemented. This is a protocol limitation, not a Hyprland-only product scope. X11 and macOS are outside this release. The separate Windows port and its installation-free ZIP are described in [Windows packaging](packaging/windows.md). The owner verified the CI Windows bundle with disposable data and without development tools on PATH; broader platform limits remain documented.
 
 ## Status
 
@@ -53,15 +53,44 @@ pkg-config --modversion gtk4-layer-shell-0
 pkg-config --modversion sqlite3
 ```
 
-## Packaging
+## Install v0.10
 
-The separate [Windows ZIP guide](packaging/windows.md) documents user-directory storage, build inputs, notices and source/build identification. It does not add an adjacent-data portable mode.
+Package version is `0.10.0`; the GitHub release tag is `v0.10`.
 
-The [Packages workflow](.github/workflows/packages.yml) is configured to build Arch x86_64 and Windows x86_64 downloads from the same commit on pushes to `main`, pull requests and manual runs. Download artifacts from GitHub Actions after both package jobs succeed. They include matching sources and checksums and expire after 30 days. Both platform jobs passed in [the verified build run](https://github.com/0atxl/stickies/actions/runs/39740913431) at commit `8f7622b`. These artifacts are development builds, not published releases. See [automated build artifacts](packaging/README.md#automated-build-artifacts) for details.
+- [GitHub downloads](https://github.com/0atxl/stickies/releases/tag/v0.10): Windows x86_64 ZIP and Arch Linux x86_64 package, matching sources, notices and checksums.
+- [AUR stickies](https://aur.archlinux.org/packages/stickies): build from source.
+- [AUR stickies-bin](https://aur.archlinux.org/packages/stickies-bin): install the prebuilt Arch download.
+- [crates.io](https://crates.io/crates/stickies): install from source with Cargo and the native dependencies below.
 
-The [packaging guide](packaging/README.md) prepares an Arch Linux x86_64 PKGBUILD, matching source and checksums. The planned GitHub binary download is **Arch Linux x86_64 only**, using that same native package. No Kali or Ubuntu binary compatibility is claimed; other package formats are outside this pass. Source builds require compatible native libraries and a Layer Shell v4+ Wayland desktop.
+On Windows, extract the whole ZIP and launch `bin\stickies.exe`. Rust and MSYS2 are not required for the ZIP. Keep all extracted runtime folders together. Notes and settings normally use `%LOCALAPPDATA%\stickies`, independently of the bundle folder. Quit before replacing the bundle. See [Windows packaging](packaging/windows.md) for storage and login behavior.
 
-The owner's approved original PNG application icon is included in the package inputs. Release identity, clean-runner, installed icon/launcher, upgrade/removal and installed-login verification remain outstanding; no release has been published by this preparation.
+On an up-to-date Arch Linux x86_64 system, install the downloaded native package:
+
+```bash
+sudo pacman -U ./stickies-0.10.0-1-x86_64.pkg.tar.zst
+```
+
+The Arch binary does not target Ubuntu or Kali. The Linux edge requires a Wayland compositor with Layer Shell v4+. Package removal preserves user notes and settings. Disable Launch at login before removing the application if you also want its optional user startup entry removed.
+
+For Cargo on Arch, install the build prerequisites, then compile the published source:
+
+```bash
+sudo pacman -S --needed base-devel rust pkgconf gtk4 libadwaita gtk4-layer-shell sqlite librsvg
+cargo install stickies --version 0.10.0 --locked
+```
+
+Cargo installs only the executable. To add the Linux desktop launcher and icon, download the matching `stickies-0.10.0-src.tar.gz` from the release, extract it, and run these commands from its source directory:
+
+```bash
+install -Dm644 data/dev.stickies.Stickies.desktop "$HOME/.local/share/applications/dev.stickies.Stickies.desktop"
+install -Dm644 data/dev.stickies.Stickies.png "$HOME/.local/share/icons/dev.stickies.Stickies.png"
+```
+
+Your graphical session must have Cargo's binary directory, normally `~/.cargo/bin`, on PATH for the launcher to find `stickies`. Cargo builds on Windows require the GNU target and MSYS2 native build environment described in the Windows guide; the ZIP is the ready-to-run Windows distribution.
+
+Release files are unsigned. Verify `SHA256SUMS` before installation; checksums alone do not authenticate the publisher. Matching source and original notices accompany the binaries. See the [release notes](https://github.com/0atxl/stickies/releases/tag/v0.10) for known limitations.
+
+The [Packages workflow](.github/workflows/packages.yml) also produces development artifacts from pushes, pull requests and manual runs. Those Actions downloads expire after 30 days. Public releases are separate, persistent downloads.
 
 ## Build and run
 
