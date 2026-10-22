@@ -1,0 +1,113 @@
+name: Packages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packages-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  arch:
+    name: Arch Linux x86_64
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    timeout-minutes: 45
+    steps:
+      - name: Install Arch build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed git python rust pkgconf desktop-file-utils \
+            cairo dbus fontconfig gdk-pixbuf2 glib2 glibc graphene gtk4 \
+            gtk4-layer-shell libadwaita libgcc pango sqlite librsvg
+      - name: Check out the workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Create unprivileged package builder
+        run: |
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+      - name: Build package and collect matching sources
+        shell: bash
+        run: runuser -u builder -- bash scripts/ci-package-arch.sh
+      - name: Upload Arch package, sources and checksums
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: stickies-arch-x86_64-${{ github.sha }}
+          path: dist/arch/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install MSYS2 UCRT64 dependencies
+        id: msys2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-sqlite3
+            mingw-w64-ucrt-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-adwaita-icon-theme
+            mingw-w64-ucrt-x86_64-hicolor-icon-theme
+      - name: Install Rust target and fetch locked dependencies
+        run: |
+          rustup toolchain install stable --profile minimal --target x86_64-pc-windows-gnu
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain installation failed' }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain selection failed' }
+          cargo fetch --locked --target x86_64-pc-windows-gnu
+          if ($LASTEXITCODE -ne 0) { throw 'Cargo fetch failed' }
+      - name: Prepare verified original native notices
+        env:
+          MSYS_BASE: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          python scripts/prepare-windows-notices.py `
+            --msys-root "$env:MSYS_BASE/ucrt64" `
+            --output "$env:RUNNER_TEMP/stickies-native-notices"
+          if ($LASTEXITCODE -ne 0) { throw 'Native notice preparation failed' }
+      - name: Build Windows binary and source ZIPs
+        env:
+          MSYS_BASE: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          ./scripts/package-windows.ps1 `
+            -MsysRoot "$env:MSYS_BASE/ucrt64" `
+            -NativeNoticeRoot "$env:RUNNER_TEMP/stickies-native-notices" `
+            -OutputDirectory "$env:GITHUB_WORKSPACE/dist/windows"
+      - name: Upload Windows ZIPs and checksums
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: stickies-windows-x86_64-${{ github.sha }}
+          path: |
+            dist/windows/stickies-windows-x86_64.zip
+            dist/windows/stickies-windows-x86_64-source.zip
+            dist/windows/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

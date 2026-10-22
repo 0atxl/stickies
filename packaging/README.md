@@ -1,6 +1,16 @@
 # Arch packaging preparation
 
-The separate Windows branch uses the [Windows ZIP guide](windows.md). The Arch procedure below remains Linux-specific.
+Linux and Windows share `main`. Windows uses the [Windows ZIP guide](windows.md); the Arch procedure below remains Linux-specific.
+
+## Automated build artifacts
+
+The [Packages workflow](../.github/workflows/packages.yml) builds Arch x86_64 and Windows x86_64 from the same workflow commit on pushes to `main`, pull requests targeting `main`, and manual dispatch. In GitHub, open Actions, select Packages, select a successful run, then download the artifact for your OS. A pull-request build uses GitHub's proposed merge commit. Artifact names include the full commit SHA, and each artifact contains its matching application source and checksums. Both platform jobs must succeed before treating a run as a complete candidate.
+
+The Arch job uses a fresh `archlinux:base-devel` container, installs dependencies, then runs `makepkg --nocheck --nosign --log` as an unprivileged user through [ci-package-arch.sh](../scripts/ci-package-arch.sh). It collects the package, exact source archive, generated PKGBUILD, source/preparation records, actual BUILDINFO/PKGINFO, installed build-package inventory and verified SHA256SUMS. The Windows job uses the existing PowerShell packager with automated original-notice preparation.
+
+Artifacts are retained for 30 days and are development downloads, not a published or signed release. The workflow has read-only repository permissions and does not create releases or tags. Native package repositories and compiler updates can change build inputs; inventories record their versions, but reproducibility is not claimed. The existing CI workflow remains separate and still runs its checks and tests. The Packages workflow itself runs no tests or app sessions. UI behavior, installation, upgrade/removal and clean-machine launch still need verification of the downloaded artifacts.
+
+The first hosted run remains pending. Local syntax and source inspection do not establish successful hosted builds. A commit containing `[skip ci]` skips push-triggered workflows; after the workflow is on `main`, an explicitly authorized manual Packages run can build that commit without running the separate test workflow.
 
 Stickies is a Linux Wayland app requiring `zwlr_layer_shell_v1` v4+ and compatible native libraries. This pass prepares an Arch Linux x86_64 package recipe and source inputs. The owner-approved application icon is included. No package has been installed or verified on a clean runner.
 

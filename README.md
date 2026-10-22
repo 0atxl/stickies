@@ -57,6 +57,8 @@ pkg-config --modversion sqlite3
 
 The separate [Windows ZIP guide](packaging/windows.md) documents user-directory storage, build inputs, notices and source/build identification. It does not add an adjacent-data portable mode.
 
+The [Packages workflow](.github/workflows/packages.yml) is configured to build Arch x86_64 and Windows x86_64 downloads from the same commit on pushes to `main`, pull requests and manual runs. Download artifacts from GitHub Actions after both package jobs succeed. They include matching sources and checksums and expire after 30 days. The first hosted build is pending; these artifacts are development builds, not published releases. See [automated build artifacts](packaging/README.md#automated-build-artifacts) for details.
+
 The [packaging guide](packaging/README.md) prepares an Arch Linux x86_64 PKGBUILD, matching source and checksums. The planned GitHub binary download is **Arch Linux x86_64 only**, using that same native package. No Kali or Ubuntu binary compatibility is claimed; other package formats are outside this pass. Source builds require compatible native libraries and a Layer Shell v4+ Wayland desktop.
 
 The owner's approved original PNG application icon is included in the package inputs. Release identity, clean-runner, installed icon/launcher, upgrade/removal and installed-login verification remain outstanding; no release has been published by this preparation.
