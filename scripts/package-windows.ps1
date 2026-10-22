@@ -48,7 +48,7 @@ Push-Location $RepoRoot
 try {
     if ($env:OS -ne "Windows_NT" -or -not [Environment]::Is64BitProcess) { throw "Run this packaging script in 64-bit PowerShell on Windows with MSYS2 UCRT64." }
     if (-not $MsysRoot) {
-        $PkgConfig = Get-Command pkg-config.exe -CommandType Application -ErrorAction SilentlyContinue
+        $PkgConfig = Get-Command pkg-config.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $PkgConfig) { throw "Pass -MsysRoot with the MSYS2 UCRT64 prefix, or put its pkg-config.exe on PATH." }
         $MsysRoot = Split-Path (Split-Path $PkgConfig.Source -Parent) -Parent
     }
@@ -62,9 +62,9 @@ try {
     foreach ($Tool in @($Pacman, $Objdump, $Compiler, "$MsysRoot\bin\pkg-config.exe", "$MsysRoot\bin\glib-compile-resources.exe")) {
         if (-not (Test-Path -LiteralPath $Tool -PathType Leaf)) { throw "Required build tool is missing: $Tool" }
     }
-    $Cargo = (Get-Command cargo.exe -CommandType Application -ErrorAction Stop).Source
-    $Rustc = (Get-Command rustc.exe -CommandType Application -ErrorAction Stop).Source
-    $Git = (Get-Command git.exe -CommandType Application -ErrorAction Stop).Source
+    $Cargo = (Get-Command cargo.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    $Rustc = (Get-Command rustc.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    $Git = (Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 
     # pkg-config's library flags need a space-free prefix. Do not assume 8.3 aliases exist.
     $Fso = New-Object -ComObject Scripting.FileSystemObject
