@@ -47,6 +47,7 @@ def main():
     recipe = re.sub(r'\A# Source template.*?# with[^\n]*\n', '', recipe, flags=re.S)
     header = recipe.split('\nprepare()', 1)[0]
     header = header.replace('pkgname=stickies\n', 'pkgname=stickies-bin\n')
+    header = header.replace("options=('!debug')", "options=('!debug' '!strip')")
     header = re.sub(r'^makedepends=.*\n', '', header, flags=re.M)
     header = re.sub(r'^_target=.*\n', '', header, flags=re.M)
     header = re.sub(r'^source=.*$', f'source=("{base}/{binary_name}")', header, flags=re.M)
@@ -55,7 +56,7 @@ def main():
 conflicts=('stickies')
 
 package() {
-    cp -a "$srcdir/usr" "$pkgdir/"
+    cp -r "$srcdir/usr" "$pkgdir/"
 }
 '''
     for name, text in [('stickies', recipe), ('stickies-bin', binary_recipe)]:
