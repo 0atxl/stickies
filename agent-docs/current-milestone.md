@@ -4,6 +4,10 @@ The owner accepts the current UI/UX. Design is complete; the active milestone is
 
 [SPEC.md](SPEC.md) describes current behavior. [implementation.md](implementation.md) owns remaining roadmap work. The [detailed verification record](manual-testing.md) contains results, fixtures, evidence and the remaining checklist. Further test execution requires separate authorization under [AGENTS.md](../AGENTS.md).
 
+## Existing CI test compilation repair, October 22
+
+The owner authorized the existing CI checks and automated tests, then approved a manual trigger, commit and push. Run [39743357801](https://github.com/0atxl/stickies/actions/runs/39743357801) at `b173dbd` passed formatting and desktop-entry validation but stopped during all-target compilation, before Clippy or tests. Eight test setup calls in `edge.rs` and `manager.rs` still used the old one-argument `build` signature. The owner approved updating those calls, committing/pushing and rerunning the same CI. Each now supplies an initially false shared startup-error flag, matching normal startup initialization. Application code, test assertions and ignored-test policy are unchanged. Formatting and whitespace checks pass; hosted rerun results are pending. No extra app sessions or ignored UI tests are authorized.
+
 ## Owner acceptance and main integration, October 22
 
 Integration completed at `85bed333dd1066cc759d2722733775bcea73ca56` on local and remote `main`, with a clean working tree. The owner then authorized CI packaging setup. The new Packages workflow builds Arch and Windows artifacts from one workflow commit, using existing package scripts plus an Arch collection wrapper and verified GStreamer notice preparation. It supports pushes/PRs to `main` and manual dispatch, retains downloads for 30 days and publishes no release. The existing test workflow is unchanged. The owner authorized committing/pushing this setup with `[skip ci]` and manually running only Packages. Hosted results are recorded below; no tests or app sessions are authorized for this setup. See the [packaging guide](../packaging/README.md#automated-build-artifacts).

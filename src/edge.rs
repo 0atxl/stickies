@@ -3414,7 +3414,7 @@ mod tests {
                 .create_note(title, "Body", NoteColor::Green)
                 .unwrap();
         }
-        let ui = crate::build(&app).unwrap();
+        let ui = crate::build(&app, &Rc::new(Cell::new(false))).unwrap();
         let settle = |ms| {
             let end = std::time::Instant::now() + Duration::from_millis(ms);
             while std::time::Instant::now() < end {
@@ -3698,7 +3698,7 @@ mod tests {
         storage
             .create_note("Reading", "Body", NoteColor::Pink)
             .unwrap();
-        let ui = crate::build(&app).unwrap();
+        let ui = crate::build(&app, &Rc::new(Cell::new(false))).unwrap();
         let settle = |ms| {
             let end = std::time::Instant::now() + Duration::from_millis(ms);
             while std::time::Instant::now() < end {
@@ -4002,7 +4002,7 @@ mod feedback_tests {
             .save(&crate::config::config_path())
             .unwrap();
             // Each edge starts with a new, not-yet-allocated parent surface.
-            let ui = crate::build(&app).unwrap();
+            let ui = crate::build(&app, &Rc::new(Cell::new(false))).unwrap();
             let layouts = Rc::new(RefCell::new(Vec::new()));
             let positions = layouts.clone();
             let weak = Rc::downgrade(&ui);
@@ -4074,7 +4074,7 @@ mod feedback_tests {
             settle();
         }
         // Closing before the first allocation must cancel the queued popup.
-        let ui = crate::build(&app).unwrap();
+        let ui = crate::build(&app, &Rc::new(Cell::new(false))).unwrap();
         ui.show_edge_search();
         ui.close_edge_search();
         settle();
@@ -4103,7 +4103,7 @@ mod feedback_tests {
                 .create_note(title, "Body", NoteColor::Yellow)
                 .unwrap();
         }
-        let ui = crate::build(&app).unwrap();
+        let ui = crate::build(&app, &Rc::new(Cell::new(false))).unwrap();
         let settle = || {
             let end = std::time::Instant::now() + Duration::from_millis(200);
             while std::time::Instant::now() < end {
@@ -4262,7 +4262,7 @@ mod feedback_tests {
             .unwrap()
             .id;
         storage.set_note_pinned(id, true).unwrap();
-        let ui = crate::build(&app).unwrap();
+        let ui = crate::build(&app, &Rc::new(Cell::new(false))).unwrap();
         let settle = |ms| {
             let end = std::time::Instant::now() + Duration::from_millis(ms);
             while std::time::Instant::now() < end {

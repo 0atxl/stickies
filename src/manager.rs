@@ -1325,7 +1325,7 @@ mod feedback_tests {
             .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
             .build();
         app.register(None::<&gtk::gio::Cancellable>).unwrap();
-        let ui = crate::build(&app).unwrap();
+        let ui = crate::build(&app, &Rc::new(Cell::new(false))).unwrap();
         ui.show_manager();
         let manager = ui.manager.borrow().clone().unwrap();
         let manager = &manager.0;
@@ -1435,7 +1435,7 @@ mod feedback_tests {
         app.register(None::<&gtk::gio::Cancellable>).unwrap();
         let storage = Storage::open(&crate::storage::database_path()).unwrap();
         storage.create_note("Weekend plans", "- [ ] Pick up groceries\n- [x] Finish the sketch\n- [ ] A longer item that wraps onto the next line\n\nA little space to think.", NoteColor::Yellow).unwrap();
-        let ui = crate::build(&app).unwrap();
+        let ui = crate::build(&app, &Rc::new(Cell::new(false))).unwrap();
         ui.show_manager();
         let manager = ui.manager.borrow().clone().unwrap();
         let manager = &manager.0;
