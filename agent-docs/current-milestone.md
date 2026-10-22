@@ -6,7 +6,7 @@ The owner accepts the current UI/UX. Design is complete; the active milestone is
 
 ## v0.10 publication, October 22
 
-The owner accepted the Windows CI artifact checks, selected a normal `v0.10` release with package version `0.10.0`, and authorized release preparation, commit/push, existing CI and packaging verification, and publication to GitHub, AUR and crates.io. AUR/crates.io distribution is explicitly included in the current milestone. Publication results will be recorded after the final candidate passes. No new UI behavior or deferred failure-injection/display matrix is included.
+The owner accepted the Windows CI artifact checks, selected a normal `v0.10` release with package version `0.10.0`, and authorized release preparation, commit/push, existing CI and packaging verification, and publication to GitHub, AUR and crates.io. AUR/crates.io distribution is explicitly included in the current milestone. Publication completed from `ad7856c327659bdf083fdea8c6ff61aad0debee6`: [GitHub v0.10](https://github.com/0atxl/stickies/releases/tag/v0.10), [AUR stickies](https://aur.archlinux.org/packages/stickies), [AUR stickies-bin](https://aur.archlinux.org/packages/stickies-bin) and [crates.io 0.10.0](https://crates.io/crates/stickies/0.10.0). Final CI passed 52 tests with 23 existing display-dependent tests ignored, and both package jobs passed. Public downloads, asset hashes, AUR recipes and the published crate checksum were verified. No new UI behavior or deferred failure-injection/display matrix is included. Broader runtime limits remain documented; this completes the authorized publication scope.
 
 ## Downloaded CI artifact verification, October 22
 
