@@ -1,5 +1,13 @@
 # Current verification checklist
 
+## October 22 existing CI checks and test setup repair
+
+The owner separately authorized running the existing CI checks/tests and adding a manual workflow trigger with commit/push. Run [39743357801](https://github.com/0atxl/stickies/actions/runs/39743357801) at `b173dbd` stopped during all-target compilation. Eight test setup calls in `edge.rs` and `manager.rs` omitted the startup-error flag added to `build`. No tests executed in that failed run.
+
+The owner approved updating those eight calls, committing/pushing and rerunning the same CI. Each call now passes `Rc::new(Cell::new(false))`, matching normal startup initialization. Production behavior, test assertions and the existing ignored-test policy are unchanged. Local formatting and whitespace checks passed; no local tests or app sessions ran.
+
+The authorized rerun [39743974933](https://github.com/0atxl/stickies/actions/runs/39743974933) passed on Ubuntu 26.04 at `1743e12`. Formatting, desktop-entry validation, `cargo check --locked --all-targets`, `cargo clippy --locked --all-targets -- -D warnings -A deprecated`, `cargo test --locked` and `cargo build --release --locked` all succeeded. The test summary is 52 passed, 0 failed and 23 ignored. Ignored checks require a GTK display or isolated Wayland session and were not run. This establishes the existing Linux CI scope, not Windows test coverage or interactive release acceptance. No package regeneration, installation or additional test scope was introduced.
+
 ## October 22 hosted package builds
 
 The owner authorized committing/pushing CI setup with `[skip ci]` and manually running only the new Packages workflow. The existing test workflow remained unchanged and did not run. No tests, installations or app sessions were executed during this setup.
