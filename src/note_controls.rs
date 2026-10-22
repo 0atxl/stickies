@@ -272,6 +272,10 @@ impl NoteControls {
         let more_popover = popup(&more, &commands);
         let panels = [&color_popover, &text_popover, &more_popover];
         for panel in panels {
+            #[cfg(target_os = "windows")]
+            if surface != Surface::Preview {
+                crate::edge_surface::bind_note_popover(panel);
+            }
             let others: Vec<_> = panels.iter().map(|p| p.downgrade()).collect();
             panel.connect_visible_notify(move |panel| {
                 if panel.is_visible() {

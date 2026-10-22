@@ -17,6 +17,32 @@ pub const WIDTH: i32 = 320;
 pub const HEIGHT: i32 = 376;
 pub const MIN_WIDTH: i32 = 300;
 pub const MIN_HEIGHT: i32 = 280;
+pub const MAX_WIDTH: i32 = 640;
+pub const MAX_HEIGHT: i32 = 720;
+
+pub fn constrain_size(widget: &impl IsA<gtk::Widget>, width: i32, height: i32) -> (i32, i32) {
+    let s = crate::edge_surface::scale_px;
+    let available = widget
+        .as_ref()
+        .native()
+        .and_then(|native| native.surface())
+        .and_then(|surface| surface.display().monitor_at_surface(&surface))
+        .map(|monitor| {
+            let geometry = monitor.geometry();
+            (geometry.width() - s(48), geometry.height() - s(48))
+        })
+        .unwrap_or((s(MAX_WIDTH), s(MAX_HEIGHT)));
+    (
+        width.clamp(
+            s(MIN_WIDTH),
+            s(MAX_WIDTH).min(available.0).max(s(MIN_WIDTH)),
+        ),
+        height.clamp(
+            s(MIN_HEIGHT),
+            s(MAX_HEIGHT).min(available.1).max(s(MIN_HEIGHT)),
+        ),
+    )
+}
 
 pub struct Editor {
     pub root: gtk::Overlay,
@@ -442,8 +468,7 @@ impl Editor {
         self.docked_size.get()
     }
     pub fn set_docked_size(&self, width: i32, height: i32) {
-        let s = crate::edge_surface::scale_px;
-        let size = (width.max(s(MIN_WIDTH)), height.max(s(MIN_HEIGHT)));
+        let size = constrain_size(&self.root, width, height);
         self.docked_size.set(size);
         self.root.set_size_request(size.0, size.1);
     }

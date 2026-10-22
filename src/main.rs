@@ -428,45 +428,43 @@ impl Ui {
         window.set_child(Some(&editor.root));
         #[cfg(target_os = "linux")]
         {
-            // Present as a fixed-size note first so the compositor keeps it floating.
-            // Allow resizing once the mapped surface enters its initial monitor.
-            window.connect_realize(|window| {
-                if let Some(surface) = window.surface() {
-                    let weak = window.downgrade();
-                    surface.connect_enter_monitor(move |_, _| {
-                        if let Some(window) = weak.upgrade() {
-                            window.set_resizable(true);
-                        }
-                    });
-                }
-            });
-            let resize = gtk::GestureClick::new();
+            // GTK4 exposes no maximum window size. Keep compositor resizing
+            // disabled and let the existing grip request bounded sizes.
+            let resize = gtk::GestureDrag::new();
             resize.set_button(1);
             resize.set_propagation_phase(gtk::PropagationPhase::Capture);
+            let start = Rc::new(Cell::new((s(editor::WIDTH), s(editor::HEIGHT), 0., 0.)));
+            let initial = start.clone();
             let weak = window.downgrade();
-            resize.connect_pressed(move |gesture, _, _, _| {
+            resize.connect_drag_begin(move |gesture, _, _| {
                 if let Some(window) = weak.upgrade()
-                    && let Some(surface) = window.surface()
-                    && let Ok(toplevel) = surface.downcast::<gtk::gdk::Toplevel>()
                     && let Some(event) = gesture.current_event()
                     && let Some((x, y)) = event.position()
                 {
-                    toplevel.begin_resize(
-                        gtk::gdk::SurfaceEdge::SouthEast,
-                        gesture.current_event_device().as_ref(),
-                        1,
-                        x,
-                        y,
-                        gesture.current_event_time(),
-                    );
+                    initial.set((window.width(), window.height(), x, y));
                     gesture.set_state(gtk::EventSequenceState::Claimed);
+                }
+            });
+            let weak = window.downgrade();
+            resize.connect_drag_update(move |gesture, _, _| {
+                if let Some(window) = weak.upgrade()
+                    && let Some(event) = gesture.current_event()
+                    && let Some((x, y)) = event.position()
+                {
+                    let (width, height, start_x, start_y) = start.get();
+                    let (width, height) = editor::constrain_size(
+                        &window,
+                        width + (x - start_x) as i32,
+                        height + (y - start_y) as i32,
+                    );
+                    window.set_default_size(width, height);
                 }
             });
             editor.resize.add_controller(resize);
         }
         #[cfg(target_os = "windows")]
         {
-            window.set_resizable(true);
+            edge_surface::bind_detached_resize(&window);
             let cur_size = Rc::new(Cell::new((s(editor::WIDTH), s(editor::HEIGHT))));
             let begin_size = cur_size.clone();
             let begin_window = window.downgrade();
@@ -487,8 +485,7 @@ impl Ui {
                 },
                 move |w, h, dx, dy| {
                     if let Some(window) = update_window.upgrade() {
-                        let new_w = (w + dx).max(s(editor::MIN_WIDTH));
-                        let new_h = (h + dy).max(s(editor::MIN_HEIGHT));
+                        let (new_w, new_h) = editor::constrain_size(&window, w + dx, h + dy);
                         update_size.set((new_w, new_h));
                         edge_surface::resize_window(&window, new_w, new_h);
                     }
@@ -542,6 +539,12 @@ impl Ui {
                 editor: editor.clone(),
             },
         );
+        if is_docked {
+            // Open away completes the edge interaction; no pointer-leave event
+            // is guaranteed after the docked editor and its popup disappear.
+            self.edge.cancel_timers();
+            self.dormant();
+        }
         window.present();
         editor.body.grab_focus();
     }

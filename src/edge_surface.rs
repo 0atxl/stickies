@@ -96,20 +96,22 @@ mod imp_windows {
         time::Duration,
     };
     use windows_sys::Win32::{
-        Foundation::{HWND, POINT, RECT},
+        Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, RGN_OR, SetWindowRgn},
         UI::{
             HiDpi::{
                 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem,
                 SetProcessDpiAwarenessContext,
             },
+            Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
             WindowsAndMessaging::{
                 ASFW_ANY, AllowSetForegroundWindow, GWL_EXSTYLE, GetCursorPos, GetSystemMetrics,
-                GetWindowLongPtrW, GetWindowRect, HWND_NOTOPMOST, HWND_TOPMOST, SM_SWAPBUTTON,
-                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
-                SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, WS_EX_APPWINDOW,
-                WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-                WS_EX_TRANSPARENT,
+                GetWindowLongPtrW, GetWindowRect, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST,
+                MINMAXINFO, SM_SWAPBUTTON, STYLESTRUCT, SWP_NOACTIVATE, SWP_NOMOVE,
+                SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
+                SetWindowLongPtrW, SetWindowPos, WINDOWPOS, WM_GETMINMAXINFO, WM_NCDESTROY,
+                WM_STYLECHANGING, WM_WINDOWPOSCHANGING, WS_EX_APPWINDOW, WS_EX_LAYERED,
+                WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
             },
         },
     };
@@ -254,6 +256,32 @@ mod imp_windows {
         }
     }
 
+    const EDGE_SURFACE_SUBCLASS_ID: usize = 1;
+
+    unsafe extern "system" fn edge_surface_subclass(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        subclass_id: usize,
+        _data: usize,
+    ) -> LRESULT {
+        if message == WM_NCDESTROY {
+            unsafe {
+                RemoveWindowSubclass(hwnd, Some(edge_surface_subclass), subclass_id);
+            }
+        }
+        let result = unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
+        if message == WM_STYLECHANGING && wparam as i32 == GWL_EXSTYLE && lparam != 0 {
+            // GTK clears TOOLWINDOW when updating toplevel styles. Keep edge
+            // hosts out of the taskbar without changing its other style bits.
+            let style = unsafe { &mut *(lparam as *mut STYLESTRUCT) };
+            style.styleNew = (style.styleNew | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
+            return 0;
+        }
+        result
+    }
+
     fn sync_hwnd_styles_and_z(window: &gtk::ApplicationWindow) {
         let Some(hwnd) = window_hwnd(window) else {
             return;
@@ -264,8 +292,7 @@ mod imp_windows {
         };
         unsafe {
             let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            let mut target = (current | (WS_EX_TOPMOST as isize) | (WS_EX_TOOLWINDOW as isize))
-                & !(WS_EX_APPWINDOW as isize);
+            let mut target = (current | (WS_EX_TOOLWINDOW as isize)) & !(WS_EX_APPWINDOW as isize);
             if state.keyboard_mode == KeyboardMode::None {
                 target |= WS_EX_NOACTIVATE as isize;
             } else {
@@ -280,6 +307,12 @@ mod imp_windows {
                 SetWindowLongPtrW(hwnd, GWL_EXSTYLE, target);
             }
             let z = desired_z_order(state.layer);
+            // Geometry/style refreshes must not raise the host over its menus.
+            let z_flags = if (current & WS_EX_TOPMOST as isize != 0) == (z == HWND_TOPMOST) {
+                SWP_NOZORDER
+            } else {
+                0
+            };
             SetWindowPos(
                 hwnd,
                 z,
@@ -287,13 +320,56 @@ mod imp_windows {
                 0,
                 0,
                 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | z_flags,
             );
             if state.keyboard_mode == KeyboardMode::Exclusive {
                 let _ = AllowSetForegroundWindow(ASFW_ANY);
                 let _ = SetForegroundWindow(hwnd);
             }
         }
+    }
+
+    pub fn bind_note_popover(popover: &gtk::Popover) {
+        popover.connect_map(|popover| {
+            let weak = popover.downgrade();
+            // Run after GTK finishes showing and placing the native popup.
+            glib::idle_add_local_once(move || {
+                let Some(popover) = weak.upgrade().filter(|popover| popover.is_mapped()) else {
+                    return;
+                };
+                let Some(surface) = popover.surface() else {
+                    return;
+                };
+                let Some(parent) = popover.root().and_downcast::<gtk::Window>() else {
+                    return;
+                };
+                let Some(parent_surface) = parent.surface() else {
+                    return;
+                };
+                unsafe {
+                    let popup = gdk_win32_surface_get_handle(surface.as_ptr() as *mut c_void);
+                    let owner =
+                        gdk_win32_surface_get_handle(parent_surface.as_ptr() as *mut c_void);
+                    if popup.is_null() || owner.is_null() {
+                        return;
+                    }
+                    let z = if GetWindowLongPtrW(owner, GWL_EXSTYLE) & WS_EX_TOPMOST as isize != 0 {
+                        HWND_TOPMOST
+                    } else {
+                        HWND_TOP
+                    };
+                    SetWindowPos(
+                        popup,
+                        z,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                    );
+                }
+            });
+        });
     }
 
     pub fn set_fullscreen_busy(busy: bool) {
@@ -463,6 +539,91 @@ mod imp_windows {
         }
     }
 
+    const DETACHED_RESIZE_SUBCLASS_ID: usize = 2;
+
+    unsafe extern "system" fn detached_resize_subclass(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        subclass_id: usize,
+        data: usize,
+    ) -> LRESULT {
+        if message == WM_NCDESTROY {
+            unsafe {
+                RemoveWindowSubclass(hwnd, Some(detached_resize_subclass), subclass_id);
+                drop(Box::from_raw(
+                    data as *mut glib::WeakRef<gtk::ApplicationWindow>,
+                ));
+                return DefSubclassProc(hwnd, message, wparam, lparam);
+            }
+        }
+        // Upgrade before forwarding, which can cause nested native messages.
+        let window = if matches!(message, WM_GETMINMAXINFO | WM_WINDOWPOSCHANGING) && lparam != 0 {
+            unsafe { &*(data as *const glib::WeakRef<gtk::ApplicationWindow>) }.upgrade()
+        } else {
+            None
+        };
+        let result = unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
+        let Some(window) = window else {
+            return result;
+        };
+        let scale = window
+            .surface()
+            .map_or(1, |surface| surface.scale_factor().max(1));
+        let (min_width, min_height) = crate::editor::constrain_size(&window, 0, 0);
+        let (max_width, max_height) = crate::editor::constrain_size(&window, i32::MAX, i32::MAX);
+        let (min_width, min_height) = (min_width * scale, min_height * scale);
+        let (max_width, max_height) = (max_width * scale, max_height * scale);
+        match message {
+            WM_GETMINMAXINFO => {
+                let info = unsafe { &mut *(lparam as *mut MINMAXINFO) };
+                info.ptMinTrackSize.x = info.ptMinTrackSize.x.max(min_width).min(max_width);
+                info.ptMinTrackSize.y = info.ptMinTrackSize.y.max(min_height).min(max_height);
+                info.ptMaxTrackSize.x = max_width;
+                info.ptMaxTrackSize.y = max_height;
+                info.ptMaxSize.x = max_width;
+                info.ptMaxSize.y = max_height;
+            }
+            WM_WINDOWPOSCHANGING => {
+                let position = unsafe { &mut *(lparam as *mut WINDOWPOS) };
+                if position.flags & SWP_NOSIZE == 0 {
+                    position.cx = position.cx.clamp(min_width, max_width);
+                    position.cy = position.cy.clamp(min_height, max_height);
+                }
+            }
+            _ => return result,
+        }
+        0
+    }
+
+    pub fn bind_detached_resize(window: &gtk::ApplicationWindow) {
+        window.connect_realize(|window| {
+            let Some(hwnd) = window_hwnd(window) else {
+                return;
+            };
+            let data = Box::into_raw(Box::new(window.downgrade()));
+            let installed = unsafe {
+                SetWindowSubclass(
+                    hwnd,
+                    Some(detached_resize_subclass),
+                    DETACHED_RESIZE_SUBCLASS_ID,
+                    data as usize,
+                )
+            };
+            if installed == 0 {
+                unsafe {
+                    drop(Box::from_raw(data));
+                }
+                eprintln!("Could not install detached-note resize limits");
+                return;
+            }
+            // Fixed GTK windows receive equal native min/max sizes, which
+            // blocks the grip's SetWindowPos calls. The subclass supplies bounds.
+            window.set_resizable(true);
+        });
+    }
+
     pub fn sync_surface_geometry(
         window: &gtk::ApplicationWindow,
         monitor: Option<&gtk::gdk::Monitor>,
@@ -488,21 +649,16 @@ mod imp_windows {
             .unwrap_or((0, 0));
         let w = (width * scale).max(1);
         let h = (height * scale).max(1);
-        let layer = STATES.with(|map| {
-            map.borrow()
-                .get(&key(window))
-                .map_or(Layer::Top, |s| s.layer)
-        });
         sync_hwnd_styles_and_z(window);
         unsafe {
             SetWindowPos(
                 hwnd,
-                desired_z_order(layer),
+                std::ptr::null_mut(),
                 mon_x,
                 mon_y,
                 w,
                 h,
-                SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
             );
         }
     }
@@ -681,6 +837,7 @@ mod imp_windows {
         fn set_monitor(&self, monitor: Option<&gtk::gdk::Monitor>);
         fn set_anchor(&self, edge: Edge, anchor: bool);
         fn set_layer(&self, layer: Layer);
+        #[cfg(test)]
         fn layer(&self) -> Layer;
         fn margin(&self, edge: Edge) -> i32;
     }
@@ -693,6 +850,18 @@ mod imp_windows {
                 entry.window.set(Some(self));
             });
             self.connect_realize(|window| {
+                if let Some(hwnd) = window_hwnd(window)
+                    && unsafe {
+                        SetWindowSubclass(
+                            hwnd,
+                            Some(edge_surface_subclass),
+                            EDGE_SURFACE_SUBCLASS_ID,
+                            0,
+                        )
+                    } == 0
+                {
+                    eprintln!("Stickies could not preserve the edge window's taskbar style.");
+                }
                 sync_hwnd_styles_and_z(window);
                 let info = STATES.with(|map| {
                     map.borrow()
@@ -774,6 +943,7 @@ mod imp_windows {
             sync_hwnd_styles_and_z(self);
         }
 
+        #[cfg(test)]
         fn layer(&self) -> Layer {
             STATES.with(|map| map.borrow().get(&key(self)).map_or(Layer::Top, |s| s.layer))
         }
@@ -786,8 +956,8 @@ mod imp_windows {
 
 #[cfg(target_os = "windows")]
 pub use imp_windows::{
-    Edge, KeyboardMode, Layer, LayerShell, apply_input_region, check_display_support,
-    configure_display_dpi, connect_hover_fallback, connect_resize_drag, cursor_screen_pos,
-    init_dpi_awareness, is_pointer_in_window, resize_window, scale_css, scale_px,
-    set_fullscreen_busy, sync_resize_grip, sync_surface_geometry, ui_scale,
+    Edge, KeyboardMode, Layer, LayerShell, apply_input_region, bind_detached_resize,
+    bind_note_popover, check_display_support, configure_display_dpi, connect_hover_fallback,
+    connect_resize_drag, init_dpi_awareness, is_pointer_in_window, resize_window, scale_css,
+    scale_px, set_fullscreen_busy, sync_resize_grip, sync_surface_geometry, ui_scale,
 };

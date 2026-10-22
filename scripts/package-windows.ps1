@@ -29,6 +29,17 @@ function Write-Manifest([string]$Root, [string]$Path) {
     Write-Text $Path $Lines
 }
 
+function Set-ZipTimestamps([string]$Root) {
+    $Minimum = [datetime]::new(1980, 1, 1, 0, 0, 0)
+    $Maximum = [datetime]::new(2107, 12, 31, 23, 59, 58)
+    foreach ($Item in Get-ChildItem -LiteralPath $Root -Recurse -Force) {
+        if ($Item.LastWriteTime -lt $Minimum -or $Item.LastWriteTime -gt $Maximum) {
+            # Only staged metadata changes; original sources and file bytes stay intact.
+            $Item.LastWriteTime = [datetime]::new(2000, 1, 1, 0, 0, 0)
+        }
+    }
+}
+
 $SavedEnvironment = @{}
 foreach ($Name in @("PATH", "PKG_CONFIG", "PKG_CONFIG_PATH", "PKG_CONFIG_ALLOW_CROSS", "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER", "LC_ALL")) {
     $SavedEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
@@ -147,6 +158,7 @@ try {
     Write-Text (Join-Path $NoticeDir "rust\INDEX.txt") $RustIndex
 
     $NativeFiles = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $GeneratedNativeFiles = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     function Copy-NativeFile([string]$Source, [string]$Destination) {
         if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) { throw "Required runtime file is missing: $Source" }
         New-Item -ItemType Directory -Path (Split-Path $Destination -Parent) -Force | Out-Null
@@ -170,6 +182,8 @@ try {
     $Caches = @(Get-ChildItem -LiteralPath $LoaderRoot -Filter "loaders.cache" -File -Recurse)
     if ($Caches.Count -eq 0) { throw "GdkPixbuf loaders.cache is missing." }
     foreach ($Cache in $Caches) {
+        # MSYS2 generates this cache from the loader DLLs; it has no package owner.
+        [void]$GeneratedNativeFiles.Add((Join-Path $MsysRoot $Cache.FullName.Substring($DistRoot.Length + 1)))
         $Lines = @(Get-Content -LiteralPath $Cache.FullName | ForEach-Object {
             if ($_ -match '^"([^"\r\n]+\.dll)"$') {
                 $Name = [IO.Path]::GetFileName($Matches[1].Replace('\\', '\'))
@@ -183,9 +197,22 @@ try {
         Write-Text $Cache.FullName $Lines
     }
     if (-not (Get-ChildItem -LiteralPath $LoaderRoot -Filter "*svg*.dll" -File -Recurse)) { throw "The SVG loader required by Stickies icons is missing." }
-    Copy-NativeTree "share\icons\Adwaita"
-    Copy-NativeTree "share\icons\hicolor"
-    Copy-NativeFile "$MsysRoot\share\glib-2.0\schemas\gschemas.compiled" (Join-Path $ShareDir "glib-2.0\schemas\gschemas.compiled")
+    foreach ($Theme in @("Adwaita", "hicolor")) {
+        Copy-NativeTree "share\icons\$Theme"
+        # Icon caches are generated from the copied, package-owned theme files.
+        $IconCache = Join-Path $MsysRoot "share\icons\$Theme\icon-theme.cache"
+        if ($NativeFiles.Contains($IconCache)) { [void]$GeneratedNativeFiles.Add($IconCache) }
+    }
+    $SchemaRoot = Join-Path $MsysRoot "share\glib-2.0\schemas"
+    $CompiledSchemas = Join-Path $SchemaRoot "gschemas.compiled"
+    Copy-NativeFile $CompiledSchemas (Join-Path $ShareDir "glib-2.0\schemas\gschemas.compiled")
+    [void]$GeneratedNativeFiles.Add($CompiledSchemas)
+    $SchemaInputs = @(Get-ChildItem -LiteralPath $SchemaRoot -File | Where-Object {
+        $_.Name.EndsWith(".gschema.xml") -or $_.Name.EndsWith(".gschema.override")
+    } | Sort-Object FullName)
+    if (-not ($SchemaInputs | Where-Object { $_.Name.EndsWith(".gschema.xml") })) {
+        throw "GSettings schema sources are missing; cannot identify the packages contributing to gschemas.compiled."
+    }
 
     # These are Windows OS libraries/contracts, never arbitrary missing DLLs.
     $SystemDlls = @("advapi32.dll", "bcrypt.dll", "bcryptprimitives.dll", "cfgmgr32.dll", "comctl32.dll", "comdlg32.dll", "crypt32.dll", "d3d11.dll", "d3d12.dll", "dcomp.dll", "dnsapi.dll", "dwmapi.dll", "dwrite.dll", "dxgi.dll", "gdi32.dll", "gdiplus.dll", "hid.dll", "imm32.dll", "iphlpapi.dll", "kernel32.dll", "msimg32.dll", "ntdll.dll", "ole32.dll", "oleaut32.dll", "opengl32.dll", "rpcrt4.dll", "setupapi.dll", "shcore.dll", "shell32.dll", "shlwapi.dll", "user32.dll", "userenv.dll", "usp10.dll", "version.dll", "winmm.dll", "winspool.drv", "ws2_32.dll")
@@ -213,14 +240,16 @@ try {
         }
     }
 
-    # Query the owners of every copied native asset, in short command-line batches.
-    $NativePaths = @($NativeFiles | Sort-Object | ForEach-Object { "/ucrt64/" + $_.Substring($MsysRoot.Length + 1).Replace('\', '/') })
+    # Generated caches have no owner. Query the bundled loaders, theme files and schema inputs instead.
+    # Any other unowned native file or schema input still stops packaging.
+    $NoticeInputs = @($NativeFiles | Where-Object { -not $GeneratedNativeFiles.Contains($_) }) + @($SchemaInputs.FullName)
+    $NativePaths = @($NoticeInputs | Sort-Object -Unique | ForEach-Object { "/ucrt64/" + $_.Substring($MsysRoot.Length + 1).Replace('\', '/') })
     $Packages = [Collections.Generic.HashSet[string]]::new()
     for ($Offset = 0; $Offset -lt $NativePaths.Count; $Offset += 32) {
         $Last = [Math]::Min($Offset + 31, $NativePaths.Count - 1)
         foreach ($Owner in (Invoke-Checked $Pacman (@("-Qqo") + $NativePaths[$Offset..$Last]))) { [void]$Packages.Add($Owner) }
     }
-    $NativeIndex = @("Original notices for every MSYS2 package owning a bundled native binary/resource.")
+    $NativeIndex = @("Original notices for every MSYS2 package owning a bundled native binary/resource or contributing schema input.")
     $PackageVersions = @()
     foreach ($Package in $Packages | Sort-Object) {
         $PackageVersions += Invoke-Checked $Pacman @("-Q", $Package)
@@ -260,16 +289,25 @@ try {
     $BuildInfo += Invoke-Checked $Objdump @("--version")
     $BuildInfo += "RUSTFLAGS: $env:RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS: $env:CARGO_ENCODED_RUSTFLAGS"
     $BuildInfo += $PackageVersions
+    $BuildInfo += "ZIP timestamps: staged entries outside 1980-01-01 through 2107-12-31 23:59:58 use 2000-01-01; file bytes are unchanged."
+    $BuildInfo += "Generated native resources; package ownership comes from bundled loader DLLs, icon theme files and the schema inputs below:"
+    $BuildInfo += @($GeneratedNativeFiles | Sort-Object | ForEach-Object { "/ucrt64/" + $_.Substring($MsysRoot.Length + 1).Replace('\', '/') })
+    $BuildInfo += "GSettings compiler inputs, SHA-256 and path relative to the MSYS2 prefix:"
+    foreach ($Schema in $SchemaInputs) {
+        $BuildInfo += "{0}  {1}" -f (Get-FileHash -LiteralPath $Schema.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $Schema.FullName.Substring($MsysRoot.Length + 1).Replace('\', '/')
+    }
     Write-Text (Join-Path $DistRoot "BUILD-INFO.txt") $BuildInfo
 
     $SourceZip = Join-Path $OutputDirectory "stickies-windows-x86_64-source.zip"
     $BinaryZip = Join-Path $OutputDirectory "stickies-windows-x86_64.zip"
+    Set-ZipTimestamps $SourceRoot
     Compress-Archive -Path "$SourceRoot\*" -DestinationPath $SourceZip
     # Record the source archive checksum in the binary bundle before hashing it.
     $SourceChecksum = "{0}  {1}" -f (Get-FileHash -LiteralPath $SourceZip -Algorithm SHA256).Hash.ToLowerInvariant(), (Split-Path $SourceZip -Leaf)
     Write-Text (Join-Path $DistRoot "SOURCE-ARCHIVE.sha256") @($SourceChecksum)
     Write-Manifest $DistRoot (Join-Path $OutputDirectory "BUNDLE-MANIFEST.sha256")
     Copy-Item -LiteralPath (Join-Path $OutputDirectory "BUNDLE-MANIFEST.sha256") -Destination $DistRoot
+    Set-ZipTimestamps $DistRoot
     Compress-Archive -Path "$DistRoot\*" -DestinationPath $BinaryZip
     $BinaryChecksum = "{0}  {1}" -f (Get-FileHash -LiteralPath $BinaryZip -Algorithm SHA256).Hash.ToLowerInvariant(), (Split-Path $BinaryZip -Leaf)
     Write-Text (Join-Path $OutputDirectory "SHA256SUMS") @($SourceChecksum, $BinaryChecksum)

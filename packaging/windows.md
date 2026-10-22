@@ -1,6 +1,8 @@
 # Windows ZIP packaging
 
-The Windows port keeps the accepted GTK interface, shared note sessions and anchor-based checklist repair. It is separate from the Linux Wayland release. Windows clean-machine compatibility, mixed-DPI placement, focus, single-instance failure handling and session-end saving remain unverified.
+The Windows port keeps the accepted GTK interface, shared note sessions and anchor-based checklist repair. Linux and Windows share the main source branch and produce separate platform packages. Windows clean-machine compatibility, mixed-DPI placement, general focus behavior, single-instance failure handling and session-end saving remain unverified.
+
+On October 22 the owner reported that the latest Windows build works after the combined detached-resize and Open away correction, and also accepted the latest Linux build. This is owner verification in the development environments, not clean-machine or full release acceptance.
 
 ## Installation-free launch and storage
 
@@ -10,7 +12,13 @@ Installation-free does not mean that data travels with the ZIP. Notes use GLib's
 
 Launch at login is optional and uses the current user's Windows Run registry key with a quoted executable path. Disable it before moving/removing the bundle, or re-enable it from the new location. Saved note bodies, formatting offsets and schema migrations remain the same as on Linux.
 
-The tray offers strip toggling, New Note, Quick Search, All Notes and Quit. Settings also offers Quit Stickies on Linux and Windows through the same application action. Quit flushes all shared sessions and stays open with a visible, editor-owned error dialog if a save fails. Closing All Notes with × does not quit the app. Explorer taskbar recreation re-registers the existing icon. These fixes have no Windows runtime acceptance yet.
+The tray offers strip toggling, New Note, Quick Search, All Notes and Quit. Settings also offers Quit Stickies on Linux and Windows through the same application action. Quit flushes all shared sessions and stays open with a visible, editor-owned error dialog if a save fails. Closing All Notes with × does not quit the app. Explorer taskbar recreation re-registers the existing icon. Failed-save retention and Explorer recovery still lack explicit Windows runtime results.
+
+The edge hosts stay out of the taskbar while the strip, docked note or Search is showing. All Notes and detached notes keep normal taskbar behavior. A Windows subclass preserves the edge hosts' tool-window styles across GTK style updates and removes itself when the native window is destroyed. The tray remains available for strip toggling, opening All Notes and Quit. The taskbar fix is included in the owner-accepted Windows build.
+
+Successfully opening a docked note away collapses the strip to its marker through the existing animation on Windows and Linux. It does not depend on a pointer-leave event from the removed editor. A failed save retains the docked editor and expanded strip. Opening a different note away from All Notes preserves an unrelated docked editor.
+
+Individual notes on both platforms resize between 300 × 280 and 640 × 720 logical pixels, with a smaller maximum on small monitors. Detached notes use their existing grip for bounded app-managed resizing. Windows detached notes also enforce these limits through native size constraints, including maximization; GTK resizing stays enabled so fixed-size hints do not block the grip. Linux keeps compositor resizing disabled. On Windows, individual-note footer popups are raised after mapping without activating or moving their note; edge geometry updates preserve stacking order. The owner accepted the latest fixes on both platforms; small-monitor and mixed-DPI coverage remain unestablished.
 
 On Windows, the existing hide-in-DND preference responds to explicit Presentation Mode only. `SHQueryUserNotificationState` does not expose the modern Windows DND switch here. First-login/upgrade quiet time no longer hides the strip. Fullscreen policy retains the existing polling heuristic and needs runtime verification.
 
@@ -32,9 +40,13 @@ Run only after packaging execution is authorized. For example, from any working 
 
 The output directory must not exist. Previous outputs are never removed. The script snapshots explicit application inputs, including untracked `src\*.rs` files, and builds that snapshot into a fresh build directory. Agent material, existing artifacts and user storage are excluded. Review the snapshot before sharing.
 
+Before each ZIP, staged file and directory modification times outside ZIP's supported range of 1980-01-01 through 2107-12-31 23:59:58 are set to 2000-01-01. This handles native resources with old timestamps without changing their bytes or installed MSYS2 files. Build information records the policy; byte manifests and archive checksums still cover the packaged contents.
+
 Every required helper, loader, schema and icon tree must exist. The script checks objdump's exit status and x86_64 PE format, recursively resolves imports, and rejects unresolved imports except declared Windows system libraries/API contracts. It normalizes loader-cache module paths to bundle-relative paths and requires an SVG loader. Static dependency closure does not verify optional runtime loading, graphics drivers or clean-machine operation.
 
 The bundle includes the application MPL text, original font notices, enabled Windows Rust normal/build dependency notices, and original notices from every MSYS2 package owning copied native files. Installed package metadata records native versions, licences and upstream URLs. A missing notice stops packaging rather than silently omitting it or inventing replacement text.
+
+MSYS2 generates `loaders.cache`, `gschemas.compiled` and each icon theme's `icon-theme.cache`, so these caches need no direct pacman owner. The script checks ownership and notices for the bundled loader DLLs, the copied Adwaita/hicolor theme files and all installed `.gschema.xml` and `.gschema.override` inputs instead. Only the root `icon-theme.cache` in each copied theme gets this exception. `BUILD-INFO.txt` lists the generated caches and hashes the schema inputs; `BUNDLE-MANIFEST.sha256` covers the bundled cache bytes. Missing schema sources, other unowned native files and unowned schema inputs still stop packaging.
 
 Some MSYS2 split packages do not install their own notices. Supply original notices for the exact installed versions under a separate directory, with one child named after each full MSYS2 package name, then pass `-NativeNoticeRoot 'C:\release-inputs\native-notices'`. Include original copyright/exception texts and a short source/provenance record in each child. Review these inputs before distribution; the script copies them without downloading anything. The error identifies a package whose notices are still missing.
 
@@ -48,4 +60,4 @@ The source manifest hashes application inputs and excludes itself and generated 
 
 Keep matching application source available alongside the binary download. Cargo.lock identifies exact Rust registry sources; the native package inventory identifies the MSYS2 versions whose matching sources can be obtained through the MSYS2 package/source archive catalogues. Preserve the original notices and any applicable source-distribution requirements when sharing native libraries.
 
-The existing repository-root ZIP predates these fixes. This change does not regenerate or approve it. Sharing a new build remains blocked on a separately authorized packaging run, review of the generated notices/manifests, and focused Windows verification.
+The existing repository-root ZIP predates these fixes. The owner has built newer ZIPs and accepted the latest behavior, but the old ZIP remains historical. Public release still requires CI-built artifacts from the chosen source commit, review of notices/manifests and verification of the actual release bundle on a clean Windows environment.
