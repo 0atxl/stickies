@@ -10,7 +10,7 @@ The Arch job uses a fresh `archlinux:base-devel` container, installs dependencie
 
 Artifacts are retained for 30 days and are development downloads, not a published or signed release. The workflow has read-only repository permissions and does not create releases or tags. Native package repositories and compiler updates can change build inputs; inventories record their versions, but reproducibility is not claimed. The existing CI workflow remains separate and still runs its checks and tests. The Packages workflow itself runs no tests or app sessions. UI behavior, installation, upgrade/removal and clean-machine launch still need verification of the downloaded artifacts.
 
-The first hosted run remains pending. Local syntax and source inspection do not establish successful hosted builds. A commit containing `[skip ci]` skips push-triggered workflows; after the workflow is on `main`, an explicitly authorized manual Packages run can build that commit without running the separate test workflow.
+Both platform jobs passed in [run 39740913431](https://github.com/0atxl/stickies/actions/runs/39740913431) at commit `8f7622b`. This establishes hosted package construction, not installed-app behavior. A commit containing `[skip ci]` skips push-triggered workflows; after the workflow is on `main`, an explicitly authorized manual Packages run can build that commit without running the separate test workflow.
 
 Stickies is a Linux Wayland app requiring `zwlr_layer_shell_v1` v4+ and compatible native libraries. This pass prepares an Arch Linux x86_64 package recipe and source inputs. The owner-approved application icon is included. No package has been installed or verified on a clean runner.
 

@@ -1,5 +1,19 @@
 # Current verification checklist
 
+## October 22 hosted package builds
+
+The owner authorized committing/pushing CI setup with `[skip ci]` and manually running only the new Packages workflow. The existing test workflow remained unchanged and did not run. No tests, installations or app sessions were executed during this setup.
+
+The first run, [39740472232](https://github.com/0atxl/stickies/actions/runs/39740472232) at `9e39d8b`, passed Arch packaging but failed Windows before compilation. Several `git.exe` matches from `Get-Command` became one invalid command string. Selecting the first executable for Git/Cargo/rustc and optional pkg-config lookup fixed that runner-specific packaging failure.
+
+The corrected run, [39740913431](https://github.com/0atxl/stickies/actions/runs/39740913431), passed both platforms at `8f7622be6e9b1ce627d7d070ce2b455bb00a444d`. Arch's job completed in 2 minutes 28 seconds, including a 1 minute 38 second release compilation. Windows release compilation took 2 minutes 31 seconds, followed by about 2 minutes 16 seconds of dependency/notice collection, hashing and ZIP generation. The quiet interval after Cargo's completion message was packaging work. The final `Distribute both ZIPs and SHA256SUMS together` message marks successful packaging completion.
+
+GitHub uploaded an approximately 4.4 MB Arch artifact and 50 MB Windows artifact, both named with the full source commit. The Arch artifact contains the package, exact source archive, generated recipe, source/preparation records, BUILDINFO/PKGINFO, build-package inventory and SHA256SUMS. The Windows artifact contains binary/source ZIPs and SHA256SUMS, including bundled native notices and source/build manifests. Retention is 30 days. These are unsigned development artifacts; no release or tag was published.
+
+Static inspection of the corrected Arch download verified all eight artifact checksums and all 221 source-manifest entries. Source identity matches the workflow commit. The package includes the executable, desktop entry and approved icon; desktop/icon bytes match the source archive. The three GStreamer original source archives used by the Windows helper were independently checked against the pinned MSYS2 recipe hashes before CI. Windows hosted packaging passed its dependency and notice checks, but local artifact downloads did not complete, so its downloaded ZIP bytes and cross-platform source-manifest comparison remain unverified locally.
+
+Remaining focused acceptance should use these actual CI artifacts: verify the Windows download checksums and launch on a machine without development-tool paths, then check note resizing/menus/Open away/taskbar behavior. Verify Arch installation/launcher and upgrade/removal with disposable data. These are suggested checks, not new authorization to run them. Deferred failed-save, mixed-DPI/multi-monitor and other runtime limits remain unchanged.
+
 ## October 22 owner acceptance and integration
 
 After the combined detached-resize and Open away patch, the owner ran the latest Linux source with `cargo run --locked --offline --bin stickies` and reported that it works. The requested checks covered docked/detached resizing and bounds, detached movement, note-menu stacking and strip collapse when opening a docked note away. The owner then reported that the latest Windows build also works. The Windows instructions used `stickies-windows-followup-fixes.patch`, packaged into `C:\Users\cherry\Stickies-build-followup-fixes`, and launched the extracted bundle from a directory containing spaces with a different working directory.
