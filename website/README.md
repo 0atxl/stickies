@@ -1,14 +1,14 @@
 # Stickies launch page
 
-This is a standalone static site. `index.html`, `styles.css`, `app.js` and `assets/` can be served together from any static host, including a GitHub Pages project subpath. No dependencies or build step are needed. The repository includes its release-update workflow; hosting has not been configured and nothing has been deployed.
+This is a standalone static site. `index.html`, `styles.css`, `app.js` and `assets/` can be served together from any static host, including a GitHub Pages project subpath. No dependencies or build step are needed. The production site is [getstickies.vercel.app](https://getstickies.vercel.app/). Its release-update workflow and Vercel Git deployment are active.
 
 After browser verification is authorized, open `index.html` locally or serve this directory over localhost. Copy text needs a browser that allows clipboard writes in that context. Failure produces visible feedback; no clipboard-read permission is requested.
 
 ## Release and appearance
 
-On October 23, 2026, GitHub's public latest-release API confirmed [v0.10.1](https://github.com/0atxl/stickies/releases/tag/v0.10.1), neither a draft nor a prerelease. Its source commit is `f4b70bac936c402aac9418988f8fdf84dc601743`, with package version `0.10.1`. The updater applied that actual metadata to the page, including the API-returned URLs for `stickies-windows-x86_64.zip`, `stickies-0.10.1-1-x86_64.pkg.tar.zst`, and `SHA256SUMS`. No required release assets are missing. File sizes are omitted.
+On October 24, 2026, GitHub's public latest-release API confirmed [v0.10.2](https://github.com/0atxl/stickies/releases/tag/v0.10.2), neither a draft nor a prerelease. Its source commit is `48b20dbf672aac09be1e661c8ae1d5eb7846185e`, with package version `0.10.2`. The automatic release workflow updated the page to the API-returned URLs for `stickies-windows-x86_64.zip`, `stickies-0.10.2-1-x86_64.pkg.tar.zst`, and `SHA256SUMS`. Live HTML inspection confirmed all three links after Vercel deployed the bot commit. No required release assets are missing. File sizes are omitted.
 
-The demo depicts the optional Playful Clean appearance and Classic connector shipped in v0.10.1. Its disclosure now reads "Simplified demo of Playful Clean. Downloads are v0.10.1." Wavy remains the application's default. The browser demo's editing and layout simplifications are listed below.
+The demo depicts the optional Playful Clean appearance and Classic connector shipped in v0.10.1. Its disclosure now reads "Simplified demo of Playful Clean. Downloads are v0.10.2." Wavy remains the application's default. The browser demo's editing and layout simplifications are listed below.
 
 The `data-demo-since="v0.10.1"` attribute on the disclosure records the first release containing this appearance. It is an explicit editorial choice. When the demo changes to depict unpublished UI, set it to `unreleased`; set it to the new tag only after confirming that release contains the depicted appearance. The updater retains the preview warning until the baseline is satisfied.
 
@@ -22,11 +22,11 @@ Visual references are `src/appearance.rs`, `src/note_controls.rs`, `src/edge.rs`
 
 The workflow uses its built-in `GITHUB_TOKEN` with `contents: write`, commits as `github-actions[bot]` and pushes only the changed page to the default branch. It makes no commit when the page is already current. Push conflicts or branch rules that disallow direct writes fail visibly; the workflow never force-pushes or changes branch protection. Built-in-token pushes do not start the repository's separate CI/Packages workflows. This workflow contains no tests or package builds.
 
-To activate:
+For a new Vercel connection, use these settings:
 
 1. Ensure the website, updater and workflow are on the default branch. The owner authorized their initial commit and push on October 23. The workflow must be available on the default branch for manual runs.
 2. In Vercel, import `0atxl/stickies` and set Root Directory to `website`, Framework Preset to Other, Build Command override to empty, Output Directory to `.`, and Production Branch to the repository's default branch, currently `main`. No environment variables or Vercel secrets are needed for this Git integration.
-3. Vercel deploys website commits through its GitHub connection. Future stable releases with their assets already attached update the page and create such a commit automatically. The first Vercel deployment will use the already-updated v0.10.1 page.
+3. Vercel deploys website commits through its GitHub connection. Future stable releases with their assets already attached update the page and create such a commit automatically. The existing connection deployed the automatic v0.10.2 update on October 24.
 
 If assets are attached after publication, upload them and rerun **Update website release** from Actions. No-op runs create no Vercel deployment. Releases published using another workflow's `GITHUB_TOKEN` do not trigger additional release workflows; that publishing workflow must explicitly dispatch this workflow after uploading assets, or the owner can run it manually. Human publication through GitHub or a separately authenticated CLI triggers the release event normally.
 
@@ -48,9 +48,9 @@ References: [GitHub release triggers](https://docs.github.com/en/actions/referen
 
 Static inspection covers release metadata, appearance differences, copied-asset provenance, in-memory state, text insertion through DOM values, focus handling and responsive CSS. JavaScript syntax, HTML references, local asset paths, release-asset URLs and whitespace are checked without executing the demo.
 
-The automation addition was checked through Python syntax parsing, workflow YAML parsing, HTML marker/reference inspection and whitespace checks. The real v0.10.1 API response was used to update the page. The hosted workflow, bot push and Vercel deployment have not been exercised.
+The automation addition was checked through Python syntax parsing, workflow YAML parsing, HTML marker/reference inspection and whitespace checks. The real v0.10.1 API response initially updated the page. On v0.10.2 publication, [release run 40004276056](https://github.com/0atxl/stickies/actions/runs/40004276056) pushed bot commit `ac9c1c9c1cf182b8dfbe6df49426a0c7eb588c0f`. The second release event completed without another change. Vercel reported success for that commit, and a direct read of the live HTML confirmed the v0.10.2 download links and retained v0.10.1 demo appearance baseline.
 
-No automated tests, browser/app sessions, screenshots, benchmarks or Lighthouse runs were authorized or performed. Rendering and runtime behavior remain unverified. The initial website commit uses `[skip ci]` to preserve that test restriction. Vercel hosting setup remains with the owner.
+No automated tests, browser/app sessions, screenshots, benchmarks or Lighthouse runs were authorized or performed. Rendering and runtime behavior remain unverified. The initial website commit uses `[skip ci]` to preserve that test restriction. The current release publication authorized checking the hosted automation and live HTML only.
 
 Suggested checks for separate authorization:
 
@@ -58,4 +58,4 @@ Suggested checks for separate authorization:
 - Touch reveal, note switching, checkbox hit areas, editing with the on-screen keyboard, and both download choices.
 - Reduced-motion preference, narrow layouts at 320px and 390px, tablet/desktop layouts and browser zoom. Confirm the note footer and text remain usable without horizontal page overflow.
 - Follow Windows, Arch, AUR, source-installation, release-note and checksum links. Check clipboard success/failure on the intended host. Confirm the upcoming-appearance label remains accurate before publishing.
-- Verify stable/prerelease handling, incomplete assets leaving the page intact, repeated runs producing no commit, and the complete release-to-Vercel path after setup. These automated/hosted verification runs require separate authorization.
+- Verify stable/prerelease handling, incomplete assets leaving the page intact, repeated runs producing no commit, and future failure cases. The successful stable-release-to-Vercel path is recorded above; additional scenario runs require separate authorization.
