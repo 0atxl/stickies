@@ -93,6 +93,24 @@ def main():
                   f"  Authors: {', '.join(package.get('authors', []))}", ""]
     files["packaging/notices/INDEX.txt"] = ("\n".join(index) + "\n").encode()
 
+    # Install one attributed document rather than a directory per dependency.
+    # Keep the original notice files in the matching source archive.
+    notices = {}
+    for name, data in sorted(files.items()):
+        if name.startswith("packaging/notices/") or (
+            name.startswith("assets/fonts/") and name.endswith("-LICENSE.txt")
+        ):
+            notices.setdefault(data, []).append(name)
+    combined = bytearray(
+        b"Third-party notices for Stickies (Linux)\n"
+        b"Each section lists all original paths sharing the following text.\n"
+    )
+    for data, names in notices.items():
+        combined.extend(("\n" + "=" * 72 + "\n" + "\n".join(names) + "\n\n").encode())
+        combined.extend(data)
+        combined.extend(b"\n")
+    files["packaging/THIRD-PARTY-NOTICES.txt"] = bytes(combined)
+
     archive_name = f"stickies-{version}-src.tar.gz"
     icon_status = f"present; SHA-256 {digest(files[icon])}" if icon in files else "MISSING; package construction is blocked"
     source_info = (

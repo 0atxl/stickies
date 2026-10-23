@@ -4,12 +4,12 @@ Linux and Windows share `main`. Windows uses the [Windows ZIP guide](windows.md)
 
 ## Public release channels
 
-The selected release is `v0.10.1`, with package version `0.10.1`. GitHub hosts Windows and Arch x86_64 downloads with matching sources, inventories and checksums. AUR `stickies` builds the source archive; `stickies-bin` installs the same prebuilt Arch package. crates.io distributes the application source for Cargo installation with native build prerequisites. The repository README contains user installation steps.
+The selected release is `v0.10.2`, with package version `0.10.2`. GitHub hosts Windows and Arch x86_64 downloads with matching sources, inventories and checksums. AUR `stickies` builds the source archive; `stickies-bin` installs the same prebuilt Arch package. crates.io distributes the application source for Cargo installation with native build prerequisites. The repository README contains user installation steps.
 
 After downloading and verifying the release candidate's Arch Actions artifact, prepare the two AUR submissions with:
 
 ```bash
-python scripts/prepare-aur.py --artifacts /path/to/arch-artifact --tag v0.10.1 --output /path/to/new-aur-directory
+python scripts/prepare-aur.py --artifacts /path/to/arch-artifact --tag v0.10.2 --output /path/to/new-aur-directory
 ```
 
 The helper verifies the artifact checksums and source recipe hash, writes GitHub release URLs and generates `.SRCINFO` with `makepkg --printsrcinfo`. It never builds or publishes. Verify the source recipe and binary repackaging before submission, then check the public asset URLs after GitHub publication and before pushing AUR. Keep AUR recipes and `.SRCINFO` together; do not upload binaries to AUR.
@@ -59,7 +59,7 @@ These are source/feature requirements, not a promise that a binary built with ne
 
 The owner supplied and approved `Frosted Layered Sticky Notes.png` and confirmed it is their own design, with no third-party attribution identified. `data/dev.stickies.Stickies.png` preserves that 1254 × 1254 transparent PNG byte-for-byte, SHA-256 `edf8cd958d73fa9a79e909dd5ff8d1d447657eaf27852c6d91a6e079d75e3f2c`. No conversion, redraw or substitute artwork is used. Keep the desktop entry's existing icon identifier. The original raster uses the standard unthemed [pixmaps lookup](https://specifications.freedesktop.org/icon-theme/latest/), avoiding an invented SVG or a mismatched fixed-size theme directory. Fonts, CSS, UI icons and migrations are already embedded; do not install separate copies of the fonts or alter application resource loading.
 
-Original Rust dependency notice files are copied from Cargo's cached sources for the enabled Linux normal/build dependency tree. The inventory includes build tools, so some entries are not linked into the executable. The two locked gtk4-layer-shell bindings omit their MIT file from their crate archives. `packaging/licenses/gtk4-layer-shell-MIT.txt` is the identical original notice verified at upstream commits [7043a44](https://github.com/pentamassiv/gtk4-layer-shell-gir/blob/7043a44adc4e31868e6f30a4f8c8279168417a94/LICENSE) for 0.8.1 and [c52b9b1](https://github.com/pentamassiv/gtk4-layer-shell-gir/blob/c52b9b12e6b1afa38dcb496ec821c55bb298da78/LICENSE) for sys 0.6.1. The script applies that supplement only to those versions and stops on other missing notices. Native shared libraries are provided by Arch, not bundled here.
+Original Rust dependency notice files are copied from Cargo's cached sources for the enabled Linux normal/build dependency tree. The matching source archive retains those originals. Installed Arch packages use one `THIRD-PARTY-NOTICES.txt` document for font/dependency notices, grouping identical texts with all original paths and retaining package attribution; the application MPL text remains separate. This reduces the package's file/directory count without removing notice content. The inventory includes build tools, so some entries are not linked into the executable. The two locked gtk4-layer-shell bindings omit their MIT file from their crate archives. `packaging/licenses/gtk4-layer-shell-MIT.txt` is the identical original notice verified at upstream commits [7043a44](https://github.com/pentamassiv/gtk4-layer-shell-gir/blob/7043a44adc4e31868e6f30a4f8c8279168417a94/LICENSE) for 0.8.1 and [c52b9b1](https://github.com/pentamassiv/gtk4-layer-shell-gir/blob/c52b9b12e6b1afa38dcb496ec821c55bb298da78/LICENSE) for sys 0.6.1. The script applies that supplement only to those versions and stops on other missing notices. Native shared libraries are provided by Arch, not bundled here.
 
 ## Prepare source and checksums locally
 
@@ -71,7 +71,7 @@ python3 packaging/prepare-release.py
 
 The script uses cached Cargo metadata only. On a new builder, first fetch the locked dependencies with `cargo fetch --locked --target x86_64-unknown-linux-gnu` when network use is authorized. Preparation itself neither downloads nor compiles anything. An existing output directory is refused; use `--output /path/to/a/new/directory` to preserve older inputs.
 
-The default output, `target/packaging/`, contains the source archive, generated `PKGBUILD`, `SOURCE-INFO.txt`, `PREPARATION.txt` and `SHA256SUMS`. The source version comes from Cargo.toml, currently `0.10.1`; it does not select a release version/tag. The archive contains current bytes of tracked application inputs, the named packaging files and generated notices. `SOURCE-INFO.txt` records the Git baseline and explicitly identifies a working-tree snapshot. `SOURCE-MANIFEST.sha256` inside the archive identifies those bytes. Unrelated local files, build outputs, agent material and saved notes are excluded.
+The default output, `target/packaging/`, contains the source archive, generated `PKGBUILD`, `SOURCE-INFO.txt`, `PREPARATION.txt` and `SHA256SUMS`. The source version comes from Cargo.toml, currently `0.10.2`; it does not select a release version/tag. The archive contains current bytes of tracked application inputs, the named packaging files and generated notices. `SOURCE-INFO.txt` records the Git baseline and explicitly identifies a working-tree snapshot. `SOURCE-MANIFEST.sha256` inside the archive identifies those bytes. Unrelated local files, build outputs, agent material and saved notes are excluded.
 
 Source archive paths, order, timestamps, ownership and modes are normalized. `SOURCE_DATE_EPOCH` defaults to the Git baseline's commit time and is recorded. Reuse it when recreating the same source snapshot. Archive normalization and Cargo.lock do not establish bit-for-bit binary reproducibility.
 
@@ -118,7 +118,7 @@ Launch at login stays optional and app-managed. On valid startup, Stickies creat
 
 ## Remaining verification
 
-The application artwork is approved and included; release identity is v0.10.1. Focused downloaded-candidate installation, launch, same-version reinstall and removal checks passed. Desktop icon lookup, actual login and older-version upgrade coverage remain incomplete. Keep the separate reliability/Wayland gaps in the current project record; packaging does not resolve them. The [October 19 source maintenance pass](../agent-docs/manual-testing.md#october-19-gtk-deprecation-maintenance) reports zero application warnings on Linux, down from the integrated 35. Existing packages predate those replacements; no package was regenerated or verified in that pass.
+The application artwork is approved and included; release identity is v0.10.2. Focused downloaded-candidate installation, launch, same-version reinstall and removal checks passed. Desktop icon lookup, actual login and older-version upgrade coverage remain incomplete. Keep the separate reliability/Wayland gaps in the current project record; packaging does not resolve them. The [October 19 source maintenance pass](../agent-docs/manual-testing.md#october-19-gtk-deprecation-maintenance) reports zero application warnings on Linux, down from the integrated 35. Existing packages predate those replacements; no package was regenerated or verified in that pass.
 
 The smallest later, separately authorized installation check is:
 

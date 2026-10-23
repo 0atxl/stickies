@@ -50,6 +50,23 @@ fn register_font_path(path: &Path, name: &str) -> Result<(), Box<dyn std::error:
 
 pub fn register() -> Result<(), Box<dyn std::error::Error>> {
     gio::resources_register_include!("stickies.gresource")?;
+    #[cfg(target_os = "windows")]
+    {
+        let executable = std::env::current_exe()?;
+        let icons = executable
+            .parent()
+            .and_then(Path::parent)
+            .map(|root| root.join("share/stickies-icons.gresource"));
+        // Cargo/MSYS2 development builds continue using their installed theme.
+        if let Some(icons) = icons.filter(|path| path.exists()) {
+            let resource = gio::Resource::load(icons)?;
+            gio::resources_register(&resource);
+            if let Some(display) = gtk::gdk::Display::default() {
+                gtk::IconTheme::for_display(&display)
+                    .add_resource_path("/dev/stickies/Stickies/native-icons");
+            }
+        }
+    }
     let cache = glib::user_cache_dir().join("stickies").join("fonts");
     for name in [
         "Virgil.ttf",

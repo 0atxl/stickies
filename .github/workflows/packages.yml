@@ -107,6 +107,7 @@ jobs:
           path: |
             dist/windows/stickies-windows-x86_64.zip
             dist/windows/stickies-windows-x86_64-source.zip
+            dist/windows/stickies-windows-x86_64-symbols.zip
             dist/windows/SHA256SUMS
           if-no-files-found: error
           compression-level: 0

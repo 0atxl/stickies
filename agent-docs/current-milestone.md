@@ -4,6 +4,20 @@ The active milestone is reliability, Wayland verification and release finishing 
 
 [SPEC.md](SPEC.md) describes current behavior. [implementation.md](implementation.md) owns remaining roadmap work. The [detailed verification record](manual-testing.md) contains results, fixtures, evidence and the remaining checklist. Further test execution requires separate authorization under [AGENTS.md](../AGENTS.md).
 
+## v0.10.2 publication, October 23
+
+The owner authorized committing/pushing the extraction cleanup, building fresh Arch/Windows packages, publishing a GitHub patch release and updating crates.io and both AUR packages. The selected version is `0.10.2`, tag `v0.10.2`. The existing website release workflow should update its version/download links after publication; its run and resulting page will be checked.
+
+This scope permits static checks, compilation, package creation, artifact inspection and publication. Tests, app sessions and performance benchmarks remain excluded. The release commit uses `[skip ci]`; Packages is dispatched manually. Publication results will be recorded after completion.
+
+## Package extraction cleanup, October 23
+
+The owner approved the package audit's recommended cleanup, prioritizing extraction file count. Arch now installs one attributed third-party notice document plus the application MPL text; the original per-dependency notices stay in its source archive. Windows consolidates font/Rust/native notices with byte-identical texts grouped by their original paths, retaining the three upstream source archives. It excludes loader import libraries and unrelated hicolor demo icons, compiles stock Adwaita images into one GResource and keeps native control coverage through an added Windows icon resource path. Required DLLs, loader formats and cursor fallbacks are retained. The application executable is stripped, with the unstripped executable and runtime identity in an optional symbols ZIP that the Packages workflow uploads.
+
+On the audited v0.10.1 inputs this layout is expected to reduce Arch's installed regular files from 153 to seven and Windows from 1,155 to about 131. These are structural counts, not measured extraction/RAM improvements. Loader/cursor pruning, moving upstream source archives out of the runtime, native dependency changes and runtime font behavior are outside this implementation scope. The subsequent publication authorization is recorded above.
+
+Verification passed for Rustfmt, Bash/Python syntax, PowerShell tree-sitter parsing, Git whitespace checks and Linux compilation. Source preparation succeeded; inspection confirms that all 147 original third-party notice paths and texts are present in the consolidated Arch document, with originals retained in the source archive. Static icon inventory maps all 768 Adwaita images to unique supported hicolor resource paths. No tests, app sessions or benchmarks are authorized. Native PowerShell execution, Windows compilation/resource lookup and fresh installed package counts require later verification. Suggested focused checks are Windows native menus/emoji, icons, tray, cursor and resize states, extraction paths with spaces/Unicode, symbols identity, and Arch install/desktop launch. Keep the published v0.10.1 evidence below distinct from this unreleased cleanup.
+
 ## v0.10.1 publication, October 23
 
 The owner authorized committing and pushing the accumulated Playful/Classic redesign and title/connector fixes, attaching fresh packages to a public GitHub release, and updating both AUR packages and crates.io. The selected patch version is `0.10.1`, with GitHub tag `v0.10.1`. The original footer, Wavy default and Paper/Minimal arrow remain part of the approved design.

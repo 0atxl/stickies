@@ -29,6 +29,38 @@ function Write-Manifest([string]$Root, [string]$Path) {
     Write-Text $Path $Lines
 }
 
+function Write-NoticeBundle([string]$Source, [string]$Destination) {
+    $Groups = [ordered]@{}
+    foreach ($File in Get-ChildItem -LiteralPath $Source -File -Recurse | Sort-Object FullName) {
+        $Relative = $File.FullName.Substring($Source.Length + 1)
+        if ($File.Name.EndsWith(".tar.xz")) {
+            # Keep the original dependency sources available alongside the notices.
+            $Archive = Join-Path (Split-Path $Destination -Parent) $Relative
+            New-Item -ItemType Directory -Path (Split-Path $Archive -Parent) -Force | Out-Null
+            Copy-Item -LiteralPath $File.FullName -Destination $Archive
+            continue
+        }
+        $Digest = (Get-FileHash -LiteralPath $File.FullName -Algorithm SHA256).Hash
+        if (-not $Groups.Contains($Digest)) { $Groups[$Digest] = [Collections.Generic.List[IO.FileInfo]]::new() }
+        $Groups[$Digest].Add($File)
+    }
+    New-Item -ItemType Directory -Path (Split-Path $Destination -Parent) -Force | Out-Null
+    $Encoding = [Text.UTF8Encoding]::new($false)
+    $Stream = [IO.File]::Create($Destination)
+    try {
+        $Header = $Encoding.GetBytes("Third-party notices for Stickies (Windows)`nEach section lists all original paths sharing the following text.`n")
+        $Stream.Write($Header, 0, $Header.Length)
+        foreach ($Group in $Groups.Values) {
+            $Paths = @($Group | ForEach-Object { $_.FullName.Substring($Source.Length + 1).Replace('\', '/') })
+            $Header = $Encoding.GetBytes("`n" + ('=' * 72) + "`n" + ($Paths -join "`n") + "`n`n")
+            $Stream.Write($Header, 0, $Header.Length)
+            $Bytes = [IO.File]::ReadAllBytes($Group[0].FullName)
+            $Stream.Write($Bytes, 0, $Bytes.Length)
+            $Stream.WriteByte(10)
+        }
+    } finally { $Stream.Dispose() }
+}
+
 function Set-ZipTimestamps([string]$Root) {
     $Minimum = [datetime]::new(1980, 1, 1, 0, 0, 0)
     $Maximum = [datetime]::new(2107, 12, 31, 23, 59, 58)
@@ -58,8 +90,9 @@ try {
     $MsysBase = Split-Path $MsysRoot -Parent
     $Pacman = Join-Path $MsysBase "usr\bin\pacman.exe"
     $Objdump = Join-Path $MsysRoot "bin\objdump.exe"
+    $Strip = Join-Path $MsysRoot "bin\strip.exe"
     $Compiler = Join-Path $MsysRoot "bin\gcc.exe"
-    foreach ($Tool in @($Pacman, $Objdump, $Compiler, "$MsysRoot\bin\pkg-config.exe", "$MsysRoot\bin\glib-compile-resources.exe")) {
+    foreach ($Tool in @($Pacman, $Objdump, $Strip, $Compiler, "$MsysRoot\bin\pkg-config.exe", "$MsysRoot\bin\glib-compile-resources.exe")) {
         if (-not (Test-Path -LiteralPath $Tool -PathType Leaf)) { throw "Required build tool is missing: $Tool" }
     }
     $Cargo = (Get-Command cargo.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
@@ -87,8 +120,9 @@ try {
     $DistRoot = Join-Path $OutputDirectory "stickies-windows-x86_64"
     $BinDir = Join-Path $DistRoot "bin"
     $ShareDir = Join-Path $DistRoot "share"
-    $NoticeDir = Join-Path $DistRoot "licenses"
-    New-Item -ItemType Directory -Path $SourceRoot, $BinDir, $ShareDir, $NoticeDir | Out-Null
+    $NoticeDir = Join-Path $OutputDirectory "notices"
+    $SymbolsRoot = Join-Path $OutputDirectory "symbols"
+    New-Item -ItemType Directory -Path $SourceRoot, $BinDir, $ShareDir, $NoticeDir, $SymbolsRoot | Out-Null
 
     # Build the exact snapshot we distribute, including the untracked Rust modules.
     # Do not copy the repository, agent files, user data, existing ZIPs or build output.
@@ -113,7 +147,7 @@ try {
         "SOURCE-MANIFEST.sha256 identifies the exact application inputs compiled from this snapshot.",
         "Application: MPL-2.0. Fonts and dependencies retain their original notices under licenses/.",
         "Rust sources are identified by Cargo.lock registry versions/checksums; obtain those versions from crates.io.",
-        "Native package versions and upstream URLs are recorded in BUILD-INFO.txt and licenses/native/INDEX.txt.",
+        "Native package versions and upstream URLs are recorded in BUILD-INFO.txt and licenses/THIRD-PARTY-NOTICES.txt.",
         "Obtain matching native source packages from https://packages.msys2.org and https://repo.msys2.org/mingw/sources/.",
         "Distributors must keep these instructions, notices and matching source available with the binary download.",
         "This records build inputs, not clean-machine compatibility or binary reproducibility."
@@ -130,6 +164,13 @@ try {
         $Tree = Invoke-Checked $Cargo @("tree", "--frozen", "--target", $Target, "-e", "normal,build", "--prefix", "none", "--format", "{p}")
     } finally { Pop-Location }
     Copy-Item -LiteralPath (Join-Path $BuildRoot "$Target\release\stickies.exe") -Destination $BinDir
+    Copy-Item -LiteralPath (Join-Path $BinDir "stickies.exe") -Destination $SymbolsRoot
+    Invoke-Checked $Strip @("--strip-all", (Join-Path $BinDir "stickies.exe")) | Out-Host
+    Write-Text (Join-Path $SymbolsRoot "README.txt") @(
+        "Unstripped Stickies executable for crash investigation; not needed to run the app.",
+        "Source commit: $Revision",
+        "Runtime executable SHA-256: $((Get-FileHash -LiteralPath (Join-Path $BinDir 'stickies.exe') -Algorithm SHA256).Hash.ToLowerInvariant())"
+    )
     Copy-Item -LiteralPath (Join-Path $SourceRoot "LICENSE") -Destination (Join-Path $DistRoot "LICENSE")
     Copy-Item -LiteralPath (Join-Path $SourceRoot "packaging\windows.md") -Destination (Join-Path $DistRoot "README.md")
     New-Item -ItemType Directory -Path (Join-Path $NoticeDir "fonts") | Out-Null
@@ -176,7 +217,12 @@ try {
     foreach ($Helper in @("gdbus.exe", "gspawn-win64-helper.exe", "gspawn-win64-helper-console.exe")) {
         Copy-NativeFile (Join-Path $MsysRoot "bin\$Helper") (Join-Path $BinDir $Helper)
     }
-    Copy-NativeTree "lib\gdk-pixbuf-2.0"
+    # Import libraries are build inputs, not runtime loader modules.
+    foreach ($File in Get-ChildItem -LiteralPath (Join-Path $MsysRoot "lib\gdk-pixbuf-2.0") -File -Recurse) {
+        if ($File.Name.EndsWith(".dll.a")) { continue }
+        $Part = $File.FullName.Substring($MsysRoot.Length + 1)
+        Copy-NativeFile $File.FullName (Join-Path $DistRoot $Part)
+    }
     # Cache paths must resolve against the bundle, regardless of the launch CWD.
     $LoaderRoot = Join-Path $DistRoot "lib\gdk-pixbuf-2.0"
     $Caches = @(Get-ChildItem -LiteralPath $LoaderRoot -Filter "loaders.cache" -File -Recurse)
@@ -197,12 +243,37 @@ try {
         Write-Text $Cache.FullName $Lines
     }
     if (-not (Get-ChildItem -LiteralPath $LoaderRoot -Filter "*svg*.dll" -File -Recurse)) { throw "The SVG loader required by Stickies icons is missing." }
-    foreach ($Theme in @("Adwaita", "hicolor")) {
-        Copy-NativeTree "share\icons\$Theme"
-        # Icon caches are generated from the copied, package-owned theme files.
-        $IconCache = Join-Path $MsysRoot "share\icons\$Theme\icon-theme.cache"
-        if ($NativeFiles.Contains($IconCache)) { [void]$GeneratedNativeFiles.Add($IconCache) }
+    # Keep stock GTK icons available without extracting hundreds of small files.
+    # Resource icons use hicolor's standard directories, including symbolic icons.
+    $AdwaitaRoot = Join-Path $MsysRoot "share\icons\Adwaita"
+    $HicolorIndex = Get-Content -LiteralPath (Join-Path $MsysRoot "share\icons\hicolor\index.theme") -Raw
+    $Icons = @(Get-ChildItem -LiteralPath $AdwaitaRoot -File -Recurse | Where-Object { $_.Extension -in @(".svg", ".png") } | Sort-Object FullName)
+    if ($Icons.Count -eq 0) { throw "Adwaita icons are missing." }
+    $Manifest = [xml]'<gresources><gresource prefix="/dev/stickies/Stickies/native-icons" /></gresources>'
+    foreach ($File in $Icons) {
+        $Relative = $File.FullName.Substring($AdwaitaRoot.Length + 1).Replace('\', '/')
+        $Size = if ($File.Extension -eq ".svg") { "scalable" } else { $Relative.Split('/')[0] }
+        $Directory = "$Size/$($Relative.Split('/')[1])"
+        if (-not $HicolorIndex.Contains("[$Directory]")) { $Directory = "$Size/actions" }
+        $Entry = $Manifest.CreateElement("file")
+        $Entry.SetAttribute("alias", "$Directory/$($File.Name)")
+        if ($File.Extension -eq ".svg") { $Entry.SetAttribute("compressed", "true") }
+        $Entry.InnerText = $Relative
+        [void]$Manifest.gresources.gresource.AppendChild($Entry)
+        [void]$NativeFiles.Add($File.FullName)
     }
+    $IconManifest = Join-Path $OutputDirectory "native-icons.gresource.xml"
+    $Manifest.Save($IconManifest)
+    Invoke-Checked (Join-Path $MsysRoot "bin\glib-compile-resources.exe") @(
+        "--sourcedir=$AdwaitaRoot", "--target=$(Join-Path $ShareDir 'stickies-icons.gresource')", $IconManifest
+    ) | Out-Host
+    # Cursor fallbacks remain ordinary Win32 resources. Demo-app icons from
+    # hicolor and stale icon caches are not copied into the runtime.
+    foreach ($Theme in @("Adwaita", "hicolor")) {
+        $Relative = "share\icons\$Theme\index.theme"
+        Copy-NativeFile (Join-Path $MsysRoot $Relative) (Join-Path $DistRoot $Relative)
+    }
+    Copy-NativeTree "share\icons\Adwaita\cursors"
     $SchemaRoot = Join-Path $MsysRoot "share\glib-2.0\schemas"
     $CompiledSchemas = Join-Path $SchemaRoot "gschemas.compiled"
     Copy-NativeFile $CompiledSchemas (Join-Path $ShareDir "glib-2.0\schemas\gschemas.compiled")
@@ -279,9 +350,12 @@ try {
             }
         }
         if ($Count -eq 0) { throw "Missing original native notices for '$Package'. Supply its original notices in a '$Package' child directory under -NativeNoticeRoot; no substitute licence is generated." }
-        $NativeIndex += "Notices: licenses/native/$Package", ""
+        $NativeIndex += "Notices: licenses/THIRD-PARTY-NOTICES.txt, original paths native/$Package", ""
     }
     Write-Text (Join-Path $NoticeDir "native\INDEX.txt") $NativeIndex
+    Write-NoticeBundle $NoticeDir (Join-Path $DistRoot "licenses\THIRD-PARTY-NOTICES.txt")
+    Copy-Item -LiteralPath (Join-Path $DistRoot "LICENSE") -Destination $SymbolsRoot
+    Copy-Item -LiteralPath (Join-Path $DistRoot "licenses\THIRD-PARTY-NOTICES.txt") -Destination $SymbolsRoot
     $BuildInfo = @("UTC build time: $([DateTime]::UtcNow.ToString('o'))", "Target: $Target", "Command: cargo build --release --frozen --target $Target --target-dir <output>/build", "MSYS2 prefix: $MsysRoot", "Windows: $([Environment]::OSVersion.VersionString)")
     $BuildInfo += Invoke-Checked $Rustc @("--version", "--verbose")
     $BuildInfo += Invoke-Checked $Cargo @("--version")
@@ -290,6 +364,8 @@ try {
     $BuildInfo += "RUSTFLAGS: $env:RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS: $env:CARGO_ENCODED_RUSTFLAGS"
     $BuildInfo += $PackageVersions
     $BuildInfo += "ZIP timestamps: staged entries outside 1980-01-01 through 2107-12-31 23:59:58 use 2000-01-01; file bytes are unchanged."
+    $BuildInfo += "Runtime stickies.exe: strip --strip-all; unstripped executable is in the separate symbols ZIP."
+    $BuildInfo += "Stock Adwaita icons: $($Icons.Count) images in share/stickies-icons.gresource; cursors remain external."
     $BuildInfo += "Generated native resources; package ownership comes from bundled loader DLLs, icon theme files and the schema inputs below:"
     $BuildInfo += @($GeneratedNativeFiles | Sort-Object | ForEach-Object { "/ucrt64/" + $_.Substring($MsysRoot.Length + 1).Replace('\', '/') })
     $BuildInfo += "GSettings compiler inputs, SHA-256 and path relative to the MSYS2 prefix:"
@@ -300,18 +376,23 @@ try {
 
     $SourceZip = Join-Path $OutputDirectory "stickies-windows-x86_64-source.zip"
     $BinaryZip = Join-Path $OutputDirectory "stickies-windows-x86_64.zip"
+    $SymbolsZip = Join-Path $OutputDirectory "stickies-windows-x86_64-symbols.zip"
     Set-ZipTimestamps $SourceRoot
     Compress-Archive -Path "$SourceRoot\*" -DestinationPath $SourceZip
     # Record the source archive checksum in the binary bundle before hashing it.
     $SourceChecksum = "{0}  {1}" -f (Get-FileHash -LiteralPath $SourceZip -Algorithm SHA256).Hash.ToLowerInvariant(), (Split-Path $SourceZip -Leaf)
     Write-Text (Join-Path $DistRoot "SOURCE-ARCHIVE.sha256") @($SourceChecksum)
+    Copy-Item -LiteralPath (Join-Path $DistRoot "SOURCE-ARCHIVE.sha256") -Destination $SymbolsRoot
     Write-Manifest $DistRoot (Join-Path $OutputDirectory "BUNDLE-MANIFEST.sha256")
     Copy-Item -LiteralPath (Join-Path $OutputDirectory "BUNDLE-MANIFEST.sha256") -Destination $DistRoot
     Set-ZipTimestamps $DistRoot
     Compress-Archive -Path "$DistRoot\*" -DestinationPath $BinaryZip
+    Set-ZipTimestamps $SymbolsRoot
+    Compress-Archive -Path "$SymbolsRoot\*" -DestinationPath $SymbolsZip
     $BinaryChecksum = "{0}  {1}" -f (Get-FileHash -LiteralPath $BinaryZip -Algorithm SHA256).Hash.ToLowerInvariant(), (Split-Path $BinaryZip -Leaf)
-    Write-Text (Join-Path $OutputDirectory "SHA256SUMS") @($SourceChecksum, $BinaryChecksum)
-    Write-Host "Distribute both ZIPs and SHA256SUMS together from $OutputDirectory"
+    $SymbolsChecksum = "{0}  {1}" -f (Get-FileHash -LiteralPath $SymbolsZip -Algorithm SHA256).Hash.ToLowerInvariant(), (Split-Path $SymbolsZip -Leaf)
+    Write-Text (Join-Path $OutputDirectory "SHA256SUMS") @($SourceChecksum, $BinaryChecksum, $SymbolsChecksum)
+    Write-Host "Distribute runtime/source ZIPs and SHA256SUMS; retain the optional symbols ZIP from $OutputDirectory"
 } finally {
     Pop-Location
     foreach ($Name in $SavedEnvironment.Keys) {

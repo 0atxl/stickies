@@ -43,12 +43,8 @@ package() {
     install -Dm644 data/dev.stickies.Stickies.png \
         "$pkgdir/usr/share/pixmaps/dev.stickies.Stickies.png"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/stickies/LICENSE"
-    local notice
-    for notice in assets/fonts/*-LICENSE.txt; do
-        install -Dm644 "$notice" "$pkgdir/usr/share/licenses/stickies/fonts/${notice##*/}"
-    done
-    install -d "$pkgdir/usr/share/licenses/stickies/rust"
-    cp -r packaging/notices/. "$pkgdir/usr/share/licenses/stickies/rust/"
+    install -Dm644 packaging/THIRD-PARTY-NOTICES.txt \
+        "$pkgdir/usr/share/licenses/stickies/THIRD-PARTY-NOTICES.txt"
     install -Dm644 SOURCE-INFO.txt "$pkgdir/usr/share/doc/stickies/SOURCE-INFO.txt"
     install -Dm644 packaging/README.md "$pkgdir/usr/share/doc/stickies/packaging.md"
 }
