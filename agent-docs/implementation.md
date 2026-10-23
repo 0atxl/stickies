@@ -1,6 +1,6 @@
 # Stickies finishing roadmap
 
-[current-milestone.md](current-milestone.md) defines current authorization. The owner accepts the implemented UI/UX. This roadmap tracks reliability and release work, without new UI design or extra controls.
+[current-milestone.md](current-milestone.md) defines current authorization. This roadmap tracks reliability and release work. The owner-approved October 22 optional Playful edges and Classic tab refinement are the only reopened design scope; its implementation and verification limits are recorded in the current milestone.
 
 ## Product scope
 

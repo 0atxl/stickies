@@ -172,6 +172,8 @@ fn decorate(view: &gtk::TextView, snapshot: &gtk::Snapshot) {
     let em = (ascent + descent).max(1.);
     // Pango's strike/underline thickness can round below a pixel in handwriting fonts.
     let thickness = (em * 0.065).clamp(1.25, 3.);
+    let clean = std::iter::successors(view.parent(), |widget| widget.parent())
+        .any(|widget| widget.has_css_class("clean-note"));
     while !at.is_end() {
         if at.starts_line() && view.line_yrange(&at).0 > visible.y() + visible.height() {
             break;
@@ -210,6 +212,11 @@ fn decorate(view: &gtk::TextView, snapshot: &gtk::Snapshot) {
                 snapshot.append_color(&color, &gtk::graphene::Rect::new(x, y, width, thickness));
             }
             if struck {
+                let thickness = if completed_here && clean {
+                    (em * 0.045).clamp(1., 1.5)
+                } else {
+                    thickness
+                };
                 let y = baseline - ascent * 0.36;
                 snapshot.append_color(&color, &gtk::graphene::Rect::new(x, y, width, thickness));
             }

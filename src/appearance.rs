@@ -200,9 +200,12 @@ pub fn apply(provider: &gtk::CssProvider, config: &Config) {
         .management.playful .inline-check {{ min-height: 0; min-width: 0; padding: 0; margin: 0 8px 0 0; }}
         .individual.playful .inline-check check,
         .management.playful .inline-check check {{ min-width: 14px; min-height: 14px; padding: 0; margin: 0; -gtk-icon-size: 14px; border: 1.5px solid currentColor; border-radius: 3px; }}
+        .individual.clean-note .inline-check check, .management.clean-note .inline-check check {{ min-width: 16px; min-height: 16px; -gtk-icon-size: 16px; border-width: 1px; }}
         .inline-check {{ margin-right: 8px; color: inherit; }}
         .inline-check check {{ color: inherit; min-width: 16px; min-height: 16px; border-radius: 3px; border: 1px solid currentColor; background: transparent; box-shadow: none; }}
         .inline-check check:checked {{ background: #30353b; border-color: #30353b; color: white; }}
+        .individual.clean-note .inline-check check:checked,
+        .management.clean-note .inline-check check:checked {{ background: transparent; border-color: currentColor; color: alpha(#202923, .55); }}
         .individual.minimal-dark .inline-check check:checked, .management.minimal-dark .inline-check check:checked {{ background: #edf1f5; border-color: #edf1f5; color: #23262b; }}
 
         .individual.minimal .note-controls {{ --note-ink: #292f36; --rail-line: #cdd4db; --rail-selected: #dceaff; }}
@@ -272,78 +275,47 @@ pub fn paper_background(
     let area = gtk::DrawingArea::new();
     area.set_draw_func(move |_, cr, width, height| {
         let config = config.borrow();
-        let inset = if config.theme == Theme::Playful {
-            20
-        } else {
-            16
-        };
+        let wavy = config.theme == Theme::Playful && !config.clean_playful();
+        let inset = if wavy { 20 } else { 16 };
         let w = f64::from(width - inset).max(1.);
         let h = f64::from(height - inset).max(1.);
         cr.translate(8., 8.);
-        let shape = if config.theme == Theme::Minimal {
-            Shape::Square
-        } else {
-            config.shape
-        };
-        let radius = match config.theme {
-            Theme::Minimal => (18., 18.),
-            Theme::Paper => (18., if shape == Shape::Square { 18. } else { 0. }),
-            Theme::Playful => (18., 18.),
-        };
-        for offset in (1..=if config.theme == Theme::Playful { 0 } else { 5 }).rev() {
-            let _ = cr.save();
-            cr.translate(0., f64::from(offset));
-            sheet_path(
-                cr,
-                w,
-                h,
-                shape,
-                radius,
-                config.theme == Theme::Playful,
-                seed.get(),
-            );
-            cr.set_source_rgba(
-                0.16,
-                0.18,
-                0.22,
-                if config.theme == Theme::Paper {
-                    0.032
-                } else if config.theme == Theme::Minimal && !dark(&config) {
-                    0.025
-                } else if config.theme == Theme::Minimal && dark(&config) {
-                    0.045
-                } else {
-                    0.018
-                },
-            );
-            let _ = cr.fill();
-            let _ = cr.restore();
-        }
-        if config.theme == Theme::Playful {
+        if config.clean_playful() {
+            // A spread shadow stays inside the existing transparent drawing margin.
+            for spread in (1..=6).rev() {
+                let spread = f64::from(spread);
+                let _ = cr.save();
+                cr.translate(-spread / 2., 2. - spread / 2.);
+                note_outline(cr, w + spread, h + spread, &config, seed.get());
+                cr.set_source_rgba(0.12, 0.17, 0.14, 0.018);
+                let _ = cr.fill();
+                let _ = cr.restore();
+            }
+        } else if wavy {
             let _ = cr.save();
             cr.translate(6., 7.);
-            sheet_path(
-                cr,
-                w,
-                h,
-                shape,
-                radius,
-                config.theme == Theme::Playful,
-                seed.get(),
-            );
+            note_outline(cr, w, h, &config, seed.get());
             cr.set_source_rgba(0.12, 0.16, 0.13, 0.45);
             let _ = cr.fill();
             let _ = cr.restore();
+        } else {
+            for offset in (1..=5).rev() {
+                let _ = cr.save();
+                cr.translate(0., f64::from(offset));
+                note_outline(cr, w, h, &config, seed.get());
+                let alpha = if config.theme == Theme::Paper {
+                    0.032
+                } else if dark(&config) {
+                    0.045
+                } else {
+                    0.025
+                };
+                cr.set_source_rgba(0.16, 0.18, 0.22, alpha);
+                let _ = cr.fill();
+                let _ = cr.restore();
+            }
         }
-        sheet_path(
-            cr,
-            w,
-            h,
-            shape,
-            radius,
-            config.theme == Theme::Playful,
-            seed.get(),
-        );
+        note_outline(cr, w, h, &config, seed.get());
         let (r, g, b, a) = match config.theme {
             Theme::Minimal if dark(&config) => (39. / 255., 44. / 255., 50. / 255., 1.),
             Theme::Minimal => (1., 1., 1., 1.),
@@ -353,9 +325,25 @@ pub fn paper_background(
                 (r, g, b, 1.)
             }
         };
-        cr.set_source_rgba(r, g, b, a);
+        if config.clean_playful() {
+            let fill = gtk::cairo::LinearGradient::new(0., 0., w * 0.35, h);
+            fill.add_color_stop_rgb(
+                0.,
+                r + (1. - r) * 0.20,
+                g + (1. - g) * 0.20,
+                b + (1. - b) * 0.20,
+            );
+            fill.add_color_stop_rgb(0.65, r, g, b);
+            fill.add_color_stop_rgb(1., r * 0.985, g * 0.985, b * 0.985);
+            let _ = cr.set_source(&fill);
+        } else {
+            cr.set_source_rgba(r, g, b, a);
+        }
         let _ = cr.fill_preserve();
-        if config.theme == Theme::Playful {
+        if config.clean_playful() {
+            cr.set_source_rgba(0.12, 0.16, 0.13, 0.12);
+            cr.set_line_width(0.8);
+        } else if wavy {
             cr.set_source_rgb(0.10, 0.12, 0.11);
             cr.set_line_width(3.2);
         } else if config.theme == Theme::Minimal && dark(&config) {
@@ -425,6 +413,40 @@ pub fn paper_background(
         }
     });
     area
+}
+
+/// Keep the note and its docked pointer clipping on the same outline.
+pub(super) fn note_outline(cr: &gtk::cairo::Context, w: f64, h: f64, config: &Config, seed: u64) {
+    if config.clean_playful() {
+        let radius = 22_f64.min(w / 4.).min(h / 4.);
+        let quarter = std::f64::consts::FRAC_PI_2;
+        cr.new_path();
+        cr.arc(w - radius, radius, radius, -quarter, 0.);
+        cr.arc(w - radius, h - radius, radius, 0., quarter);
+        cr.arc(radius, h - radius, radius, quarter, 2. * quarter);
+        cr.arc(radius, radius, radius, 2. * quarter, 3. * quarter);
+        cr.close_path();
+        return;
+    }
+    let shape = if config.theme == Theme::Minimal {
+        Shape::Square
+    } else {
+        config.shape
+    };
+    let bottom = if config.theme == Theme::Paper && shape != Shape::Square {
+        0.
+    } else {
+        18.
+    };
+    sheet_path(
+        cr,
+        w,
+        h,
+        shape,
+        (18., bottom),
+        config.theme == Theme::Playful,
+        seed,
+    );
 }
 
 pub(super) fn sheet_path(

@@ -374,6 +374,11 @@ impl ManagerUi {
         } else {
             self.window.remove_css_class("playful");
         }
+        if defaults.clean_playful() {
+            self.window.add_css_class("clean-note");
+        } else {
+            self.window.remove_css_class("clean-note");
+        }
         let session = self.session.borrow().clone();
         let style = session.as_ref().map(|s| s.style()).unwrap_or_else(|| {
             self.selected

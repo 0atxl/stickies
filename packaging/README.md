@@ -4,12 +4,12 @@ Linux and Windows share `main`. Windows uses the [Windows ZIP guide](windows.md)
 
 ## Public release channels
 
-The selected release is `v0.10`, with package version `0.10.0`. GitHub hosts Windows and Arch x86_64 downloads with matching sources, inventories and checksums. AUR `stickies` builds the source archive; `stickies-bin` installs the same prebuilt Arch package. crates.io distributes the application source for Cargo installation with native build prerequisites. The repository README contains user installation steps.
+The selected release is `v0.10.1`, with package version `0.10.1`. GitHub hosts Windows and Arch x86_64 downloads with matching sources, inventories and checksums. AUR `stickies` builds the source archive; `stickies-bin` installs the same prebuilt Arch package. crates.io distributes the application source for Cargo installation with native build prerequisites. The repository README contains user installation steps.
 
 After downloading and verifying the release candidate's Arch Actions artifact, prepare the two AUR submissions with:
 
 ```bash
-python scripts/prepare-aur.py --artifacts /path/to/arch-artifact --tag v0.10 --output /path/to/new-aur-directory
+python scripts/prepare-aur.py --artifacts /path/to/arch-artifact --tag v0.10.1 --output /path/to/new-aur-directory
 ```
 
 The helper verifies the artifact checksums and source recipe hash, writes GitHub release URLs and generates `.SRCINFO` with `makepkg --printsrcinfo`. It never builds or publishes. Verify the source recipe and binary repackaging before submission, then check the public asset URLs after GitHub publication and before pushing AUR. Keep AUR recipes and `.SRCINFO` together; do not upload binaries to AUR.
@@ -71,7 +71,7 @@ python3 packaging/prepare-release.py
 
 The script uses cached Cargo metadata only. On a new builder, first fetch the locked dependencies with `cargo fetch --locked --target x86_64-unknown-linux-gnu` when network use is authorized. Preparation itself neither downloads nor compiles anything. An existing output directory is refused; use `--output /path/to/a/new/directory` to preserve older inputs.
 
-The default output, `target/packaging/`, contains the source archive, generated `PKGBUILD`, `SOURCE-INFO.txt`, `PREPARATION.txt` and `SHA256SUMS`. The source version comes from Cargo.toml, currently `0.10.0`; it does not select a release version/tag. The archive contains current bytes of tracked application inputs, the named packaging files and generated notices. `SOURCE-INFO.txt` records the Git baseline and explicitly identifies a working-tree snapshot. `SOURCE-MANIFEST.sha256` inside the archive identifies those bytes. Unrelated local files, build outputs, agent material and saved notes are excluded.
+The default output, `target/packaging/`, contains the source archive, generated `PKGBUILD`, `SOURCE-INFO.txt`, `PREPARATION.txt` and `SHA256SUMS`. The source version comes from Cargo.toml, currently `0.10.1`; it does not select a release version/tag. The archive contains current bytes of tracked application inputs, the named packaging files and generated notices. `SOURCE-INFO.txt` records the Git baseline and explicitly identifies a working-tree snapshot. `SOURCE-MANIFEST.sha256` inside the archive identifies those bytes. Unrelated local files, build outputs, agent material and saved notes are excluded.
 
 Source archive paths, order, timestamps, ownership and modes are normalized. `SOURCE_DATE_EPOCH` defaults to the Git baseline's commit time and is recorded. Reuse it when recreating the same source snapshot. Archive normalization and Cargo.lock do not establish bit-for-bit binary reproducibility.
 
@@ -118,7 +118,7 @@ Launch at login stays optional and app-managed. On valid startup, Stickies creat
 
 ## Remaining verification
 
-The application artwork is approved and included; release identity is v0.10. Focused downloaded-candidate installation, launch, same-version reinstall and removal checks passed. Desktop icon lookup, actual login and older-version upgrade coverage remain incomplete. Keep the separate reliability/Wayland gaps in the current project record; packaging does not resolve them. The [October 19 source maintenance pass](../agent-docs/manual-testing.md#october-19-gtk-deprecation-maintenance) reports zero application warnings on Linux, down from the integrated 35. Existing packages predate those replacements; no package was regenerated or verified in that pass.
+The application artwork is approved and included; release identity is v0.10.1. Focused downloaded-candidate installation, launch, same-version reinstall and removal checks passed. Desktop icon lookup, actual login and older-version upgrade coverage remain incomplete. Keep the separate reliability/Wayland gaps in the current project record; packaging does not resolve them. The [October 19 source maintenance pass](../agent-docs/manual-testing.md#october-19-gtk-deprecation-maintenance) reports zero application warnings on Linux, down from the integrated 35. Existing packages predate those replacements; no package was regenerated or verified in that pass.
 
 The smallest later, separately authorized installation check is:
 

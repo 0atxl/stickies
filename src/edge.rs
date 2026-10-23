@@ -113,7 +113,7 @@ const HEIGHT: i32 = 500;
 const TAB_GAP: i32 = -8;
 fn tab_gap(config: &Config) -> i32 {
     match config.tab_layout {
-        config::TabLayout::Classic => 4,
+        config::TabLayout::Classic => 8,
         config::TabLayout::Stacked => TAB_GAP,
     }
 }
@@ -983,6 +983,9 @@ impl Ui {
                 self.edge.strip_motion.value(),
                 &hovers,
             );
+        }
+        if self.config.borrow().tab_layout == config::TabLayout::Classic {
+            self.edge.pointer.queue_draw();
         }
     }
     fn finish_hover_motion(self: &Rc<Self>) {
@@ -1926,15 +1929,27 @@ impl Ui {
         // Measure the upright titles, but cap their contribution so a long title
         // cannot widen the whole strip. Both orientations use a slim 24px depth.
         let tab_width = if horizontal {
+            let weight = if config.tab_layout == config::TabLayout::Classic {
+                "Medium"
+            } else {
+                "Semi-Bold"
+            };
             let font_desc =
-                gtk::pango::FontDescription::from_string(&format!("Inter Semi-Bold {}px", s(11)));
+                gtk::pango::FontDescription::from_string(&format!("Inter {weight} {}px", s(11)));
             let title_width = notes
                 .iter()
                 .map(|note| {
-                    let layout = self
-                        .edge
-                        .tabs
-                        .create_pango_layout(Some(&note.title.to_uppercase()));
+                    let title = if note.title.trim().is_empty() {
+                        "Untitled note"
+                    } else {
+                        &note.title
+                    };
+                    let title = if config.tab_layout == config::TabLayout::Classic {
+                        title.to_owned()
+                    } else {
+                        note.title.to_uppercase()
+                    };
+                    let layout = self.edge.tabs.create_pango_layout(Some(&title));
                     layout.set_font_description(Some(&font_desc));
                     layout.pixel_size().0
                 })
@@ -1971,7 +1986,12 @@ impl Ui {
                 + self.edge.tabs.spacing()
                 + 3 * depth
                 + 2 * motion::HOVER_PAD;
-            ((screen_height - reserved) / count).clamp(depth, s(80))
+            let maximum = if config.tab_layout == config::TabLayout::Classic {
+                s(104)
+            } else {
+                s(80)
+            };
+            ((screen_height - reserved) / count).clamp(depth, maximum)
         };
         let fixed = glib::Object::new::<TabLayout>().upcast::<gtk::Fixed>();
         fixed
@@ -2007,7 +2027,12 @@ impl Ui {
                 &note.title
             };
             tab.update_property(&[gtk::accessible::Property::Label(title)]);
-            let label = gtk::Label::new(Some(&title.to_uppercase()));
+            let label =
+                gtk::Label::new(Some(&if config.tab_layout == config::TabLayout::Classic {
+                    title.to_owned()
+                } else {
+                    title.to_uppercase()
+                }));
             label.add_css_class("tab-title");
             label.set_ellipsize(gtk::pango::EllipsizeMode::End);
             label.set_width_chars(1);
@@ -3110,35 +3135,22 @@ impl Ui {
         let y = bounds.y() as f64;
         let w = bounds.width() as f64;
         let h = bounds.height() as f64;
-        // Overlap the base far enough to cover even the inward Playful waves.
+        // Overlap the base far enough to cover the sheet's inset.
         // Only the portion outside the actual sheet outline gets an arrow stroke.
         let inset = if session.is_some() { 20. } else { 1. };
         let note_path = session.as_ref().and_then(|session| {
-            let shape = if config.theme == config::Theme::Minimal {
-                config::Shape::Square
-            } else {
-                config.shape
-            };
-            let bottom_radius =
-                if config.theme == config::Theme::Paper && shape != config::Shape::Square {
-                    0.
-                } else {
-                    18.
-                };
-            let padding = if config.theme == config::Theme::Playful {
+            let padding = if config.theme == config::Theme::Playful && !config.clean_playful() {
                 20.
             } else {
                 16.
             };
             let _ = cr.save();
             cr.translate(x + 8., y + 8.);
-            appearance::sheet_path(
+            appearance::note_outline(
                 cr,
                 (w - padding).max(1.),
                 (h - padding).max(1.),
-                shape,
-                (18., bottom_radius),
-                config.theme == config::Theme::Playful,
+                &config,
                 session.id().value(),
             );
             let _ = cr.restore();
@@ -3180,6 +3192,158 @@ impl Ui {
         } else {
             (248. / 255., 247. / 255., 243. / 255.)
         };
+        // Use the tab's placement and paint transform, not its last allocation.
+        // The strip and note have separate frame clocks, so a rebuilt strip can
+        // still have stale allocated bounds when this surface draws.
+        if config.tab_layout == config::TabLayout::Classic
+            && config.theme == config::Theme::Playful
+            && let Some(session) = session.as_ref()
+            && let Some(fixed) = self.edge.tabs.first_child().and_downcast::<TabLayout>()
+        {
+            let mut child = fixed.first_child();
+            while let Some(tab) = child {
+                child = tab.next_sibling();
+                if tab.widget_name() != format!("note-{:?}", session.id()) {
+                    continue;
+                }
+                if let Some(transform) = fixed.child_transform(&tab)
+                    && tab.width_request() > 0
+                    && tab.height_request() > 0
+                {
+                    let local = transform.transform_bounds(&gtk::graphene::Rect::new(
+                        0.,
+                        0.,
+                        tab.width_request() as f32,
+                        tab.height_request() as f32,
+                    ));
+                    let tab = gtk::graphene::Rect::new(
+                        local.x() + self.edge.tabs.margin_start() as f32,
+                        local.y() + self.edge.tabs.margin_top() as f32,
+                        local.width(),
+                        local.height(),
+                    );
+                    // Both overlays use the same monitor-local origin.
+                    let far_inset =
+                        if config.theme == config::Theme::Playful && !config.clean_playful() {
+                            12.
+                        } else {
+                            8.
+                        };
+                    let overlap =
+                        if config.theme == config::Theme::Playful && !config.clean_playful() {
+                            6.
+                        } else {
+                            2.
+                        };
+                    let (from, to, tab_center, tab_length) = match edge {
+                        ScreenEdge::Right => (
+                            x + w - far_inset - overlap,
+                            f64::from(tab.x()) + 1.,
+                            f64::from(tab.y() + tab.height() / 2.),
+                            f64::from(tab.height()),
+                        ),
+                        ScreenEdge::Left => (
+                            x + 8. + overlap,
+                            f64::from(tab.x() + tab.width()) - 1.,
+                            f64::from(tab.y() + tab.height() / 2.),
+                            f64::from(tab.height()),
+                        ),
+                        ScreenEdge::Bottom => (
+                            y + h - far_inset - overlap,
+                            f64::from(tab.y()) + 1.,
+                            f64::from(tab.x() + tab.width() / 2.),
+                            f64::from(tab.width()),
+                        ),
+                        ScreenEdge::Top => (
+                            y + 8. + overlap,
+                            f64::from(tab.y() + tab.height()) - 1.,
+                            f64::from(tab.x() + tab.width() / 2.),
+                            f64::from(tab.width()),
+                        ),
+                    };
+                    let direction = if matches!(edge, ScreenEdge::Right | ScreenEdge::Bottom) {
+                        1.
+                    } else {
+                        -1.
+                    };
+                    let distance = (to - from) * direction;
+                    if distance > 0. {
+                        let scale = crate::edge_surface::ui_scale();
+                        let note_half = 10. * scale;
+                        let tab_half =
+                            (18. * scale).min((tab_length / 2. - 12. * scale).max(6. * scale));
+                        let point = |across: f64, along: f64| {
+                            if horizontal {
+                                (along, from + across * direction)
+                            } else {
+                                (from + across * direction, along)
+                            }
+                        };
+                        let top = [
+                            point(0., center - note_half),
+                            point(distance * 0.45, center - note_half),
+                            point(distance * 0.55, tab_center - tab_half),
+                            point(distance, tab_center - tab_half),
+                        ];
+                        let bottom = [
+                            point(distance, tab_center + tab_half),
+                            point(distance * 0.55, tab_center + tab_half),
+                            point(distance * 0.45, center + note_half),
+                            point(0., center + note_half),
+                        ];
+                        cr.new_path();
+                        cr.move_to(top[0].0, top[0].1);
+                        cr.curve_to(top[1].0, top[1].1, top[2].0, top[2].1, top[3].0, top[3].1);
+                        cr.line_to(bottom[0].0, bottom[0].1);
+                        cr.curve_to(
+                            bottom[1].0,
+                            bottom[1].1,
+                            bottom[2].0,
+                            bottom[2].1,
+                            bottom[3].0,
+                            bottom[3].1,
+                        );
+                        cr.close_path();
+                        let tab_color = if config.theme == config::Theme::Minimal {
+                            (r, g, bg)
+                        } else {
+                            session.color().fill()
+                        };
+                        let start = point(0., center);
+                        let end = point(distance, tab_center);
+                        let fill = gtk::cairo::LinearGradient::new(start.0, start.1, end.0, end.1);
+                        fill.add_color_stop_rgb(0., r, g, bg);
+                        fill.add_color_stop_rgb(1., tab_color.0, tab_color.1, tab_color.2);
+                        let _ = cr.set_source(&fill);
+                        let _ = cr.fill();
+                        // Stroke only the two curved sides, never a cap across
+                        // either join. Clip the stroke out of the paper itself.
+                        let _ = cr.save();
+                        if let Some(note_path) = note_path.as_ref() {
+                            cr.new_path();
+                            let (screen_width, screen_height) = self.note_limits();
+                            cr.rectangle(0., 0., f64::from(screen_width), f64::from(screen_height));
+                            cr.append_path(note_path);
+                            cr.set_fill_rule(gtk::cairo::FillRule::EvenOdd);
+                            cr.clip();
+                        }
+                        cr.new_path();
+                        for side in [top, bottom] {
+                            cr.move_to(side[0].0, side[0].1);
+                            cr.curve_to(
+                                side[1].0, side[1].1, side[2].0, side[2].1, side[3].0, side[3].1,
+                            );
+                        }
+                        cr.set_source_rgba(0.18, 0.23, 0.20, 0.10);
+                        cr.set_line_width(0.7);
+                        let _ = cr.stroke();
+                        let _ = cr.restore();
+                        return;
+                    }
+                }
+                break;
+            }
+        }
         cr.new_path();
         cr.move_to(a.0, a.1);
         cr.line_to(tip.0, tip.1);
@@ -3197,7 +3361,10 @@ impl Ui {
             cr.append_path(&arrow_path);
         }
         cr.set_line_join(gtk::cairo::LineJoin::Round);
-        if session.is_some() && config.theme == config::Theme::Playful {
+        if session.is_some() && config.clean_playful() {
+            cr.set_source_rgba(0.12, 0.16, 0.13, 0.12);
+            cr.set_line_width(0.8);
+        } else if session.is_some() && config.theme == config::Theme::Playful {
             cr.set_source_rgb(0.10, 0.12, 0.11);
             cr.set_line_width(3.2);
         } else if config.theme == config::Theme::Minimal && appearance::dark(&config) {

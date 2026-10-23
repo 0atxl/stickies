@@ -1,7 +1,7 @@
 use crate::{
     app::NoteColor,
     appearance,
-    config::{Appearance, Config, MarkerStyle, ScreenEdge, Shape, TabLayout, Theme},
+    config::{Appearance, Config, MarkerStyle, PlayfulEdges, ScreenEdge, Shape, TabLayout, Theme},
 };
 use gtk::prelude::*;
 use std::{
@@ -39,6 +39,8 @@ struct AppearanceControls {
     themes: Vec<(gtk::ToggleButton, Theme)>,
     mode: gtk::Box,
     modes: Vec<gtk::ToggleButton>,
+    playful_row: gtk::Box,
+    playful_edges: Vec<gtk::ToggleButton>,
     motion: gtk::Switch,
     samples: Vec<(Rc<RefCell<Config>>, gtk::DrawingArea)>,
 }
@@ -50,6 +52,14 @@ impl AppearanceControls {
             button.set_active(config.theme == *theme);
         }
         self.mode.set_visible(config.theme == Theme::Minimal);
+        self.playful_row.set_visible(config.theme == Theme::Playful);
+        for (button, edges) in self
+            .playful_edges
+            .iter()
+            .zip([PlayfulEdges::Wavy, PlayfulEdges::Clean])
+        {
+            button.set_active(config.playful_edges == edges);
+        }
         for (index, button) in self.modes.iter().enumerate() {
             button.set_active(config.appearance as usize == index);
         }
@@ -57,6 +67,7 @@ impl AppearanceControls {
         for (sample, drawing) in &self.samples {
             let mut sample = sample.borrow_mut();
             sample.appearance = config.appearance;
+            sample.playful_edges = config.playful_edges;
             drawing.queue_draw();
         }
         self.syncing.set(was_syncing);
@@ -329,6 +340,11 @@ pub fn build(
     section(&mode, "Mode", &modes.0);
     mode.set_visible(config.theme == Theme::Minimal);
     root.append(&mode);
+    let playful_row = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    let playful_edges = choices(&["Wavy", "Clean"], config.playful_edges as usize);
+    section(&playful_row, "Note edges", &playful_edges.0);
+    playful_row.set_visible(config.theme == Theme::Playful);
+    root.append(&playful_row);
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     let label = gtk::Label::new(Some("Reduce motion"));
     label.set_xalign(0.);
@@ -345,6 +361,8 @@ pub fn build(
         themes: theme_buttons,
         mode,
         modes: modes.1,
+        playful_row,
+        playful_edges: playful_edges.1,
         motion: switch,
         samples,
     });
@@ -387,6 +405,20 @@ pub fn build(
                 let mut config = controls.current.borrow().clone();
                 config.appearance =
                     [Appearance::System, Appearance::Light, Appearance::Dark][index];
+                update(config);
+            }
+        });
+    }
+    for (index, button) in appearance.playful_edges.iter().enumerate() {
+        let weak = Rc::downgrade(&appearance);
+        let update = update.clone();
+        button.connect_toggled(move |button| {
+            if let Some(controls) = weak.upgrade()
+                && button.is_active()
+                && !controls.syncing.get()
+            {
+                let mut config = controls.current.borrow().clone();
+                config.playful_edges = [PlayfulEdges::Wavy, PlayfulEdges::Clean][index];
                 update(config);
             }
         });

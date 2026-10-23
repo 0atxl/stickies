@@ -636,6 +636,8 @@ pub fn style_checklists(buffer: &gtk::TextBuffer, config: &crate::config::Config
     let color = if config.theme == crate::config::Theme::Minimal && crate::appearance::dark(config)
     {
         gtk::gdk::RGBA::new(0.72, 0.73, 0.74, 1.)
+    } else if config.clean_playful() {
+        gtk::gdk::RGBA::new(0.36, 0.42, 0.38, 1.)
     } else {
         gtk::gdk::RGBA::new(0.37, 0.35, 0.32, 1.)
     };

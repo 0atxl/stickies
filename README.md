@@ -53,11 +53,11 @@ pkg-config --modversion gtk4-layer-shell-0
 pkg-config --modversion sqlite3
 ```
 
-## Install v0.10
+## Install v0.10.1
 
-Package version is `0.10.0`; the GitHub release tag is `v0.10`.
+Package version is `0.10.1`; the GitHub release tag is `v0.10.1`.
 
-- [GitHub downloads](https://github.com/0atxl/stickies/releases/tag/v0.10): Windows x86_64 ZIP and Arch Linux x86_64 package, matching sources, notices and checksums.
+- [GitHub downloads](https://github.com/0atxl/stickies/releases/tag/v0.10.1): Windows x86_64 ZIP and Arch Linux x86_64 package, matching sources, notices and checksums.
 - [AUR stickies](https://aur.archlinux.org/packages/stickies): build from source.
 - [AUR stickies-bin](https://aur.archlinux.org/packages/stickies-bin): install the prebuilt Arch download.
 - [crates.io](https://crates.io/crates/stickies): install from source with Cargo and the native dependencies below.
@@ -67,7 +67,7 @@ On Windows, extract the whole ZIP and launch `bin\stickies.exe`. Rust and MSYS2 
 On an up-to-date Arch Linux x86_64 system, install the downloaded native package:
 
 ```bash
-sudo pacman -U ./stickies-0.10.0-1-x86_64.pkg.tar.zst
+sudo pacman -U ./stickies-0.10.1-1-x86_64.pkg.tar.zst
 ```
 
 The Arch binary does not target Ubuntu or Kali. The Linux edge requires a Wayland compositor with Layer Shell v4+. Package removal preserves user notes and settings. Disable Launch at login before removing the application if you also want its optional user startup entry removed.
@@ -76,10 +76,10 @@ For Cargo on Arch, install the build prerequisites, then compile the published s
 
 ```bash
 sudo pacman -S --needed base-devel rust pkgconf gtk4 libadwaita gtk4-layer-shell sqlite librsvg
-cargo install stickies --version 0.10.0 --locked
+cargo install stickies --version 0.10.1 --locked
 ```
 
-Cargo installs only the executable. To add the Linux desktop launcher and icon, download the matching `stickies-0.10.0-src.tar.gz` from the release, extract it, and run these commands from its source directory:
+Cargo installs only the executable. To add the Linux desktop launcher and icon, download the matching `stickies-0.10.1-src.tar.gz` from the release, extract it, and run these commands from its source directory:
 
 ```bash
 install -Dm644 data/dev.stickies.Stickies.desktop "$HOME/.local/share/applications/dev.stickies.Stickies.desktop"
@@ -88,7 +88,7 @@ install -Dm644 data/dev.stickies.Stickies.png "$HOME/.local/share/icons/dev.stic
 
 Your graphical session must have Cargo's binary directory, normally `~/.cargo/bin`, on PATH for the launcher to find `stickies`. Cargo builds on Windows require the GNU target and MSYS2 native build environment described in the Windows guide; the ZIP is the ready-to-run Windows distribution.
 
-Release files are unsigned. Verify `SHA256SUMS` before installation; checksums alone do not authenticate the publisher. Matching source and original notices accompany the binaries. See the [release notes](https://github.com/0atxl/stickies/releases/tag/v0.10) for known limitations.
+Release files are unsigned. Verify `SHA256SUMS` before installation; checksums alone do not authenticate the publisher. Matching source and original notices accompany the binaries. See the [release notes](https://github.com/0atxl/stickies/releases/tag/v0.10.1) for known limitations.
 
 The [Packages workflow](.github/workflows/packages.yml) also produces development artifacts from pushes, pull requests and manual runs. Those Actions downloads expire after 30 days. Public releases are separate, persistent downloads.
 

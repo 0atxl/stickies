@@ -1,8 +1,40 @@
 # Current milestone
 
-The owner accepts the current UI/UX. Design is complete; the active milestone is reliability, Wayland verification and release finishing for a simple sticky-notes app. Verification does not reopen settled design choices.
+The active milestone is reliability, Wayland verification and release finishing for a simple sticky-notes app. The owner explicitly approved optional Playful edge styling and Classic tab refinements on October 22, as described below. Other design choices remain settled.
 
 [SPEC.md](SPEC.md) describes current behavior. [implementation.md](implementation.md) owns remaining roadmap work. The [detailed verification record](manual-testing.md) contains results, fixtures, evidence and the remaining checklist. Further test execution requires separate authorization under [AGENTS.md](../AGENTS.md).
+
+## v0.10.1 publication, October 23
+
+The owner authorized committing and pushing the accumulated Playful/Classic redesign and title/connector fixes, attaching fresh packages to a public GitHub release, and updating both AUR packages and crates.io. The selected patch version is `0.10.1`, with GitHub tag `v0.10.1`. The original footer, Wavy default and Paper/Minimal arrow remain part of the approved design.
+
+This release permits static checks, compilation, package creation, artifact/checksum inspection and publication. No tests or app sessions are authorized for this task. The release commit uses `[skip ci]`; the separate Packages workflow is dispatched manually and builds with tests disabled. Current visual/runtime acceptance remains limited to owner observations and the earlier records below. Publication results will be recorded after completion.
+
+## Title visibility and connector geometry, October 22
+
+The owner approved correcting titles that hide their beginning and a stretched Classic connector after changing text size. Individual docked and detached titles now start at cursor position zero and return there when focus leaves the title. Unfocused shared-buffer cursor updates also return to zero, keeping the beginning visible through resizing; focused editing retains native cursor scrolling.
+
+The Playful Classic connector now uses the tab's requested size, current paint transform and strip placement margins instead of reading allocated bounds from the strip's separate window. This avoids mixing fresh note geometry with stale tab allocations after a style save rebuilds the strip, while retaining hover movement and all four edge orientations.
+
+Locked offline compilation, Rustfmt and Git whitespace checks passed. No tests or app sessions ran. Suggested focused checks are opening and resizing long titles in docked/detached notes, editing then leaving the title, and changing S/M/L text size while a Playful Classic connector is visible on each edge. Runtime confirmation remains pending.
+
+## Selected Classic tab connector, October 22
+
+A clearer reference crop established that the broad curved neck connects the open note to its selected tab; it is not part of every tab's silhouette. The owner explicitly authorized implementing that correction with Classic depth/shadow refinements, preserving the original footer, Playful Wavy/Clean choice and Stacked. They subsequently requested limiting the broad connector to Playful, with Paper and Minimal keeping the original arrow.
+
+A docked Playful note with a visible Classic tab now draws a short, broad connector to that tab's painted bounds, following its six-pixel hover translation. The two curved sides widen slightly at the tab; the fill blends the note and tab colors, with no outline cap crossing either join. The existing note outline clips the side strokes. Geometry rotates across all four edges and uses the existing monitor-local overlays. Paper, Minimal, Search, Stacked and notes without a visible tab retain the original arrow. The connector stays decorative with no new input region or setting. Classic shading now runs across its depth with a faint inset highlight and a more diffuse shadow.
+
+Linux compilation and Clippy passed with `cargo check --locked --offline --bin stickies` and `cargo clippy --locked --offline --bin stickies -- -D warnings`. Source review covers the four orientations, selected-tab lookup, hover redraw and fallback paths. `cargo fmt --all -- --check` and `git diff --check` also passed. No tests or app sessions are authorized or run. Suggested focused visual checks are selected-tab joining/hover, switching and closing notes on each edge, plus Search/overflow fallback. Final visual fidelity and Windows compilation remain unverified.
+
+## Playful edges and Classic tabs, October 22
+
+The owner requested removing the alternate Quick colors footer and its setting. The original Capsule footer is now the only footer, with its existing full palette and actions, in every theme. Config loading accepts and removes the experimental `footer_style` key so configurations saved by the prior build still load. The separate Note edges Wavy/Clean setting remains visible only for Playful, with Wavy as the default and no new theme. Original waves, dark outline, offset shadow and checkbox appearance remain available. Clean selects circular corners, softly shaded fill, spread shadow and the outlined checklist/finer strike treatment.
+
+The owner rejected the custom Classic attachment shape in a screenshot because its raised shoulders did not match the reference. That custom Button drawing has been removed. Classic now uses native buttons with straight sides, softly rounded exposed corners, a faint highlight and soft shadow. Vertical Classic tabs allow up to 104 px for longer titles, while Stacked remains capped at 80 px. Classic retains the eight-pixel gap, original title casing, six-pixel hover translation and continuous screen-edge extension. Minimal keeps its light/dark fills and note-color accent. Stacked drawing and motion are unchanged.
+
+The Playful edge choice uses the existing save, error-recovery and live-refresh path, including open individual editors, All Notes and the theme sample in Settings. Switching away from Playful hides the edge control without clearing its saved value. No stored note content or note-style fields change.
+
+Verification passed for this correction: `cargo fmt --all -- --check`, `git diff --check`, `cargo check --locked --offline --bin stickies` and `cargo clippy --locked --offline --bin stickies -- -D warnings`. Source review confirms the shared footer matches the original implementation, only retired-key handling references `footer_style`, and the custom Classic drawing is removed. Tests, app sessions, benchmarks, package rebuilding, installation, commits and pushes are not authorized. Suggested later checks: saved-config loading after footer removal, Wavy/Clean persistence and switching, original footer controls, checklist editing/undo/save/reopen, and Classic proportions/hover on all four edges. Final visual rendering and Windows compilation remain unverified; the rejected screenshot is evidence only for the previous implementation.
 
 ## v0.10 publication, October 22
 

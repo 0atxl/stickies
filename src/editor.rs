@@ -107,6 +107,24 @@ impl Editor {
         title.set_width_chars(1);
         title.set_placeholder_text(Some("Untitled note"));
         title.set_buffer(&session.title);
+        // An idle title reads from the beginning, even after narrowing the note
+        // or updating its shared buffer from another editor.
+        title.set_position(0);
+        if let Some(text) = title.delegate().and_downcast::<gtk::Text>() {
+            text.connect_cursor_position_notify(|text| {
+                if !text.has_focus() && text.position() != 0 {
+                    text.set_position(0);
+                }
+            });
+            let focus = gtk::EventControllerFocus::new();
+            let weak_text = text.downgrade();
+            focus.connect_leave(move |_| {
+                if let Some(text) = weak_text.upgrade() {
+                    text.set_position(0);
+                }
+            });
+            title.add_controller(focus);
+        }
         session.attach_title(&title);
         let weak_session = Rc::downgrade(&session);
         crate::text_editing::bind_title_history(&title, move || weak_session.upgrade());
@@ -558,6 +576,7 @@ impl Editor {
                 config.theme == Theme::Minimal && appearance::dark(&config),
             ),
             ("playful", config.theme == Theme::Playful),
+            ("clean-note", config.clean_playful()),
         ] {
             if enabled {
                 self.root.add_css_class(class);

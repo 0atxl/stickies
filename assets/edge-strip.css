@@ -196,7 +196,33 @@
 .edge-window .edge-marker .marker-pill:not(.edge-result-color) { background: #88847d; }
 
 /* Classic reveals one continuous tab from off screen; no shadow seam. */
-.edge-window.edge-classic.edge-right button.note-tab { padding-right: 6px; }
-.edge-window.edge-classic.edge-left button.note-tab { padding-left: 6px; }
-.edge-window.edge-classic.edge-top button.note-tab { padding-top: 6px; }
-.edge-window.edge-classic.edge-bottom button.note-tab { padding-bottom: 6px; }
+.edge-window.edge-classic .tab-title { font-weight: 500; letter-spacing: 0; }
+/* Shading runs across the tab's depth, with a diffuse shadow at its free edge. */
+.edge-window.edge-classic.edge-right button.note-tab {
+  padding-right: 6px; border-radius: 12px 0 0 12px;
+  background-image: linear-gradient(to right, alpha(white, .18), alpha(white, .03) 55%, alpha(black, .035));
+  box-shadow: inset 1px 1px 2px alpha(white, .24), -2px 2px 7px alpha(black, .14);
+}
+.edge-window.edge-classic.edge-left button.note-tab {
+  padding-left: 6px; border-radius: 0 12px 12px 0;
+  background-image: linear-gradient(to left, alpha(white, .18), alpha(white, .03) 55%, alpha(black, .035));
+  box-shadow: inset -1px 1px 2px alpha(white, .24), 2px 2px 7px alpha(black, .14);
+}
+.edge-window.edge-classic.edge-top button.note-tab {
+  padding-top: 6px; border-radius: 0 0 12px 12px;
+  background-image: linear-gradient(to top, alpha(white, .18), alpha(white, .03) 55%, alpha(black, .035));
+  box-shadow: inset 1px -1px 2px alpha(white, .24), 0 2px 7px alpha(black, .14);
+}
+.edge-window.edge-classic.edge-bottom button.note-tab {
+  padding-bottom: 6px; border-radius: 12px 12px 0 0;
+  background-image: linear-gradient(to bottom, alpha(white, .18), alpha(white, .03) 55%, alpha(black, .035));
+  box-shadow: inset 1px 1px 2px alpha(white, .24), 0 -2px 7px alpha(black, .14);
+}
+.edge-window.edge-classic.edge-minimal.edge-right button.note-tab,
+.edge-window.edge-classic.edge-minimal-dark.edge-right button.note-tab { box-shadow: inset 2px 0 var(--edge-accent), -2px 2px 7px alpha(black, .14); }
+.edge-window.edge-classic.edge-minimal.edge-left button.note-tab,
+.edge-window.edge-classic.edge-minimal-dark.edge-left button.note-tab { box-shadow: inset -2px 0 var(--edge-accent), 2px 2px 7px alpha(black, .14); }
+.edge-window.edge-classic.edge-minimal.edge-top button.note-tab,
+.edge-window.edge-classic.edge-minimal-dark.edge-top button.note-tab { box-shadow: inset 0 -2px var(--edge-accent), 0 2px 7px alpha(black, .14); }
+.edge-window.edge-classic.edge-minimal.edge-bottom button.note-tab,
+.edge-window.edge-classic.edge-minimal-dark.edge-bottom button.note-tab { box-shadow: inset 0 2px var(--edge-accent), 0 -2px 7px alpha(black, .14); }

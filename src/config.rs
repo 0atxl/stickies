@@ -29,6 +29,14 @@ pub enum Theme {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
+pub enum PlayfulEdges {
+    #[default]
+    Wavy,
+    Clean,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Appearance {
     #[default]
     System,
@@ -146,6 +154,7 @@ pub struct Config {
     pub edge_hover_enabled: bool,
     pub launch_at_login: bool,
     pub theme: Theme,
+    pub playful_edges: PlayfulEdges,
     pub appearance: Appearance,
     // Rendering defaults; legacy global choices migrate into per-note styles.
     #[serde(skip_serializing)]
@@ -175,6 +184,7 @@ impl Default for Config {
             edge_hover_enabled: true,
             launch_at_login: false,
             theme: Theme::Paper,
+            playful_edges: PlayfulEdges::Wavy,
             appearance: Appearance::System,
             font: Font::Theme,
             legacy_font_size: None,
@@ -193,6 +203,10 @@ impl Default for Config {
 }
 
 impl Config {
+    pub fn clean_playful(&self) -> bool {
+        self.theme == Theme::Playful && self.playful_edges == PlayfulEdges::Clean
+    }
+
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         let contents = match fs::read_to_string(path) {
             Ok(contents) => contents,
@@ -209,6 +223,8 @@ impl Config {
             preferences.contains_key("paper"),
         ];
         let removed = preferences.remove("white_paper").is_some();
+        // Accept configurations saved while the alternate footer was available.
+        let removed_footer = preferences.remove("footer_style").is_some();
         let mut config: Self = preferences.try_into()?;
         config.legacy_note_defaults = legacy_note_defaults;
         // Older files allowed custom timeouts from 30 to 1800 seconds.
@@ -219,7 +235,7 @@ impl Config {
             config.inactivity_seconds = Self::default().inactivity_seconds;
         }
         config.validate()?;
-        if removed && !legacy_note_defaults.into_iter().any(|present| present) {
+        if (removed || removed_footer) && !legacy_note_defaults.into_iter().any(|present| present) {
             config.save(path)?;
         }
         Ok(config)
