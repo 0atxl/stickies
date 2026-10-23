@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#FAF9FC">
+  <title>Stickies · A little space for your thoughts</title>
+  <meta name="description" content="Sticky notes at the edge of your desktop. Local, offline, and without an account. Download Stickies for Windows or supported Linux Wayland desktops.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Stickies · A little space for your thoughts">
+  <meta property="og:description" content="Write it down, keep it nearby, and get back to it. Local sticky notes for Windows and supported Linux Wayland desktops.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/0atxl/stickies/ad7856c327659bdf083fdea8c6ff61aad0debee6/data/dev.stickies.Stickies.png">
+  <meta property="og:image:width" content="1254">
+  <meta property="og:image:height" content="1254">
+  <meta property="og:image:alt" content="Stickies app icon: a yellow note in front of a blue note">
+  <meta name="twitter:card" content="summary">
+  <link rel="icon" href="assets/stickies.png" type="image/png">
+  <link rel="apple-touch-icon" href="assets/stickies.png">
+  <link rel="preload" href="assets/fonts/Inter.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <nav class="container navigation" aria-label="Main navigation">
+      <a class="brand" href="#" aria-label="Stickies home"><img src="assets/stickies.png" width="48" height="48" alt=""><span>Stickies</span></a>
+      <div class="nav-links">
+        <a href="#why-stickies">Why Stickies</a>
+        <a href="#downloads">Downloads</a>
+        <a href="https://github.com/0atxl/stickies">GitHub <span aria-hidden="true">↗</span></a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero container" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <a class="release-label" data-release-href="release" href="https://github.com/0atxl/stickies/releases/tag/v0.10.1"><span class="release-dot" aria-hidden="true"></span> <span data-release-text="tag">v0.10.1</span> is here <span aria-hidden="true">↗</span></a>
+        <h1 id="hero-title">A little space<br>for your thoughts.</h1>
+        <p class="hero-description">Sticky notes at the edge of your desktop.<br class="desktop-break"> Write it down, keep it nearby, and get back to it.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="#downloads"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg>Download Stickies</a>
+          <a class="text-link" href="https://github.com/0atxl/stickies">Star on GitHub <span aria-hidden="true">↗</span></a>
+        </div>
+        <p class="privacy-line">Local storage. Works offline.<br>No account. No telemetry.</p>
+      </div>
+
+      <div class="demo-wrap">
+        <div class="demo-heading"><span id="demo-label">Interactive demo</span><span>Try the tabs <span aria-hidden="true">↘</span></span></div>
+        <div id="demo" class="desktop-preview" data-view="marker" role="region" aria-labelledby="demo-label" aria-describedby="demo-instructions demo-disclosure">
+          <div class="annotation" aria-hidden="true">right here when<br>you need it<svg viewBox="0 0 120 130"><path d="M8 8C90 0 110 60 106 114m-10-12 10 12 8-15"/></svg></div>
+          <div id="empty-hint" class="empty-hint"><p>A thought. A list.<br>A place to leave it.</p><span id="demo-instructions">Hover or tap the marker to begin.<br>Or Tab to it and press Enter.</span></div>
+          <button id="edge-marker" class="edge-marker" aria-label="Reveal sample note tabs" aria-expanded="false" aria-controls="note-tabs" disabled><span></span></button>
+          <div id="note-tabs" class="note-tabs" role="group" aria-label="Sample notes" hidden></div>
+          <svg id="connector" class="connector" viewBox="0 0 30 70" preserveAspectRatio="none" aria-hidden="true" hidden><path d="M0 18C16 18 18 10 30 0V70C18 60 16 52 0 52Z"/></svg>
+          <section id="note" class="note" aria-label="Sample note editor" hidden>
+            <header class="note-header">
+              <label class="sr-only" for="note-title">Note title</label>
+              <input id="note-title" class="note-title" type="text" autocomplete="off" spellcheck="false">
+              <button id="close-note" class="icon-button" aria-label="Close note" title="Close note"><img src="assets/icons/close.svg" alt="" width="20" height="20"></button>
+            </header>
+            <div id="note-body" class="note-body" role="group" aria-label="Editable note text"></div>
+            <div class="note-bottom">
+              <div id="color-panel" class="popover color-panel" role="group" aria-label="Note color" hidden></div>
+              <div id="font-panel" class="popover font-panel" role="group" aria-label="Note font" hidden>
+                <button data-font="virgil" class="font-virgil" aria-pressed="true">Virgil</button>
+                <button data-font="inter" aria-pressed="false">Inter</button>
+              </div>
+              <div id="more-panel" class="popover more-panel" role="group" aria-label="More note actions" hidden>
+                <button id="copy-text">Copy text</button>
+                <button id="reset-menu">Reset demo</button>
+              </div>
+              <div class="note-footer" role="group" aria-label="Note controls">
+                <button id="color-control" class="icon-button" aria-label="Change note color" title="Color" aria-expanded="false" aria-controls="color-panel"><span class="color-dot"></span></button>
+                <button id="font-control" class="icon-button font-control" aria-label="Change note font" title="Font" aria-expanded="false" aria-controls="font-panel">Aa</button>
+                <button id="checklist-control" class="icon-button" aria-label="Toggle checklist on current line" title="Checklist on current line" aria-pressed="false"><img src="assets/icons/checklist.svg" alt="" width="19" height="19"></button>
+                <button id="pin-control" class="icon-button" aria-label="Always open" aria-describedby="timeout-help" title="Always open: disable inactivity timeout" aria-pressed="false"><img id="pin-icon" src="assets/icons/pin.svg" alt="" width="20" height="20"></button>
+                <button id="more-control" class="icon-button" aria-label="More note actions" title="More" aria-expanded="false" aria-controls="more-panel"><img src="assets/icons/more-dots.svg" alt="" width="20" height="20"></button>
+              </div>
+            </div>
+          </section>
+          <noscript><p class="noscript-message">Enable JavaScript to try the notes. Downloads are available below.</p></noscript>
+        </div>
+        <div class="demo-caption"><span>Demo edits reset on refresh</span><button id="reset-demo" disabled>Reset <span aria-hidden="true">↺</span></button></div>
+        <p id="demo-disclosure" class="demo-disclosure" data-demo-since="v0.10.1" data-release-text="disclosure">Simplified demo of Playful Clean. Downloads are v0.10.1.</p>
+        <p id="timeout-help" class="demo-help">Notes close after one idle minute. Pin to keep one open.</p>
+        <p id="demo-status" class="demo-status" role="status" aria-live="polite" aria-atomic="true"></p>
+      </div>
+    </section>
+
+    <section id="why-stickies" class="benefits section-divider" aria-labelledby="benefits-title">
+      <div class="container">
+        <h2 id="benefits-title">Write it down. Carry on.</h2>
+        <p class="section-intro">For the things you want to remember,<br>without leaving what you're doing.</p>
+        <div class="benefit-list">
+          <div><span class="benefit-number" aria-hidden="true">01</span><h3>Lives at the edge.</h3><p>Reveal your notes, open one,<br>and keep working.</p></div>
+          <div><span class="benefit-number" aria-hidden="true">02</span><h3>Lists for the little things.</h3><p>Write a reminder<br>or check something off.</p></div>
+          <div><span class="benefit-number" aria-hidden="true">03</span><h3>Saved on your computer.</h3><p>Your notes work offline,<br>without an account.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="downloads" class="downloads section-divider" aria-labelledby="downloads-title">
+      <div class="container">
+        <div class="downloads-heading"><div><p class="eyebrow">MAKE A LITTLE ROOM</p><h2 id="downloads-title">At home on your desktop.</h2></div><span class="version"><span data-release-text="tag">v0.10.1</span> <span> / <span data-release-text="version">0.10.1</span></span></span></div>
+        <div class="download-options">
+          <article class="download-option" aria-labelledby="windows-title">
+            <div class="platform-title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h8v7H3zm10 0h8v7h-8zM3 13h8v7H3zm10 0h8v7h-8z"/></svg><h3 id="windows-title">Windows</h3><span>x86_64</span></div>
+            <p>A ZIP with everything you need.</p>
+            <a class="button primary download-button" data-release-href="windows" href="https://github.com/0atxl/stickies/releases/download/v0.10.1/stickies-windows-x86_64.zip">Download for Windows <span aria-hidden="true">↓</span></a>
+            <p class="install-note">Extract the entire ZIP, then open <code>bin\stickies.exe</code>. Keep the extracted folders together. No Rust or MSYS2 installation needed.</p>
+          </article>
+          <article class="download-option" aria-labelledby="arch-title">
+            <div class="platform-title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 20-6-3c0-6-6-6-6 0l-6 3z"/></svg><h3 id="arch-title">Arch Linux</h3><span>x86_64</span></div>
+            <p>For up-to-date Arch on compatible Wayland desktops.</p>
+            <a class="button secondary download-button" data-release-href="arch" href="https://github.com/0atxl/stickies/releases/download/v0.10.1/stickies-0.10.1-1-x86_64.pkg.tar.zst">Download Arch package <span aria-hidden="true">↓</span></a>
+            <p class="install-note">Install the package with <code data-release-text="arch-command">sudo pacman -U ./stickies-0.10.1-1-x86_64.pkg.tar.zst</code>. Requires Wayland Layer Shell v4+.</p>
+            <p class="aur-links">Also on AUR: <a href="https://aur.archlinux.org/packages/stickies">stickies</a> <span>source</span> · <a href="https://aur.archlinux.org/packages/stickies-bin">stickies-bin</a> <span>binary</span></p>
+          </article>
+        </div>
+        <div class="release-links"><a data-release-href="release" href="https://github.com/0atxl/stickies/releases/tag/v0.10.1">Release notes <span aria-hidden="true">↗</span></a><a data-release-href="checksums" href="https://github.com/0atxl/stickies/releases/download/v0.10.1/SHA256SUMS">SHA256 checksums <span aria-hidden="true">↗</span></a></div>
+        <p class="other-linux"><strong>Another Linux setup?</strong> <a data-release-href="source" href="https://github.com/0atxl/stickies/tree/v0.10.1#requirements">Install from source</a> with compatible native libraries and Wayland Layer Shell v4+. The Arch package is for Arch Linux only. macOS, X11, and GNOME without Layer Shell are not supported.</p>
+      </div>
+    </section>
+  </main>
+  <footer class="site-footer container"><a class="brand footer-brand" href="#"><img src="assets/stickies.png" width="32" height="32" alt=""><span>Stickies</span></a><p>A little space. All yours.</p><nav aria-label="Footer"><a href="https://github.com/0atxl/stickies">GitHub</a><a data-release-href="release" href="https://github.com/0atxl/stickies/releases/tag/v0.10.1">Release notes</a><a href="LICENSE">MPL-2.0</a></nav></footer>
+</body>
+</html>
