@@ -60,10 +60,52 @@ CI runs [prepare-windows-notices.py](../scripts/prepare-windows-notices.py) befo
 
 ## Files to distribute together
 
-- `stickies-windows-x86_64.zip`, containing the executable/runtime, readable notices, this guide, `SOURCE-INFO.txt`, `SOURCE-MANIFEST.sha256`, `SOURCE-ARCHIVE.sha256`, `BUILD-INFO.txt` and `BUNDLE-MANIFEST.sha256`.
+- `stickies-windows-x86_64.zip`, containing the executable/runtime (`bin\stickies.exe` and `bin\stickies-mcp.exe`), readable notices, this guide, `SOURCE-INFO.txt`, `SOURCE-MANIFEST.sha256`, `SOURCE-ARCHIVE.sha256`, `BUILD-INFO.txt` and `BUNDLE-MANIFEST.sha256`.
 - `stickies-windows-x86_64-source.zip`, containing the exact application snapshot built, its manifest, licence, build script and this guide.
-- `stickies-windows-x86_64-symbols.zip`, an optional unstripped executable, identity record, matching-source checksum and original notices for crash investigation. Users do not need to extract it.
+- `stickies-windows-x86_64-symbols.zip`, optional unstripped executables, an identity record, matching-source checksum and original notices for crash investigation. Users do not need to extract it.
 - `SHA256SUMS`, covering all three archives. The binary bundle also records its matching source archive's checksum.
+
+## Model Context Protocol (MCP) companion
+
+The Windows portable bundle includes `bin\stickies-mcp.exe`. It communicates with MCP clients using JSON-RPC over standard I/O and relays requests to running Stickies via a local named pipe restricted to the process token user SID. The GUI receives request data on its main context; the worker handles only pipe I/O and reply channels. Messages are capped at 2 MiB and exchanges at ten seconds. After reading the complete response, the companion sends a one-byte acknowledgement before the server disconnects. The acknowledgement wait shares the exchange deadline and shutdown cancellation; no blocking pipe flush is used. Shutdown cancels outstanding waits and joins the worker.
+
+### Configuration
+
+Example configuration for Claude Desktop on Windows (`%APPDATA%\Claude\claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "stickies": {
+      "command": "C:\\Tools\\Stickies\\bin\\stickies-mcp.exe"
+    }
+  }
+}
+```
+
+If your extraction path contains spaces, pass the full absolute path in the `command` field without adding arguments:
+
+```json
+{
+  "mcpServers": {
+    "stickies": {
+      "command": "C:\\Program Files\\Stickies\\bin\\stickies-mcp.exe"
+    }
+  }
+}
+```
+
+### Access and behavior
+
+- **Settings control**: Access defaults to Off. Enable it in Stickies Settings ("Off", "Read only", or "Read/write").
+- **Running app required**: Stickies must be running. If closed, the companion returns a structured tool error. The companion never opens SQLite directly or launches the GUI.
+- **Upgrades**: Close Stickies before extracting an updated bundle. Both executables must be updated together. This unreleased build still reports 0.10.2 but migrates schema 4 to 5 on GUI startup, even with MCP Off. Released v0.10.2 cannot open schema 5. Make a backup with Stickies closed before the first run; downgrade requires a compatible pre-upgrade backup.
+- **Scope**: Native local clients only. WSL, containers and remote connections are outside v1 compatibility. The four tools are `notes_find`, `notes_get`, `notes_create` and `notes_update`; there is no background reminder engine.
+- **Notices**: Both exact rmcp 2.2.0 crates use the source snapshot's original license supplement when building the consolidated notice bundle. Both executables retain unstripped copies in the optional symbols ZIP.
+
+Read the current note before updating it, retaining completed `- [x] ` markers. Supply body and formatting together; `[]` clears formatting. Omit both to preserve them. A stale revision fails without changing the note and requires a reread. Retry a lost reply with identical arguments and the same operation ID; changed arguments need a fresh ID. Receipts commit with the note and do not expire. Pre-repair MCP fingerprints/revisions are incompatible; reread and use fresh operation IDs after upgrading. Successful open-note changes use the shared checklist widgets and one Undo step, then refresh existing lists/tabs without opening an editor or requesting focus. Titles are limited to 500 UTF-8 bytes; serialized title, body and formatting together to 1,000,000 bytes on reads and writes. Drafts, archived/deleted notes and failed formatting loads are excluded or reported as errors.
+
+MCP verification on the current Linux host covers compilation/linking and linting of both Linux binaries, source-input inspection and Tree-sitter PowerShell syntax parsing only. Native Windows compilation and PowerShell packaging execution were unavailable. No tests or app sessions ran. Linux checks do not verify Windows-only code or runtime behavior.
 
 The source manifest hashes application inputs and excludes itself and generated source instructions. The bundle manifest hashes bundle contents and excludes itself. Build information records the target, command, Rust/compiler/binutils versions, relevant Rust flags and bundled native package versions. The Git baseline is recorded as context, not a claim that uncommitted changes are absent. These records do not establish bit-for-bit reproducibility.
 

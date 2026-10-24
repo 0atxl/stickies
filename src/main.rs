@@ -14,10 +14,16 @@ mod edge_surface;
 mod edit_history;
 mod editor;
 mod manager;
+pub(crate) mod mcp_ipc;
+mod mcp_limits;
+mod mcp_server;
+#[cfg(target_os = "windows")]
+mod mcp_windows;
 mod motion;
 mod note_controls;
 mod note_session;
 mod note_text;
+mod owner_lock;
 mod platform;
 mod settings;
 mod storage;
@@ -54,22 +60,24 @@ struct SeparateNote {
     editor: Rc<editor::Editor>,
 }
 
-struct Ui {
-    application: gtk::Application,
-    edge: edge::Strip,
-    edge_sort: Cell<NoteSort>,
-    config: Rc<RefCell<Config>>,
-    config_valid: bool,
-    dnd: Cell<bool>,
-    dnd_monitor: RefCell<Option<platform::DndWatch>>,
+pub(crate) struct Ui {
+    pub(crate) application: gtk::Application,
+    pub(crate) edge: edge::Strip,
+    pub(crate) edge_sort: Cell<NoteSort>,
+    pub(crate) config: Rc<RefCell<Config>>,
+    pub(crate) config_valid: bool,
+    pub(crate) dnd: Cell<bool>,
+    pub(crate) dnd_monitor: RefCell<Option<platform::DndWatch>>,
     #[cfg(target_os = "windows")]
-    tray: RefCell<Option<tray_windows::TrayIcon>>,
-    provider: gtk::CssProvider,
-    storage: Rc<Storage>,
-    sessions: RefCell<HashMap<NoteId, Weak<note_session::NoteSession>>>,
-    deck: RefCell<AppState>,
-    separate: RefCell<HashMap<NoteId, SeparateNote>>,
-    manager: RefCell<Option<manager::ManagerWindow>>,
+    pub(crate) tray: RefCell<Option<tray_windows::TrayIcon>>,
+    pub(crate) provider: gtk::CssProvider,
+    pub(crate) storage: Rc<Storage>,
+    pub(crate) sessions: RefCell<HashMap<NoteId, Weak<note_session::NoteSession>>>,
+    pub(crate) deck: RefCell<AppState>,
+    pub(crate) separate: RefCell<HashMap<NoteId, SeparateNote>>,
+    pub(crate) manager: RefCell<Option<manager::ManagerWindow>>,
+    pub(crate) mcp_server: RefCell<Option<mcp_server::McpServer>>,
+    pub(crate) owner_lock: RefCell<Option<owner_lock::OwnerLock>>,
 }
 
 impl Ui {
@@ -799,6 +807,32 @@ fn build(application: &gtk::Application, startup_error_pending: &Rc<Cell<bool>>)
         eprintln!("{message}");
         return None;
     }
+    let owner_lock = match owner_lock::OwnerLock::acquire(&storage::lock_path()) {
+        Ok(lock) => lock,
+        Err(owner_lock::LockError::AlreadyLocked) => {
+            eprintln!("Another instance of Stickies is already running.");
+            return None;
+        }
+        Err(owner_lock::LockError::Io(error)) => {
+            let dialog = gtk::AlertDialog::builder()
+                .modal(false)
+                .message("Stickies could not open your notes")
+                .detail(error.to_string())
+                .build();
+            let hold = application.hold();
+            let pending = startup_error_pending.clone();
+            pending.set(true);
+            dialog.choose(
+                None::<&gtk::Window>,
+                None::<&gtk::gio::Cancellable>,
+                move |_| {
+                    pending.set(false);
+                    drop(hold);
+                },
+            );
+            return None;
+        }
+    };
     let storage = match Storage::open(&storage::database_path()) {
         Ok(storage) => Rc::new(storage),
         Err(error) => {
@@ -890,7 +924,11 @@ fn build(application: &gtk::Application, startup_error_pending: &Rc<Cell<bool>>)
         deck: RefCell::new(AppState::new(Vec::new())),
         separate: RefCell::new(HashMap::new()),
         manager: RefCell::new(None),
+        mcp_server: RefCell::new(None),
+        owner_lock: RefCell::new(Some(owner_lock)),
     });
+    let mcp_srv = mcp_server::McpServer::start(&ui);
+    ui.mcp_server.replace(mcp_srv);
     apply_motion_preference(ui.config.borrow().reduced_motion);
     ui.connect_edge();
     ui.register_actions();
@@ -913,6 +951,9 @@ fn build(application: &gtk::Application, startup_error_pending: &Rc<Cell<bool>>)
     let shutdown_ui = ui.clone();
     application.connect_shutdown(move |_| {
         let ui = &shutdown_ui;
+        if let Some(mut server) = ui.mcp_server.borrow_mut().take() {
+            server.stop(ui);
+        }
         ui.edge.disconnect_monitors();
         ui.flush_sessions_on_shutdown();
         #[cfg(target_os = "linux")]
@@ -932,6 +973,7 @@ fn build(application: &gtk::Application, startup_error_pending: &Rc<Cell<bool>>)
         for note in ui.separate.borrow().values() {
             note.editor.stop();
         }
+        ui.owner_lock.borrow_mut().take();
     });
     ui.update_visibility();
     ui.set_input();

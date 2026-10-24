@@ -17,8 +17,10 @@ import json
 ROOT = Path(__file__).resolve().parent.parent
 TARGET = "x86_64-unknown-linux-gnu"
 SUPPLEMENTAL = {
-    ("gtk4-layer-shell", "0.8.1"),
-    ("gtk4-layer-shell-sys", "0.6.1"),
+    ("gtk4-layer-shell", "0.8.1"): "packaging/licenses/gtk4-layer-shell-MIT.txt",
+    ("gtk4-layer-shell-sys", "0.6.1"): "packaging/licenses/gtk4-layer-shell-MIT.txt",
+    ("rmcp", "2.2.0"): "packaging/licenses/rmcp-Apache-2.0.txt",
+    ("rmcp-macros", "2.2.0"): "packaging/licenses/rmcp-Apache-2.0.txt",
 }
 
 
@@ -43,11 +45,12 @@ def main():
     revision = run("git", "rev-parse", "HEAD")
     epoch = int(os.environ.get("SOURCE_DATE_EPOCH", run("git", "show", "-s", "--format=%ct", "HEAD")))
 
-    # Copy only tracked application inputs and the explicitly named packaging files.
-    paths = run("git", "ls-files", "--", "Cargo.toml", "Cargo.lock", "build.rs",
+    # Copy application inputs, including uncommitted new modules/migrations, and named packaging files.
+    paths = run("git", "ls-files", "--cached", "--others", "--exclude-standard", "--", "Cargo.toml", "Cargo.lock", "build.rs",
                 "LICENSE", "README.md", "src", "assets", "migrations", "data").splitlines()
     paths += ["packaging/arch/PKGBUILD", "packaging/prepare-release.py",
-              "packaging/README.md", "packaging/licenses/gtk4-layer-shell-MIT.txt"]
+              "packaging/README.md", "packaging/licenses/gtk4-layer-shell-MIT.txt",
+              "packaging/licenses/rmcp-Apache-2.0.txt"]
     icon = "data/dev.stickies.Stickies.png"
     if (ROOT / icon).is_file() and icon not in paths:
         paths.append(icon)
@@ -82,7 +85,7 @@ def main():
             notices.add(crate / package["license_file"])
         folder = f"packaging/notices/{key[0]}-{key[1]}"
         if key in SUPPLEMENTAL:
-            files[f"{folder}/LICENSE"] = files["packaging/licenses/gtk4-layer-shell-MIT.txt"]
+            files[f"{folder}/LICENSE"] = files[SUPPLEMENTAL[key]]
         elif not notices:
             parser.error(f"missing original dependency notice: {key}")
         for notice in sorted(notices):

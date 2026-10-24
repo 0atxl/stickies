@@ -5,7 +5,7 @@ use gtk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Mark {
     Bold,
@@ -37,7 +37,7 @@ impl Mark {
         })
     }
 }
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Span {
     pub start: i32,

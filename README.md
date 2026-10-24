@@ -20,6 +20,8 @@ The owner accepts the current UI/UX. UI design is complete; work now focuses on 
 
 All Notes and individual notes share live editing, per-note fonts/canvas/color, plain-text lists, separate formatting metadata and title/body undo history. Paper, Playful and Minimal Light/Dark are implemented. The fixed footer changes to B/I/U/S during editable body selection; there is no Find in note or hover preview. Fonts are Virgil, Inter, JetBrains Mono and Kalam. Existing font/canvas preferences migrate into note styles to preserve saved appearance.
 
+New configurations default to Playful with Clean edges. Existing saved theme and edge choices are preserved. MCP access defaults to Off. The optional `stickies-mcp` companion lets a local assistant find, read, create and update notes when access is enabled in Settings. See the [MCP setup and write contract](packaging/README.md#model-context-protocol-mcp-companion). Focused Linux checks passed; Windows MCP compilation and runtime remain unverified.
+
 Notes save after 750 ms of quiet time. Failed saves retain the editor. Only docked notes time out, with Off/1/2/5-minute choices and an Always open override; All Notes pin controls ordering. Blank new drafts stay out of lists/search until their first successful nonblank save. Existing blank notes remain. New All Notes windows start on Active without a selected note. Archive/restore, soft deletion with Undo and plain Copy text remain available.
 
 The strip supports all four edges, four/five visible notes, Classic/Stacked tabs and Pills/Bar markers. Current design, dimensions, menus and motion are described in the local specification. They are settled, not an invitation to add controls or redesign them.

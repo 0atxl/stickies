@@ -50,16 +50,72 @@ These are source/feature requirements, not a promise that a binary built with ne
 | File | Package path |
 |---|---|
 | Executable | `/usr/bin/stickies` |
+| MCP companion | `/usr/bin/stickies-mcp` |
 | Existing desktop entry | `/usr/share/applications/dev.stickies.Stickies.desktop` |
 | Approved PNG application icon | `/usr/share/pixmaps/dev.stickies.Stickies.png` |
 | Application MPL-2.0 | `/usr/share/licenses/stickies/LICENSE` |
-| Original Virgil, Inter, JetBrains Mono and Kalam OFL-1.1 notices | `/usr/share/licenses/stickies/fonts/` |
-| Rust dependency notices and inventory | `/usr/share/licenses/stickies/rust/` |
+| Font and Rust dependency notices with inventory | `/usr/share/licenses/stickies/THIRD-PARTY-NOTICES.txt` |
 | Source identity and this guide | `/usr/share/doc/stickies/` |
 
 The owner supplied and approved `Frosted Layered Sticky Notes.png` and confirmed it is their own design, with no third-party attribution identified. `data/dev.stickies.Stickies.png` preserves that 1254 × 1254 transparent PNG byte-for-byte, SHA-256 `edf8cd958d73fa9a79e909dd5ff8d1d447657eaf27852c6d91a6e079d75e3f2c`. No conversion, redraw or substitute artwork is used. Keep the desktop entry's existing icon identifier. The original raster uses the standard unthemed [pixmaps lookup](https://specifications.freedesktop.org/icon-theme/latest/), avoiding an invented SVG or a mismatched fixed-size theme directory. Fonts, CSS, UI icons and migrations are already embedded; do not install separate copies of the fonts or alter application resource loading.
 
 Original Rust dependency notice files are copied from Cargo's cached sources for the enabled Linux normal/build dependency tree. The matching source archive retains those originals. Installed Arch packages use one `THIRD-PARTY-NOTICES.txt` document for font/dependency notices, grouping identical texts with all original paths and retaining package attribution; the application MPL text remains separate. This reduces the package's file/directory count without removing notice content. The inventory includes build tools, so some entries are not linked into the executable. The two locked gtk4-layer-shell bindings omit their MIT file from their crate archives. `packaging/licenses/gtk4-layer-shell-MIT.txt` is the identical original notice verified at upstream commits [7043a44](https://github.com/pentamassiv/gtk4-layer-shell-gir/blob/7043a44adc4e31868e6f30a4f8c8279168417a94/LICENSE) for 0.8.1 and [c52b9b1](https://github.com/pentamassiv/gtk4-layer-shell-gir/blob/c52b9b12e6b1afa38dcb496ec821c55bb298da78/LICENSE) for sys 0.6.1. The script applies that supplement only to those versions and stops on other missing notices. Native shared libraries are provided by Arch, not bundled here.
+
+## Model Context Protocol (MCP) companion
+
+Stickies includes a companion binary, `stickies-mcp`, installed at `/usr/bin/stickies-mcp`. It communicates with MCP clients using JSON-RPC over standard I/O.
+
+### Access control
+
+MCP access defaults to Off. Enable it in Stickies Settings under the MCP access control:
+- **Off**: All MCP queries and mutations are rejected.
+- **Read only**: Clients can query and read published active notes. Mutations are rejected.
+- **Read/write**: Clients can query, read, create and update active notes without additional per-operation confirmation prompts.
+
+Changes to this setting take effect immediately. Revoking access blocks subsequent calls without restarting the app.
+
+### Native client configuration
+
+Configure your local MCP client by referencing the companion executable directly. Keep command paths and arguments separate. Do not edit client configuration files programmatically.
+
+Example configuration for Claude Desktop on Linux (`~/.config/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "stickies": {
+      "command": "/usr/bin/stickies-mcp"
+    }
+  }
+}
+```
+
+### Operational requirements and limitations
+
+- **Running app required**: Stickies must already be running in the user session. The companion never launches the GUI, quits the GUI, opens the SQLite database directly, or writes configuration files. If Stickies is closed, starting or shutting down, the companion returns a structured tool error.
+- **Upgrade procedure**: Always close Stickies before upgrading. The GUI and companion share an internal IPC contract version and must be updated together.
+- **Data scope**: MCP access includes published active notes and pending editor text. Drafts, archived notes and deleted notes are excluded.
+- **Local authorization**: Linux checks the D-Bus caller UID. Windows uses a pipe named from the process token user SID, a protected DACL granting only that user access, and remote-client rejection. This permits other processes running as the same user.
+- **Security**: Note contents are treated as untrusted text. No shell commands or links in notes are executed. Titles, bodies and search queries are never logged to stderr.
+- **Platform scope**: Native local clients are supported. WSL, containers, SSH forwarding and remote clients are outside v1 compatibility.
+
+### Note workflow and write contract
+
+The four tools are `notes_find`, `notes_get`, `notes_create` and `notes_update`. A client can create an edge note containing ordinary reminder text or `- [ ] ` checklist lines. The user edits it or checks items in Stickies. Before later changes, the client reads the current body and revision, retains completed `- [x] ` markers and supplies the intended replacement. There is no task model, monitoring, sync or timed reminder engine.
+
+`notes_create` defaults omitted title/body to empty strings and formatting to `[]`. `notes_update` preserves omitted title. Body and formatting must be supplied together; `[]` explicitly clears formatting. Omit both to retain current text, checkbox states and formatting. Formatting uses Unicode scalar offsets. Titles are limited to 500 UTF-8 bytes. Serialized title, body and formatting together are limited to 1,000,000 bytes, including JSON escaping, on reads and writes. Requests and responses have a 2 MiB framing limit. Formatting-load errors fail the call.
+
+A revision hashes a structured JSON byte array of title, body and canonical formatting with SHA-256. It includes pending session text and checkbox states. Formatting uses the same serialization as the editor. A stale revision rejects the entire write, leaving pending human edits intact. The client must reread before retrying with a new revision and operation ID. Whole-body replacement does not merge concurrent changes automatically.
+
+Each mutation saves its receipt in the same SQLite transaction as the note. Retrying identical arguments with the same operation ID returns the original note ID and revision, even after subsequent note edits or an app restart. Reusing that ID with different arguments fails, including omitted versus explicitly empty fields. Receipts remain in the local database without automatic expiry. A timeout or lost connection does not prove that a write failed; retry identical arguments with the same ID. Existing pre-repair MCP receipts/revisions use an incompatible fingerprint scheme. Do not replay those operation IDs after upgrading; reread notes and use fresh IDs.
+
+Successful changes refresh All Notes and edge tabs without opening an editor or requesting focus. Open editors share checklist widgets and one Undo step per MCP update. Failed writes leave session contents, dirty state and pending autosaves intact. IPC waits are bounded to ten seconds; Windows shutdown cancels pipe waits and joins the worker. Settings are checked on the GUI thread for every dispatched request, including receipt replays.
+
+Schema 5 adds `mutation_receipts`. The note and checklist formats remain unchanged. Close Stickies before upgrading and update the GUI and companion together. The unreleased source still reports version 0.10.2; it is not the already published schema-4 v0.10.2 package.
+
+Both packagers include both executables and the new source modules/migration. They retain the consolidated notice layout from main. The exact `rmcp` and `rmcp-macros` 2.2.0 crate archives omit LICENSE. Both packagers use `packaging/licenses/rmcp-Apache-2.0.txt`, copied from [the repository LICENSE at their recorded source commit](https://github.com/modelcontextprotocol/rust-sdk/blob/519577601db3823616dbd7c4eb84ed569d8e17d4/LICENSE). The text includes its licensing-transition statement. Other missing notices still stop packaging. The matching Windows source ZIP and Cargo source list include the supplement.
+
+Linux formatting, compilation/linking and Clippy passed for both binaries. Focused isolated Linux/Hyprland checks passed for create/read/update, checklist completion/formatting, shared views, Undo/Redo, persistence, retries, stale revisions and permission/save failures. The checkbox-focus replacement crash was repaired and its focused regressions passed. Native Windows compilation, PowerShell packaging execution and Windows MCP runtime remain unverified. The Windows implementation is retained. Historical release evidence below predates this MCP build.
 
 ## Prepare source and checksums locally
 
@@ -71,7 +127,7 @@ python3 packaging/prepare-release.py
 
 The script uses cached Cargo metadata only. On a new builder, first fetch the locked dependencies with `cargo fetch --locked --target x86_64-unknown-linux-gnu` when network use is authorized. Preparation itself neither downloads nor compiles anything. An existing output directory is refused; use `--output /path/to/a/new/directory` to preserve older inputs.
 
-The default output, `target/packaging/`, contains the source archive, generated `PKGBUILD`, `SOURCE-INFO.txt`, `PREPARATION.txt` and `SHA256SUMS`. The source version comes from Cargo.toml, currently `0.10.2`; it does not select a release version/tag. The archive contains current bytes of tracked application inputs, the named packaging files and generated notices. `SOURCE-INFO.txt` records the Git baseline and explicitly identifies a working-tree snapshot. `SOURCE-MANIFEST.sha256` inside the archive identifies those bytes. Unrelated local files, build outputs, agent material and saved notes are excluded.
+The default output, `target/packaging/`, contains the source archive, generated `PKGBUILD`, `SOURCE-INFO.txt`, `PREPARATION.txt` and `SHA256SUMS`. The source version comes from Cargo.toml, currently `0.10.2`; it does not select a release version/tag. The archive contains current bytes of tracked and untracked application inputs under the selected source paths, the named packaging files and generated notices. `SOURCE-INFO.txt` records the Git baseline and explicitly identifies a working-tree snapshot. `SOURCE-MANIFEST.sha256` inside the archive identifies those bytes. Unrelated local files, build outputs, agent material and saved notes are excluded.
 
 Source archive paths, order, timestamps, ownership and modes are normalized. `SOURCE_DATE_EPOCH` defaults to the Git baseline's commit time and is recorded. Reuse it when recreating the same source snapshot. Archive normalization and Cargo.lock do not establish bit-for-bit binary reproducibility.
 
@@ -112,7 +168,7 @@ sha256sum --check SHA256SUMS
 
 The package owns only the system files above. There are no install/remove hooks, configuration files under `/etc`, database migrations run by the package, or writes to home directories. Standard Arch desktop-entry cache hooks can handle the launcher cache.
 
-Upgrades replace package-owned files. Notes at `$XDG_DATA_HOME/stickies/notes.db`, preferences at `$XDG_CONFIG_HOME/stickies/config.toml` and cached fonts at `$XDG_CACHE_HOME/stickies/fonts` remain user-owned. The usual defaults are `~/.local/share`, `~/.config` and `~/.cache`. Quit Stickies before an upgrade so the running process and installed binary agree. Existing application startup migrations remain unchanged; older executables reject newer database schemas, so downgrade compatibility is not promised.
+Upgrades replace package-owned files. Notes at `$XDG_DATA_HOME/stickies/notes.db`, preferences at `$XDG_CONFIG_HOME/stickies/config.toml` and cached fonts at `$XDG_CACHE_HOME/stickies/fonts` remain user-owned. The usual defaults are `~/.local/share`, `~/.config` and `~/.cache`. Quit Stickies before an upgrade so the running process and installed binary agree. This MCP build migrates schema 4 to 5 at GUI startup, including when MCP access is Off. Older executables, including released v0.10.2, reject schema 5. Back up the database with Stickies closed before the first run. Downgrading needs a compatible pre-upgrade backup; do not lower `user_version` by hand.
 
 Launch at login stays optional and app-managed. On valid startup, Stickies creates or removes `$XDG_CONFIG_HOME/autostart/dev.stickies.Stickies.desktop` according to `launch_at_login`. Do not install `/etc/xdg/autostart` entries or a new service. An enabled user entry survives package removal. Disable Launch at login before removing the package, or explicitly remove that single entry afterward if desired. Its existing `TryExec=stickies` guards an absent executable. Reinstalling retains the stored preference. Package removal must leave notes, preferences, caches and other users' autostart entries alone.
 

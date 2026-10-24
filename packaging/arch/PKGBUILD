@@ -38,6 +38,7 @@ build() {
 package() {
     cd "$srcdir/stickies-$pkgver"
     install -Dm755 "$srcdir/target/$_target/release/stickies" "$pkgdir/usr/bin/stickies"
+    install -Dm755 "$srcdir/target/$_target/release/stickies-mcp" "$pkgdir/usr/bin/stickies-mcp"
     install -Dm644 data/dev.stickies.Stickies.desktop \
         "$pkgdir/usr/share/applications/dev.stickies.Stickies.desktop"
     install -Dm644 data/dev.stickies.Stickies.png \

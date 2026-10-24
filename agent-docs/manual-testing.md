@@ -1,5 +1,42 @@
 # Current verification checklist
 
+## October 25 MCP checklist-focus repair
+
+The owner authorized one small repair and only the focused regression checks for MCP replacement of a checklist buffer while an embedded checkbox has keyboard focus. Work stayed in `/home/rinzler/nothing/Stickies` on `codex/mcp`, based on `0629cb7`. The prior exact reproduction and backtrace at `/tmp/stickies-mcp-verification-20261025/REPORT.md` and `evidence/crash-backtrace.txt` were read before editing. They were sufficient to identify the input sequence, so the pre-fix crash was not triggered again.
+
+The established failure is a SIGSEGV during GTK checklist-child removal inside `TextBuffer::set_text` in `NoteSession::apply_mcp_update`. The same body replacement with text-body focus had passed. GTK selection/state and focus handling appear in the crash stack while the old child is unmapped. Re-entry into a partially cleared buffer is the working explanation; the exact invalid GTK object or iterator has not been established from the unsymbolized private GTK frames. The old note/receipt transaction had already committed before the crash.
+
+`NoteSession::focus_body_before_replacement` now examines every attached live text view using that session's buffer. If a root's focus is an `inline-check` CheckButton inside that view, it sets that root's focus to the surviving text view before removing the old buffer content. It does not present or activate a window, alter unrelated control focus, change checkbox focusability or move focus for title-only MCP updates. The view list borrow is released before GTK focus callbacks run. MCP replacement and the existing Undo/Redo replacement both call the helper with session recording/decorating guards already active. Storage, receipts, revision checks, formatting serialization, shared buffers and history grouping were not changed.
+
+Static verification passed on the existing Linux toolchain:
+
+```text
+cargo fmt --all -- --check
+git diff --check
+cargo check --locked --offline --bin stickies --bin stickies-mcp
+cargo clippy --locked --offline --bin stickies --bin stickies-mcp -- -D warnings
+cargo build --locked --offline --bin stickies --bin stickies-mcp
+```
+
+Focused runtime verification used one disposable note with two checklist items and one bold span. It reused the prior stdio JSON-RPC companion harness, native keyboard input and accessibility assertions on a nested instance of installed Hyprland with one private 1280x800 output. HOME, data, config, cache and temporary files were under `/tmp/stickies-mcp-focus-repair-20261025`; the runtime directory was `/tmp/sf1`. D-Bus and the accessibility registry were private to the fixture. No real notes database was opened or migrated.
+
+| Authorized check | Result |
+| --- | --- |
+| Original checkbox-focus MCP update | Passed. The first item was completed through native Ctrl+Tab/Space, kept focus, and the same body update that previously crashed returned success. Completion and the bold span survived. |
+| One-step Undo, Redo and reopening | Passed. A checkbox was focused again before both history replacements. One Ctrl+Z restored the entire prior note; Ctrl+Shift+Z restored the MCP result. Text, completion and formatting survived reopening. |
+| Previously passing text-body-focus case | Passed. The MCP update retained body focus, completed content and formatting. A further body-focus edit was undone once from the other shared view, redone from All Notes and persisted after reopening. |
+| Same session in two views | Passed with All Notes and a detached editor displaying note 1. MCP body updates with checkbox focus in either view updated both bodies and both sets of completion widgets without changing the active window. Shared history restoration updated both views. |
+| Unrelated control and inactive note window | Passed. With All Notes search focused and the detached note inactive, MCP left the search widget/text and active-window identity unchanged while refreshing both views. |
+| Unrelated application | Passed. Both note roots had held checkbox focus before a separate disposable GTK application's entry became active. MCP updated both inactive note views without changing the active application or its entry focus. Subsequent keyboard input went to that application. |
+
+No further application crash occurred, and the repaired app's stderr log was empty. A temporary harness attempt to navigate backward to Search did not reach it; this was corrected by using the existing pointer helper, and the actual unrelated-focus assertions then passed. No broader suite, unrelated regressions, stress checks or benchmarks ran.
+
+The focused commands were `python /tmp/stickies-mcp-focus-repair-20261025/focus_checks.py` and `python /tmp/stickies-mcp-focus-repair-20261025/shared_focus_checks.py`, followed by isolated checks of another application/search focus and shared Undo/Redo through the same helpers. Request/reply JSON, before/after accessibility focus snapshots, active-window addresses/PIDs and screenshots are retained in that directory's `evidence/`. `state.json`, `shared-state.json` and `REPORT.md` summarize the completed checks. The original crash report remains unchanged.
+
+All test processes were stopped. Snapshot comparison preserves all earlier uncommitted work and ZIPs; only `src/note_session.rs`, this record and `current-milestone.md` changed in this attempt. HEAD, the empty index, package/IPC versions, dependencies and `/home/rinzler/projects/Stickies` are unchanged. There were no installations, CI dispatches, commits, pushes or publication.
+
+Windows compilation and runtime verification remain outstanding because no native Windows target/linker is installed. Linux results cover this GTK/Hyprland environment only. The focused regression establishes that the small focus transition avoids the observed failure here; it does not prove the exact GTK memory mechanism or broader platform compatibility.
+
 ## October 22 v0.10 publication results
 
 The normal, non-prerelease [GitHub v0.10 release](https://github.com/0atxl/stickies/releases/tag/v0.10) is public. Its tag points to `ad7856c327659bdf083fdea8c6ff61aad0debee6`; Cargo and Arch use version `0.10.0`. All 11 release assets, including combined SHA256SUMS, matched GitHub's server-side SHA-256 digests before publication. Unauthenticated checks confirmed the release/tag, public checksum bytes and Windows download URLs. The AUR recipes downloaded both public Arch binary/source URLs into fresh directories and passed their checksum checks.

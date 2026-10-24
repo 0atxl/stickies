@@ -4,6 +4,63 @@ The active milestone is reliability, Wayland verification and release finishing 
 
 [SPEC.md](SPEC.md) describes current behavior. [implementation.md](implementation.md) owns remaining roadmap work. The [detailed verification record](manual-testing.md) contains results, fixtures, evidence and the remaining checklist. Further test execution requires separate authorization under [AGENTS.md](../AGENTS.md).
 
+## MCP checkpoint and startup defaults, October 25
+
+The owner authorized committing and pushing the reviewed four-tool MCP implementation on `codex/mcp`, including the checklist-focus repair, and requested Playful with Clean edges as the defaults. MCP access remains Off by default. Explicitly saved preferences are preserved. All completed Windows MCP work remains included, with Windows compilation/runtime clearly marked unverified. The main development checkout remains unchanged. This checkpoint does not publish a release or change the package version.
+
+The defaults change permits static checks and compilation only. No new tests, app sessions or benchmarks are authorized. The commit skips push-triggered test CI. Earlier focused Linux results and their environment limits remain recorded below. Package-size inspection and a minimal idle companion memory observation are requested for the resource question; they do not establish a GUI memory delta or Windows results.
+
+Static verification passed for this checkpoint: Rustfmt, staged whitespace checks and locked offline Clippy with warnings denied for both binaries. A local Arch package built from the prepared source snapshot using `CARGO_NET_OFFLINE=true makepkg --nodeps --nocheck --nosign --log`; it was not installed. New-default app sessions and tests were not run. Suggested later check is a disposable fresh configuration plus loading an existing saved theme/edge/access selection.
+
+The local Arch package is 4,390,756 bytes versus the published v0.10.2 package's 2,480,291 bytes, an increase of 1,910,465 bytes. Installed payload is 10,248,696 versus 4,965,529 bytes, an increase of 5,283,167 bytes. The stripped GUI is 4,083,568 bytes versus 3,908,176; the added companion is 4,995,536 bytes. Payload file count rises from seven to eight. This compares a local current build with the published baseline; it does not establish reproducibility or Windows sizes.
+
+One optimized companion process after MCP initialization, with no GUI calls or note database access, used 5,900 KiB RSS and 3,316 KiB PSS on this host, with ten threads. The observation is neither a GUI memory delta nor a CPU/latency benchmark. The GUI does not start the companion automatically; an MCP client controls its lifetime. The Windows v0.10.2 ZIP baseline is 46,538,053 bytes, but its MCP size increase and memory use remain unmeasured. Evidence and the uninstalled local Arch package are under `/tmp/stickies-mcp-size-20261025/`.
+
+## MCP checklist-focus repair, October 25
+
+The owner authorized one focused repair after the disposable MCP workflow check found a SIGSEGV when replacing a buffer whose embedded checkbox had keyboard focus. A small shared-session helper moves only that checkbox's root focus to its containing text view before MCP or Undo/Redo replaces the buffer. It checks every attached view, including inactive note windows, without presenting a window or touching unrelated focus. Persistence and receipt ordering, revisions, formatting, keyboard-accessible checkboxes and history grouping remain unchanged.
+
+Linux formatting, whitespace, both binary compilation/linking and Clippy passed. The authorized isolated regressions passed for the exact checkbox-focus MCP update, completion/formatting, one-step Undo, Redo, reopening, text-body focus, two shared views with checkbox focus in either, and unrelated control/application focus without inactive-window activation. No further application crash occurred. The prior exact reproduction/backtrace was sufficient, so the pre-fix crash was not repeated. The [focused verification record](manual-testing.md#october-25-mcp-checklist-focus-repair) separates the established crash location from the inferred GTK re-entry mechanism and records the evidence/limits.
+
+Only the session repair and related records changed in this attempt. All earlier uncommitted work, ZIPs, versions and dependencies are preserved. Testing used private disposable directories and never opened the real notes database. Windows compilation/runtime remain unavailable and outstanding. No broader tests, installations, CI dispatches, commits, pushes or publication occurred.
+
+## MCP review corrections, October 25
+
+The owner authorized only two follow-up fixes in `/home/rinzler/nothing/Stickies` on `codex/mcp`, preserving all earlier uncommitted work. Windows pipe replies now wait for a one-byte acknowledgement sent after the companion reads the complete response. The wait stays inside the existing ten-second exchange timeout and shutdown select. A failed acknowledgement does not discard a response already read by the companion. No blocking flush or Tokio no-op flush is used. The Settings panel's existing refresh callback now strongly owns the MCP button collection; signal handlers retain weak references. This keeps failed-save restoration and panel refresh connected to the accepted live access setting without a reference cycle.
+
+Verification passed on the existing Linux toolchain:
+
+- `cargo fmt --all -- --check` and `git diff --check`, including separate whitespace inspection of the untracked MCP Rust modules.
+- `cargo check --locked --offline --bin stickies --bin stickies-mcp`.
+- `cargo clippy --locked --offline --bin stickies --bin stickies-mcp -- -D warnings`.
+- `cargo build --locked --offline --bin stickies --bin stickies-mcp`, including linking.
+
+Static inspection covered both Windows exchange endpoints, complete-body read before acknowledgement, acknowledgement errors, the exchange timeout and shutdown cancellation. The locked Tokio source confirms pipe flush is a no-op. [Microsoft documents unread-data loss on disconnect](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-disconnectnamedpipe). Settings ownership was traced from `Panel::extras` to the button collection, with weak signal references and the existing guards preserved for failed-save restoration and panel refresh. Snapshot comparison confirms only the four intended source files and two related documentation files changed; all other existing files, both ZIPs, Cargo version/dependencies, Git HEAD and the empty index are unchanged.
+
+Native Windows compilation is unavailable because the host has only the Linux Rust target and no Windows linker. Linux compilation does not verify the Windows-only code. No tests, app sessions, benchmarks, installations, CI dispatch, commits, pushes or publication occurred. Suggested checks, not run: delayed Windows response reads; disconnect/shutdown during response or acknowledgement waits; and a failed Read/write-to-Off settings save followed by panel refresh, which must keep Read/write selected and active.
+
+## Focused MCP repairs, October 25
+
+The owner explicitly authorized repairing the uncommitted MCP implementation on `codex/mcp` in `/home/rinzler/nothing/Stickies`, based on latest main `0629cb7`. This scope adds the existing four-tool companion workflow to the reliability milestone. It permits related documentation, static checks, compilation and linting. It excludes tests, manual app sessions, benchmarks, installation, CI dispatch, commits, pushes and publication. `/home/rinzler/projects/Stickies` and the two existing repository-root ZIPs must remain unchanged.
+
+The GUI still owns SQLite, settings and live sessions. Revisions and request identities use structured bytes, receipts commit with note mutations and persist across restart without expiry, and stale revisions reject writes. Successful writes refresh the existing lists/tabs and use shared checklist widgets/history in open notes. Windows uses cancellable Tokio pipe I/O and sends only request/reply data to a GUI-thread receiver. Linux retains caller-UID checks. See the [MCP contract and upgrade constraints](../packaging/README.md#note-workflow-and-write-contract).
+
+This unreleased checkout retains package version 0.10.2 but advances the database to schema 5 for mutation receipts. Released v0.10.2 rejects that schema. Close the GUI and back up its database before first running this build. Update both executables together; use fresh operation IDs and reread notes after upgrading from pre-repair MCP builds. No live user database is opened by this repair work.
+
+Authorized verification passed with Rust/Cargo 1.99.1 on Linux:
+
+- `cargo fmt --all -- --check` and `git diff --check`, plus whitespace checks of new MCP modules.
+- `cargo check --locked --offline --bin stickies --bin stickies-mcp`.
+- `cargo clippy --locked --offline --bin stickies --bin stickies-mcp -- -D warnings`.
+- `cargo build --locked --offline --bin stickies --bin stickies-mcp`, including executable linking.
+- Python AST parsing of `packaging/prepare-release.py`, `bash -n packaging/arch/PKGBUILD` and the existing `/tmp/stickies-parse-powershell.cjs` Tree-sitter parser, with no PowerShell syntax issues. PowerShell itself is unavailable.
+- `cargo package --list --allow-dirty --locked --offline`; its source list includes the new modules, migration and license supplement.
+- `python packaging/prepare-release.py --output /tmp/stickies-mcp-repair-source-final`, followed by source-input, source-manifest and `sha256sum --check SHA256SUMS` inspection. Both exact-version rmcp notices appear in the consolidated notice document. The supplement matches the original repository LICENSE at commit `519577601db3823616dbd7c4eb84ed569d8e17d4`, obtained as text only for byte comparison. Windows source/binary/license selections were inspected statically.
+
+The original dependency lock, settings work, migration and owner lock remain intact. Both old root ZIP hashes, the `0629cb7` HEAD and the empty Git index are unchanged. No tests, app sessions, benchmarks, installations, commits, pushes, CI runs or publication occurred. No live notes database was opened. There is no native Windows Rust target/linker or PowerShell here. Windows compilation/linking, actual Windows packaging and all runtime behavior remain unverified; Linux compilation cannot establish them.
+
+Suggested follow-up tests, all not run: long/Unicode/NUL-safe revision hashing and canonical span round trips; delimiter and omitted/empty fingerprint collisions; duplicate operations across restart and lost replies; stale-revision and failed-transaction preservation of human edits/autosaves; All Notes/edge refresh without focus changes; checklist completion, shared views and one-step Undo; exclusions/formatting errors/payload boundaries; settings revocation, Linux UID/Windows user authorization, malformed/slow pipes and shutdown while waiting.
+
 ## v0.10.2 publication, October 23 and 24
 
 The owner authorized committing/pushing the extraction cleanup, building fresh Arch/Windows packages, publishing a GitHub patch release and updating crates.io and both AUR packages. The selected version is `0.10.2`, tag `v0.10.2`. This scope also included verifying the existing website release workflow and the resulting live download links.

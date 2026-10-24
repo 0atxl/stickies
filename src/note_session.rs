@@ -273,6 +273,29 @@ impl NoteSession {
         self.history.borrow().can_restore(redo)
     }
 
+    // Removing a focused anchor widget during set_text can re-enter GTK's
+    // selection handling while the buffer is being cleared. Move only that
+    // window's embedded checkbox focus to its surviving view, without activation.
+    fn focus_body_before_replacement(&self) {
+        let views: Vec<_> = self
+            .views
+            .borrow()
+            .iter()
+            .filter_map(|view| view.upgrade())
+            .filter(|view| view.buffer() == self.body)
+            .collect();
+        for view in views {
+            if let Some(root) = view.root()
+                && let Some(focus) = gtk::prelude::RootExt::focus(&root)
+                && focus.is::<gtk::CheckButton>()
+                && focus.has_css_class("inline-check")
+                && focus.is_ancestor(&view)
+            {
+                root.set_focus(Some(&view));
+            }
+        }
+    }
+
     pub fn undo(self: &Rc<Self>, redo: bool) {
         self.record_edit();
         let Some(restored) = self.history.borrow_mut().restore(redo) else {
@@ -281,6 +304,7 @@ impl NoteSession {
         let state = restored.state;
         self.decorating.set(true);
         self.title.set_text(&state.title);
+        self.focus_body_before_replacement();
         self.body.set_text(&state.body);
         crate::text_editing::apply(&self.body, &state.spans);
         self.decorating.set(false);
@@ -551,14 +575,60 @@ impl NoteSession {
         self.notify();
     }
 
+    pub fn live_note(&self) -> Note {
+        let (start, end) = self.body.bounds();
+        Note {
+            id: self.id,
+            title: self.title.text().to_string(),
+            body: crate::checklist::text(&self.body, &start, &end),
+            color: self.color.get(),
+            pinned: self.pinned.get(),
+        }
+    }
+
+    pub fn live_formatting(&self) -> Result<Vec<crate::text_editing::Span>, String> {
+        if let Some(error) = &self.formatting_error {
+            return Err(error.clone());
+        }
+        Ok(crate::text_editing::spans(&self.body))
+    }
+
+    /// The caller has already saved this content and its receipt atomically.
+    pub fn apply_mcp_update(
+        self: &Rc<Self>,
+        new_title: Option<&str>,
+        new_body: Option<&str>,
+        new_formatting: Option<&[crate::text_editing::Span]>,
+    ) {
+        self.edit_action(|| {
+            self.decorating.set(true);
+            if let Some(title) = new_title {
+                self.title.set_text(title);
+            }
+            if let Some(body) = new_body {
+                self.focus_body_before_replacement();
+                self.body.set_text(body);
+                crate::text_editing::apply(&self.body, new_formatting.unwrap_or(&[]));
+            }
+            self.decorating.set(false);
+            self.refresh_checklists();
+        });
+        if let Some(source) = self.render_source.borrow_mut().take() {
+            source.remove();
+        }
+        if let Some(source) = self.save_source.borrow_mut().take() {
+            source.remove();
+        }
+        self.dirty.set(false);
+        self.error.borrow_mut().take();
+        self.notify();
+    }
+
     pub fn flush(&self) -> bool {
         if self.formatting_error.is_some() {
             return false;
         }
         self.record_edit();
-        if let Some(source) = self.save_source.borrow_mut().take() {
-            source.remove();
-        }
         if !self.dirty.get() {
             return true;
         }
@@ -575,6 +645,9 @@ impl NoteSession {
             .update_formatted_note(&note, &crate::text_editing::spans(&self.body))
         {
             Ok(()) => {
+                if let Some(source) = self.save_source.borrow_mut().take() {
+                    source.remove();
+                }
                 self.dirty.set(false);
                 self.error.borrow_mut().take();
                 if !self.is_blank() {

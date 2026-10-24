@@ -3,6 +3,7 @@ name = "stickies"
 version = "0.10.2"
 edition = "2024"
 rust-version = "1.92"
+default-run = "stickies"
 description = "Local sticky notes for Linux Wayland and Windows"
 license = "MPL-2.0"
 repository = "https://github.com/0atxl/stickies"
@@ -10,7 +11,16 @@ readme = "README.md"
 keywords = ["notes", "gtk4", "wayland", "desktop"]
 categories = ["gui"]
 include = ["/src/**", "/assets/**", "/data/**", "/migrations/**", "/tests/**",
-           "/build.rs", "/Cargo.lock", "/LICENSE", "/README.md", "/packaging/windows.md"]
+           "/build.rs", "/Cargo.lock", "/LICENSE", "/README.md", "/packaging/windows.md",
+           "/packaging/licenses/rmcp-Apache-2.0.txt"]
+
+[[bin]]
+name = "stickies"
+path = "src/main.rs"
+
+[[bin]]
+name = "stickies-mcp"
+path = "src/mcp_main.rs"
 
 [dependencies]
 adw = { version = "0.9", package = "libadwaita", features = ["v1_7"] }
@@ -21,17 +31,26 @@ serde_json = "1.0.151"
 toml = "1.1.5"
 pango = { version = "0.22", features = ["v1_56"] }
 pangocairo = "0.22"
+rmcp = { version = "2.2", default-features = false, features = ["server", "transport-io", "macros", "schemars"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "sync", "time", "net"] }
+schemars = "1.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk4-layer-shell = "0.8"
 glib-unix = "0.22"
 libc = "0.2"
+zbus = { version = "5.19", default-features = false, features = ["tokio"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
+    "Win32_Storage_FileSystem",
     "Win32_System_LibraryLoader",
+    "Win32_System_Pipes",
     "Win32_UI_HiDpi",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",

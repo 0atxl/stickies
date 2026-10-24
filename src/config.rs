@@ -20,18 +20,18 @@ pub enum ScreenEdge {
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
-    #[default]
     #[serde(alias = "glass")]
     Minimal,
     Paper,
+    #[default]
     Playful,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PlayfulEdges {
-    #[default]
     Wavy,
+    #[default]
     Clean,
 }
 
@@ -99,6 +99,15 @@ pub enum NoteTextSize {
     #[default]
     Medium,
     Large,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum McpAccess {
+    #[default]
+    Off,
+    ReadOnly,
+    ReadWrite,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -172,6 +181,7 @@ pub struct Config {
     pub reduced_motion: bool,
     pub hide_in_fullscreen: bool,
     pub hide_in_dnd: bool,
+    pub mcp_access: McpAccess,
     #[serde(skip)]
     pub legacy_note_defaults: [bool; 2],
 }
@@ -183,8 +193,8 @@ impl Default for Config {
             marker_offset: 0.5,
             edge_hover_enabled: true,
             launch_at_login: false,
-            theme: Theme::Paper,
-            playful_edges: PlayfulEdges::Wavy,
+            theme: Theme::Playful,
+            playful_edges: PlayfulEdges::Clean,
             appearance: Appearance::System,
             font: Font::Theme,
             legacy_font_size: None,
@@ -197,6 +207,7 @@ impl Default for Config {
             reduced_motion: false,
             hide_in_fullscreen: true,
             hide_in_dnd: true,
+            mcp_access: McpAccess::Off,
             legacy_note_defaults: [false; 2],
         }
     }

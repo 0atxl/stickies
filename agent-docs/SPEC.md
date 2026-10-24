@@ -130,8 +130,8 @@ Source: [config.rs](../src/config.rs); consumers are the modules above. Path: GL
 | `marker_offset` | `0.5` | Finite 0–1; along-edge position, with placement clamping. |
 | `edge_hover_enabled` | `true` | Boolean; permits hover reveal. False still permits click/action reveal. |
 | `launch_at_login` | `false` | Boolean; reconciles the autostart desktop entry. |
-| `theme` | `paper` | `minimal`, `paper`, `playful`; legacy `glass` loads as Minimal. |
-| `playful_edges` | `wavy` | `wavy` or `clean`; only affects Playful. |
+| `theme` | `playful` | `minimal`, `paper`, `playful`; legacy `glass` loads as Minimal. |
+| `playful_edges` | `clean` | `wavy` or `clean`; only affects Playful. |
 | `appearance` | `system` | `system`, `light`, `dark`; controls Minimal's mode. |
 | legacy `font` | absent | Read for startup migration into existing note styles, then omitted on save. |
 | legacy `paper` | absent | Read for startup migration into notes without a pattern override, then omitted on save. |
@@ -143,6 +143,7 @@ Source: [config.rs](../src/config.rs); consumers are the modules above. Path: GL
 | `reduced_motion` | `false` | Boolean; suppresses application animations alongside system settings. |
 | `hide_in_fullscreen` | `true` | File-only Boolean; transient Top versus Overlay layer policy. |
 | `hide_in_dnd` | `true` | File-only Boolean; Omarchy DND visibility policy. |
+| `mcp_access` | `off` | `off`, `read-only`, `read-write`; permission for the four MCP tools. |
 | legacy `font_size` | absent | Optional unsigned integer accepted on input, ignored, omitted on save. |
 
 - Missing config creates/saves defaults. Missing keys in an existing file use these defaults. Unknown keys, invalid enums/types and invalid validated values are rejected.
@@ -150,7 +151,7 @@ Source: [config.rs](../src/config.rs); consumers are the modules above. Path: GL
 - Valid configs containing retired `white_paper` or experimental `footer_style` entries are saved atomically without those entries, after any required legacy note-default migration. Other preferences retain their accepted values.
 - Invalid/unreadable startup config logs an error and uses defaults for that run, preserves the existing file, blocks config writes and skips autostart reconciliation.
 - Saving writes `config.toml.tmp`, syncs the file and renames it over the destination. The code does not sync the parent directory.
-- Per-note style is TOML in SQLite, with `text_size=medium`, optional `font`, `paper` and `shape` absent by default. Size accepts small/medium/large; pattern/shape use the enum values above. Legacy `text_weight` accepts regular/bold; regular is omitted on save, while existing bold is preserved so style edits do not reset old notes. There is no whole-note weight UI or setter. Missing fields default; unknown fields reject. Per-note `font` is now active and persisted. At startup, legacy global font/paper values migrate transactionally into existing notes before removing their config keys. Global font wins over formerly ignored legacy note font entries; existing pattern overrides remain. Archived and deleted notes are included. Migration failure stops startup without removing the old config. The database schema stays at version 4.
+- Per-note style is TOML in SQLite, with `text_size=medium`, optional `font`, `paper` and `shape` absent by default. Size accepts small/medium/large; pattern/shape use the enum values above. Legacy `text_weight` accepts regular/bold; regular is omitted on save, while existing bold is preserved so style edits do not reset old notes. There is no whole-note weight UI or setter. Missing fields default; unknown fields reject. Per-note `font` is now active and persisted. At startup, legacy global font/paper values migrate transactionally into existing notes before removing their config keys. Global font wins over formerly ignored legacy note font entries; existing pattern overrides remain. Archived and deleted notes are included. Migration failure stops startup without removing the old config. The appearance migration itself needs no additional schema change. The MCP build uses schema 5, described below.
 
 ## Actions and shortcuts
 
@@ -186,10 +187,11 @@ Replace `new-note` with another action name. The empty parameter array matches t
 
 Sources: [storage.rs](../src/storage.rs), [note_session.rs](../src/note_session.rs), [main.rs](../src/main.rs), [migrations](../migrations).
 
-- Notes are local SQLite data at GLib's user data directory plus `stickies/notes.db` (normally `$XDG_DATA_HOME/stickies/notes.db`). Database opening creates the parent directory and applies transactional migrations through schema version 4; a newer schema is rejected.
+- Notes are local SQLite data at GLib's user data directory plus `stickies/notes.db` (normally `$XDG_DATA_HOME/stickies/notes.db`). Database opening creates the parent directory and applies transactional migrations through schema version 5; a newer schema is rejected.
 - Stored note fields are ID, title, body, color, pinned, `sort_order`, created/updated timestamps and nullable archived/deleted timestamps. Styles live in a separate `note_styles` table as TOML. No example notes are inserted at startup.
 - New notes from the strip, All Notes, search creation or the new-note action choose a random color from the existing 16-color palette, excluding the color stored on the most recently created note when one exists. The chosen color is stored once; existing notes and manual color choices are preserved. Blank creation inserts a draft for editing. Drafts are excluded from edge tabs and their order/configured slot limit, the marker, All Notes rows/order/counts/list selection and every search result. Search creation with a non-whitespace title inserts a normal visible note immediately. Existing blank notes remain visible.
-- Drafts use `created_at = -1` in the existing schema 4. The first successful title/body save with non-whitespace content replaces that marker with a real creation timestamp and assigns the usual Recent order in the same SQL update as text and formatting. Failed saves keep the draft hidden and the editor open. Style, color and pin changes alone cannot publish a blank draft. Once published, clearing its content never makes it a draft again. The docked arrow follows the published note's tab.
+- Schema 5 adds `mutation_receipts` for MCP retry protection. Note writes and receipts commit together. See the [four-tool MCP contract](../packaging/README.md#note-workflow-and-write-contract) for settings, revisions, payload limits and upgrades. Only the running GUI opens the database, guarded by an OS-backed owner lock.
+- Drafts use `created_at = -1`, introduced before schema 5. The first successful title/body save with non-whitespace content replaces that marker with a real creation timestamp and assigns the usual Recent order in the same SQL update as text and formatting. Failed saves keep the draft hidden and the editor open. Style, color and pin changes alone cannot publish a blank draft. Once published, clearing its content never makes it a draft again. The docked arrow follows the published note's tab.
 - Text/color edits save after 750 ms of quiet time through one shared session; further edits reset the debounce. Per-note style and ordering-pin changes write immediately.
 - Title/body/color saves update the timestamp and refresh ordering/edge data. Failed text/color saves retain dirty buffers and display an error. Close, switch, dock replacement and initiating archive/delete operations flush first and stop if that flush fails. Failed style/pin writes retain the previous preference and report the error.
 - An active draft still whitespace-only in both title and body is soft-deleted when its last editing view leaves. Other shared views keep it alive. Existing blank notes and published notes remain. Save/cleanup failures retain the view for retry. On startup, storage transactionally removes remaining unpublished draft rows and their styles before loading any list. This also removes blank drafts left by a crash or forced exit without removing pre-existing blank notes.
@@ -201,12 +203,12 @@ Sources: [storage.rs](../src/storage.rs), [note_session.rs](../src/note_session.
 
 The owner accepts the current UI design. The [verification record](manual-testing.md) documents scoped editing/saving, history, input, timeout, shutdown and Search passes, plus owner-confirmed resolution recovery and fixed-size Search acceptance. The final monitor/layout and diagnostic-removal changes have static checks and those owner reports only. Multi-monitor behavior, broader compositor compatibility, ordinary-use resource observations, installed login/session-end delivery and packaging remain unverified. Further verification requires separate execution authorization.
 
-Keep migrations 1-4 and compatibility parsing. Legacy whole-note bold, font/canvas defaults, shape overrides, Glass and adjacent/overlapping aliases are saved-data concerns even when the old controls are absent. Retired designs, prompts and old verification results are historical material pending explicit deletion review, not current requirements.
+Keep migrations 1-5 and compatibility parsing. Legacy whole-note bold, font/canvas defaults, shape overrides, Glass and adjacent/overlapping aliases are saved-data concerns even when the old controls are absent. Retired designs, prompts and old verification results are historical material pending explicit deletion review, not current requirements.
 
 
 ## Windows branch behavior
 
-The Windows port retains shared sessions, autosave/save guards, anchor-based checklist serialization, formatting/history and schema 4. It emulates the edge hosts through Win32 rather than Layer Shell. Linux continues using Layer Shell, including ordinary pointer-leave collapse handling. Pango 1.56+ is required on both platforms by font-file registration.
+The Windows port retains shared sessions, autosave/save guards, anchor-based checklist serialization, formatting/history and schema 5. It emulates the edge hosts through Win32 rather than Layer Shell. Linux continues using Layer Shell, including ordinary pointer-leave collapse handling. Pango 1.56+ is required on both platforms by font-file registration.
 
 The Windows edge hosts do not appear in the taskbar when displaying the strip, docked note or Search. All Notes and detached notes retain normal taskbar behavior. The system tray remains available when only the edge is showing. This policy does not change edge placement, hover/collapse, keyboard focus or note storage.
 

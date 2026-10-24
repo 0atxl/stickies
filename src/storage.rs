@@ -9,7 +9,7 @@ use rusqlite::{Connection, OptionalExtension, functions::FunctionFlags, params};
 
 use crate::app::{Note, NoteColor, NoteId};
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 // An unpublished note has no creation date yet. Normal notes, including old
 // blanks, retain their positive timestamp. Promotion writes a real date atomically.
 const DRAFT_CREATED_AT: i64 = -1;
@@ -80,6 +80,16 @@ pub enum NoteCollection {
 pub enum NoteSort {
     Recent,
     Title,
+}
+
+pub struct McpNewNote<'a> {
+    pub operation_id: &'a str,
+    pub fingerprint: &'a str,
+    pub title: &'a str,
+    pub body: &'a str,
+    pub formatting: &'a [crate::text_editing::Span],
+    pub color: NoteColor,
+    pub revision: &'a str,
 }
 
 impl Storage {
@@ -415,6 +425,136 @@ impl Storage {
         }
     }
 
+    pub fn get_mutation_receipt(
+        &self,
+        operation_id: &str,
+    ) -> Result<Option<(String, NoteId, String)>, StorageError> {
+        let result = self
+            .connection
+            .query_row(
+                "SELECT request_fingerprint, note_id, revision FROM mutation_receipts WHERE operation_id = ?1",
+                params![operation_id],
+                |row| {
+                    let fp: String = row.get(0)?;
+                    let nid: i64 = row.get(1)?;
+                    let rev: String = row.get(2)?;
+                    Ok((fp, nid, rev))
+                },
+            )
+            .optional()?;
+        match result {
+            Some((fp, nid, rev)) => {
+                let id = u64::try_from(nid).map_err(|_| StorageError::InvalidNoteId(nid))?;
+                Ok(Some((fp, NoteId::new(id), rev)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub fn mcp_create_note(&self, note: McpNewNote<'_>) -> Result<Note, StorageError> {
+        let timestamp = unix_timestamp_millis();
+        let formatting_json = serde_json::to_string(note.formatting).map_err(|e| {
+            StorageError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        })?;
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute(
+            "INSERT INTO notes (
+                title, body, color, formatting, pinned, sort_order,
+                created_at, updated_at, archived_at, deleted_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, 0,
+                (SELECT COALESCE(MIN(sort_order), 1) - 1 FROM notes WHERE created_at != ?6),
+                ?5, ?5, NULL, NULL
+             )",
+            params![
+                note.title,
+                note.body,
+                color_name(note.color),
+                formatting_json,
+                timestamp,
+                DRAFT_CREATED_AT
+            ],
+        )?;
+        let row_id = transaction.last_insert_rowid();
+        let id_u64 = u64::try_from(row_id).map_err(|_| StorageError::InvalidNoteId(row_id))?;
+        transaction.execute(
+            "INSERT INTO mutation_receipts (operation_id, request_fingerprint, note_id, revision, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![note.operation_id, note.fingerprint, row_id, note.revision, timestamp],
+        )?;
+        transaction.commit()?;
+        Ok(Note::new(
+            NoteId::new(id_u64),
+            note.title,
+            note.body,
+            note.color,
+        ))
+    }
+
+    pub fn mcp_update_note(
+        &self,
+        operation_id: &str,
+        fingerprint: &str,
+        note: &Note,
+        formatting: &[crate::text_editing::Span],
+        revision: &str,
+    ) -> Result<(), StorageError> {
+        let timestamp = unix_timestamp_millis();
+        let formatting_json = serde_json::to_string(formatting).map_err(|e| {
+            StorageError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        })?;
+        let note_i64 = note_id_to_i64(note.id)?;
+        let transaction = self.connection.unchecked_transaction()?;
+        let updated = transaction.execute(
+            "UPDATE notes SET title = ?1, body = ?2, color = ?3, formatting = ?4, updated_at = ?5
+             WHERE id = ?6 AND deleted_at IS NULL AND archived_at IS NULL AND created_at != ?7",
+            params![
+                note.title,
+                note.body,
+                color_name(note.color),
+                formatting_json,
+                timestamp,
+                note_i64,
+                DRAFT_CREATED_AT
+            ],
+        )?;
+        if updated == 0 {
+            return Err(StorageError::MissingNote(note.id));
+        }
+        transaction.execute(
+            "INSERT INTO mutation_receipts (operation_id, request_fingerprint, note_id, revision, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![operation_id, fingerprint, note_i64, revision, timestamp],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn get_active_note(&self, id: NoteId) -> Result<Option<Note>, StorageError> {
+        let note = self
+            .connection
+            .query_row(
+                "SELECT id, title, body, color, pinned
+                 FROM notes
+                 WHERE id = ?1 AND deleted_at IS NULL AND archived_at IS NULL AND created_at != ?2",
+                params![note_id_to_i64(id)?, DRAFT_CREATED_AT],
+                note_from_row,
+            )
+            .optional()?;
+        note.map(stored_note_from_row).transpose()
+    }
+
+    pub fn get_all_active_notes(&self) -> Result<Vec<Note>, StorageError> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, title, body, color, pinned
+             FROM notes
+             WHERE deleted_at IS NULL AND archived_at IS NULL AND created_at != ?1
+             ORDER BY pinned DESC, sort_order ASC, updated_at DESC",
+        )?;
+        let rows = statement.query_map([DRAFT_CREATED_AT], note_from_row)?;
+        rows.map(|r| stored_note_from_row(r?)).collect()
+    }
+
     fn migrate(&mut self) -> Result<(), StorageError> {
         let version = self
             .connection
@@ -446,6 +586,12 @@ impl Storage {
         if version < 4 {
             let transaction = self.connection.transaction()?;
             transaction.execute_batch(include_str!("../migrations/004_note_formatting.sql"))?;
+            transaction.pragma_update(None, "user_version", 4)?;
+            transaction.commit()?;
+        }
+        if version < 5 {
+            let transaction = self.connection.transaction()?;
+            transaction.execute_batch(include_str!("../migrations/005_mcp_receipts.sql"))?;
             transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             transaction.commit()?;
         }
@@ -474,6 +620,10 @@ impl Storage {
 
 pub fn database_path() -> PathBuf {
     gtk::glib::user_data_dir().join("stickies").join("notes.db")
+}
+
+pub fn lock_path() -> PathBuf {
+    database_path().with_extension("lock")
 }
 
 fn note_id_to_i64(id: NoteId) -> Result<i64, StorageError> {
@@ -505,11 +655,11 @@ fn stored_note_from_row(
     })
 }
 
-const fn color_name(color: NoteColor) -> &'static str {
+pub(crate) const fn color_name(color: NoteColor) -> &'static str {
     color.name()
 }
 
-fn parse_color(color: &str) -> Result<NoteColor, StorageError> {
+pub(crate) fn parse_color(color: &str) -> Result<NoteColor, StorageError> {
     NoteColor::ALL
         .into_iter()
         .find(|value| value.name() == color)

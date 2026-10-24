@@ -126,7 +126,7 @@ try {
 
     # Build the exact snapshot we distribute, including the untracked Rust modules.
     # Do not copy the repository, agent files, user data, existing ZIPs or build output.
-    $Inputs = @("Cargo.toml", "Cargo.lock", "build.rs", "LICENSE", "README.md", "scripts/package-windows.ps1", "packaging/windows.md", "data/dev.stickies.Stickies.png", "data/dev.stickies.Stickies.desktop")
+    $Inputs = @("Cargo.toml", "Cargo.lock", "build.rs", "LICENSE", "README.md", "scripts/package-windows.ps1", "packaging/windows.md", "packaging/licenses/rmcp-Apache-2.0.txt", "data/dev.stickies.Stickies.png", "data/dev.stickies.Stickies.desktop")
     foreach ($Pattern in @("src/*.rs", "assets/*.css", "assets/*.xml", "assets/fonts/*.ttf", "assets/fonts/*-LICENSE.txt", "assets/icons/*.svg", "assets/icons/edge/*.svg", "assets/icons/playful/*.svg", "migrations/*.sql")) {
         $Inputs += @(Get-ChildItem -Path (Join-Path $RepoRoot $Pattern) -File | ForEach-Object { $_.FullName.Substring($RepoRoot.Length + 1) })
     }
@@ -164,12 +164,16 @@ try {
         $Tree = Invoke-Checked $Cargo @("tree", "--frozen", "--target", $Target, "-e", "normal,build", "--prefix", "none", "--format", "{p}")
     } finally { Pop-Location }
     Copy-Item -LiteralPath (Join-Path $BuildRoot "$Target\release\stickies.exe") -Destination $BinDir
-    Copy-Item -LiteralPath (Join-Path $BinDir "stickies.exe") -Destination $SymbolsRoot
-    Invoke-Checked $Strip @("--strip-all", (Join-Path $BinDir "stickies.exe")) | Out-Host
+    Copy-Item -LiteralPath (Join-Path $BuildRoot "$Target\release\stickies-mcp.exe") -Destination $BinDir
+    foreach ($Executable in @("stickies.exe", "stickies-mcp.exe")) {
+        Copy-Item -LiteralPath (Join-Path $BinDir $Executable) -Destination $SymbolsRoot
+        Invoke-Checked $Strip @("--strip-all", (Join-Path $BinDir $Executable)) | Out-Host
+    }
     Write-Text (Join-Path $SymbolsRoot "README.txt") @(
-        "Unstripped Stickies executable for crash investigation; not needed to run the app.",
+        "Unstripped Stickies executables for crash investigation; not needed to run the app.",
         "Source commit: $Revision",
         "Runtime executable SHA-256: $((Get-FileHash -LiteralPath (Join-Path $BinDir 'stickies.exe') -Algorithm SHA256).Hash.ToLowerInvariant())"
+        "Runtime companion SHA-256: $((Get-FileHash -LiteralPath (Join-Path $BinDir 'stickies-mcp.exe') -Algorithm SHA256).Hash.ToLowerInvariant())"
     )
     Copy-Item -LiteralPath (Join-Path $SourceRoot "LICENSE") -Destination (Join-Path $DistRoot "LICENSE")
     Copy-Item -LiteralPath (Join-Path $SourceRoot "packaging\windows.md") -Destination (Join-Path $DistRoot "README.md")
@@ -187,8 +191,13 @@ try {
         $Crate = Split-Path $Package.manifest_path -Parent
         $Notices = @(Get-ChildItem -LiteralPath $Crate -File | Where-Object { $_.Name -match '^(license|licence|copying|notice|copyright)' })
         if ($Package.license_file) { $Notices += Get-Item -LiteralPath (Join-Path $Crate $Package.license_file) }
-        if ($Notices.Count -eq 0) { throw "Missing original Rust notice: $($Package.name) $($Package.version)" }
         $Folder = Join-Path $NoticeDir "rust\$($Package.name)-$($Package.version)"
+        # Both exact 2.2.0 crate archives omit the repository's original LICENSE.
+        $Supplement = ($Package.name -in @("rmcp", "rmcp-macros")) -and $Package.version -eq "2.2.0"
+        if ($Supplement) {
+            New-Item -ItemType Directory -Path $Folder -Force | Out-Null
+            Copy-Item -LiteralPath (Join-Path $SourceRoot "packaging/licenses/rmcp-Apache-2.0.txt") -Destination (Join-Path $Folder "LICENSE")
+        } elseif ($Notices.Count -eq 0) { throw "Missing original Rust notice: $($Package.name) $($Package.version)" }
         foreach ($Notice in $Notices | Sort-Object FullName -Unique) {
             $Destination = Join-Path $Folder $Notice.FullName.Substring($Crate.Length + 1)
             New-Item -ItemType Directory -Path (Split-Path $Destination -Parent) -Force | Out-Null
@@ -364,7 +373,7 @@ try {
     $BuildInfo += "RUSTFLAGS: $env:RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS: $env:CARGO_ENCODED_RUSTFLAGS"
     $BuildInfo += $PackageVersions
     $BuildInfo += "ZIP timestamps: staged entries outside 1980-01-01 through 2107-12-31 23:59:58 use 2000-01-01; file bytes are unchanged."
-    $BuildInfo += "Runtime stickies.exe: strip --strip-all; unstripped executable is in the separate symbols ZIP."
+    $BuildInfo += "Runtime stickies.exe and stickies-mcp.exe: strip --strip-all; unstripped executables are in the separate symbols ZIP."
     $BuildInfo += "Stock Adwaita icons: $($Icons.Count) images in share/stickies-icons.gresource; cursors remain external."
     $BuildInfo += "Generated native resources; package ownership comes from bundled loader DLLs, icon theme files and the schema inputs below:"
     $BuildInfo += @($GeneratedNativeFiles | Sort-Object | ForEach-Object { "/ucrt64/" + $_.Substring($MsysRoot.Length + 1).Replace('\', '/') })
