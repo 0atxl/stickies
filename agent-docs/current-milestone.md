@@ -4,6 +4,21 @@ The active milestone is reliability, Wayland verification and release finishing 
 
 [SPEC.md](SPEC.md) describes current behavior. [implementation.md](implementation.md) owns remaining roadmap work. The [detailed verification record](manual-testing.md) contains results, fixtures, evidence and the remaining checklist. Further test execution requires separate authorization under [AGENTS.md](../AGENTS.md).
 
+## Standard/MCP CI and package results, October 25
+
+The approved implementation is `6f6f181a1b700bc9ab0f845e70770356eb20a212` on `codex/mcp`. [CI 40137627778](https://github.com/0atxl/stickies/actions/runs/40137627778) passed both standard and MCP configurations: formatting, desktop validation, all-target compilation, the existing Clippy policy, 52 tests per configuration and release builds. Each kept the existing 23 display-dependent tests ignored. [Packages 40137634409](https://github.com/0atxl/stickies/actions/runs/40137634409) built and uploaded all four artifacts, including native Windows compilation and PowerShell packaging for both variants.
+
+| Platform | Variant | Compressed package bytes | MiB | Installed payload bytes |
+|---|---|---:|---:|---:|
+| Arch | standard | 2,492,897 | 2.38 | 4,984,519 |
+| Arch | MCP | 4,373,126 | 4.17 | 10,250,270 |
+| Windows | standard | 46,538,209 | 44.38 | 92,635,276 |
+| Windows | MCP | 48,700,991 | 46.44 | 98,218,332 |
+
+All 22 downloaded outer checksums passed. Source manifests cover 230 standard Arch entries, 322 MCP Arch entries and 83 entries in each Windows snapshot. The 85 selected original inputs in each Arch snapshot and 83 in each Windows snapshot match the implementation commit, accounting for Windows text line endings. Windows bundle manifests cover 130 standard and 131 MCP files, excluding themselves. Variant identity, source-ZIP identity, executable/symbol selection, x86-64 PE headers and Arch package names/provides/conflicts passed inspection. Standard packages omit the companion and MCP-enabled dependency notices. MCP packages include both. All 119 shared Windows native runtime/source files are byte-identical between variants.
+
+Downloads, logs, the inspection script and detailed results are under `/tmp/stickies-variants-ci-20261025/`. This result-record update changes documentation only; all artifacts and test results refer to the implementation commit above. No package was installed and no new app session, benchmark, public release, tag or main merge occurred. Windows MCP interaction remains unverified. Shared schema 5/config code preserves compatibility between the two new variants, but runtime switching was not exercised in this pass. Both original root ZIPs and the main checkout remain preserved.
+
 ## Standard and optional MCP packages, October 25
 
 The owner approved two build variants, committing/pushing the implementation, running the existing CI checks/tests and using GitHub Actions to build the new packages. Work stays on `codex/mcp` in `/home/rinzler/nothing/Stickies`; the main checkout and old root ZIPs remain preserved. No release publication, tag or main merge is included.
