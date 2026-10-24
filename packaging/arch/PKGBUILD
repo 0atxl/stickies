@@ -1,8 +1,9 @@
 # Source template. Run packaging/prepare-release.py to produce a PKGBUILD
 # with the manifest version and the exact local source archive SHA-256.
-pkgname=stickies
+pkgname=@PACKAGE_NAME@
 pkgver=@VERSION@
 pkgrel=1
+@PACKAGE_RELATIONSHIPS@
 pkgdesc='Local sticky notes for Linux Wayland with Layer Shell v4+'
 arch=('x86_64')
 url='https://github.com/0atxl/stickies'
@@ -14,9 +15,11 @@ depends=('cairo' 'dbus' 'fontconfig' 'gdk-pixbuf2' 'glib2' 'glibc' 'graphene'
          'libgcc' 'pango>=1.56' 'sqlite' 'librsvg')
 makedepends=('rust>=1:1.92' 'pkgconf' 'desktop-file-utils')
 options=('!debug')
-source=("stickies-${pkgver}-src.tar.gz")
+source=("@SOURCE_ARCHIVE@")
 sha256sums=('@SOURCE_SHA256@')
 _target=x86_64-unknown-linux-gnu
+_mcp=@MCP_ENABLED@
+_features=(@CARGO_FEATURES@)
 
 prepare() {
     cd "$srcdir/stickies-$pkgver"
@@ -32,13 +35,15 @@ prepare() {
 build() {
     cd "$srcdir/stickies-$pkgver"
     export CARGO_TARGET_DIR="$srcdir/target"
-    cargo build --release --frozen --target "$_target"
+    cargo build --release --frozen --target "$_target" "${_features[@]}"
 }
 
 package() {
     cd "$srcdir/stickies-$pkgver"
     install -Dm755 "$srcdir/target/$_target/release/stickies" "$pkgdir/usr/bin/stickies"
-    install -Dm755 "$srcdir/target/$_target/release/stickies-mcp" "$pkgdir/usr/bin/stickies-mcp"
+    if (( _mcp )); then
+        install -Dm755 "$srcdir/target/$_target/release/stickies-mcp" "$pkgdir/usr/bin/stickies-mcp"
+    fi
     install -Dm644 data/dev.stickies.Stickies.desktop \
         "$pkgdir/usr/share/applications/dev.stickies.Stickies.desktop"
     install -Dm644 data/dev.stickies.Stickies.png \

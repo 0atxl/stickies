@@ -4,6 +4,14 @@ The active milestone is reliability, Wayland verification and release finishing 
 
 [SPEC.md](SPEC.md) describes current behavior. [implementation.md](implementation.md) owns remaining roadmap work. The [detailed verification record](manual-testing.md) contains results, fixtures, evidence and the remaining checklist. Further test execution requires separate authorization under [AGENTS.md](../AGENTS.md).
 
+## Standard and optional MCP packages, October 25
+
+The owner approved two build variants, committing/pushing the implementation, running the existing CI checks/tests and using GitHub Actions to build the new packages. Work stays on `codex/mcp` in `/home/rinzler/nothing/Stickies`; the main checkout and old root ZIPs remain preserved. No release publication, tag or main merge is included.
+
+the Cargo default feature set builds the standard app without MCP dependencies, companion, listener or Settings row. `--features mcp` includes the completed integration and its preserved Windows transport. Both variants keep schema 5 and accept the same saved config so users can switch safely; the common owner lock and checklist-focus repair remain. Playful/Clean and MCP Off are defaults. Arch packages use `stickies` and `stickies-mcp`, with the latter providing/conflicting with `stickies`. Windows uses distinct standard/MCP ZIP prefixes. Dependency notices and build identity follow the selected feature. CI checks both configurations; Packages has separate Arch/Windows jobs for each.
+
+Local Rustfmt, whitespace, locked offline all-target Clippy in both configurations, Python/Bash/YAML syntax and PowerShell Tree-sitter parsing passed. Prepared source archives and generated Arch metadata passed static inspection: the standard enabled dependency tree/notices exclude rmcp, Tokio, Schemars and zbus, while MCP includes them. Hosted results will be recorded after completion. Windows native interaction is still unverified; successful hosted compilation/packaging does not establish it. The authorized hosted tests keep their existing ignored-display policy. No new app sessions, broad local tests or benchmarks are needed for this build-selection change.
+
 ## MCP checkpoint and startup defaults, October 25
 
 The owner authorized committing and pushing the reviewed four-tool MCP implementation on `codex/mcp`, including the checklist-focus repair, and requested Playful with Clean edges as the defaults. MCP access remains Off by default. Explicitly saved preferences are preserved. All completed Windows MCP work remains included, with Windows compilation/runtime clearly marked unverified. The main development checkout remains unchanged. This checkpoint does not publish a release or change the package version.

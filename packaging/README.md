@@ -2,6 +2,14 @@
 
 Linux and Windows share `main`. Windows uses the [Windows ZIP guide](windows.md); the Arch procedure below remains Linux-specific.
 
+## Standard and MCP builds
+
+The default `standard` variant builds only `stickies`, without the optional MCP dependency tree, companion, IPC listener or Settings row. The `mcp` variant enables Cargo's `mcp` feature and includes `stickies-mcp`; access defaults to Off. Both keep Playful/Clean defaults and schema 5/config compatibility. The standard build accepts a saved `mcp_access` value but cannot serve MCP requests. Switching variants preserves notes and explicit saved settings. Install one variant at a time.
+
+Prepare standard Arch inputs with `python3 packaging/prepare-release.py --variant standard --output /path/to/new-standard-directory`. Select `--variant mcp` for the companion build. Standard packages are named `stickies`; MCP packages are named `stickies-mcp`, provide `stickies` and conflict with it because they own the same application paths. Each source archive, recipe and notice inventory records its selected variant. Only enabled dependency notices enter the installed consolidated notice document.
+
+The Packages workflow builds both variants independently on Arch and Windows. Its four artifact names include `standard` or `mcp` and the source commit. Arch artifacts contain one package plus matching sources/checksums. Windows standard ZIPs retain the `stickies-windows-x86_64` prefix; MCP ZIPs use `stickies-mcp-windows-x86_64`. CI runs the existing compilation, lint, tests and release build for both feature configurations. These are build artifacts, not published releases.
+
 ## Public release channels
 
 The selected release is `v0.10.2`, with package version `0.10.2`. GitHub hosts Windows and Arch x86_64 downloads with matching sources, inventories and checksums. AUR `stickies` builds the source archive; `stickies-bin` installs the same prebuilt Arch package. crates.io distributes the application source for Cargo installation with native build prerequisites. The repository README contains user installation steps.
@@ -50,7 +58,7 @@ These are source/feature requirements, not a promise that a binary built with ne
 | File | Package path |
 |---|---|
 | Executable | `/usr/bin/stickies` |
-| MCP companion | `/usr/bin/stickies-mcp` |
+| MCP companion, MCP variant only | `/usr/bin/stickies-mcp` |
 | Existing desktop entry | `/usr/share/applications/dev.stickies.Stickies.desktop` |
 | Approved PNG application icon | `/usr/share/pixmaps/dev.stickies.Stickies.png` |
 | Application MPL-2.0 | `/usr/share/licenses/stickies/LICENSE` |
@@ -63,7 +71,7 @@ Original Rust dependency notice files are copied from Cargo's cached sources for
 
 ## Model Context Protocol (MCP) companion
 
-Stickies includes a companion binary, `stickies-mcp`, installed at `/usr/bin/stickies-mcp`. It communicates with MCP clients using JSON-RPC over standard I/O.
+The MCP variant includes a companion binary, `stickies-mcp`, installed at `/usr/bin/stickies-mcp`. It communicates with MCP clients using JSON-RPC over standard I/O.
 
 ### Access control
 
@@ -113,7 +121,7 @@ Successful changes refresh All Notes and edge tabs without opening an editor or 
 
 Schema 5 adds `mutation_receipts`. The note and checklist formats remain unchanged. Close Stickies before upgrading and update the GUI and companion together. The unreleased source still reports version 0.10.2; it is not the already published schema-4 v0.10.2 package.
 
-Both packagers include both executables and the new source modules/migration. They retain the consolidated notice layout from main. The exact `rmcp` and `rmcp-macros` 2.2.0 crate archives omit LICENSE. Both packagers use `packaging/licenses/rmcp-Apache-2.0.txt`, copied from [the repository LICENSE at their recorded source commit](https://github.com/modelcontextprotocol/rust-sdk/blob/519577601db3823616dbd7c4eb84ed569d8e17d4/LICENSE). The text includes its licensing-transition statement. Other missing notices still stop packaging. The matching Windows source ZIP and Cargo source list include the supplement.
+Both packagers include the selected variant: the standard build has the GUI only, and the MCP build has both executables. Both source snapshots retain the modules/migrations. They retain the consolidated notice layout from main. The exact `rmcp` and `rmcp-macros` 2.2.0 crate archives omit LICENSE. Both packagers use `packaging/licenses/rmcp-Apache-2.0.txt`, copied from [the repository LICENSE at their recorded source commit](https://github.com/modelcontextprotocol/rust-sdk/blob/519577601db3823616dbd7c4eb84ed569d8e17d4/LICENSE). The text includes its licensing-transition statement. Other missing notices still stop packaging. The matching Windows source ZIP and Cargo source list include the supplement.
 
 Linux formatting, compilation/linking and Clippy passed for both binaries. Focused isolated Linux/Hyprland checks passed for create/read/update, checklist completion/formatting, shared views, Undo/Redo, persistence, retries, stale revisions and permission/save failures. The checkbox-focus replacement crash was repaired and its focused regressions passed. Native Windows compilation, PowerShell packaging execution and Windows MCP runtime remain unverified. The Windows implementation is retained. Historical release evidence below predates this MCP build.
 

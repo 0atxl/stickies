@@ -82,6 +82,7 @@ pub enum NoteSort {
     Title,
 }
 
+#[cfg(feature = "mcp")]
 pub struct McpNewNote<'a> {
     pub operation_id: &'a str,
     pub fingerprint: &'a str,
@@ -425,6 +426,7 @@ impl Storage {
         }
     }
 
+    #[cfg(feature = "mcp")]
     pub fn get_mutation_receipt(
         &self,
         operation_id: &str,
@@ -451,6 +453,7 @@ impl Storage {
         }
     }
 
+    #[cfg(feature = "mcp")]
     pub fn mcp_create_note(&self, note: McpNewNote<'_>) -> Result<Note, StorageError> {
         let timestamp = unix_timestamp_millis();
         let formatting_json = serde_json::to_string(note.formatting).map_err(|e| {
@@ -491,6 +494,7 @@ impl Storage {
         ))
     }
 
+    #[cfg(feature = "mcp")]
     pub fn mcp_update_note(
         &self,
         operation_id: &str,
@@ -530,6 +534,7 @@ impl Storage {
         Ok(())
     }
 
+    #[cfg(feature = "mcp")]
     pub fn get_active_note(&self, id: NoteId) -> Result<Option<Note>, StorageError> {
         let note = self
             .connection
@@ -544,6 +549,7 @@ impl Storage {
         note.map(stored_note_from_row).transpose()
     }
 
+    #[cfg(feature = "mcp")]
     pub fn get_all_active_notes(&self) -> Result<Vec<Note>, StorageError> {
         let mut statement = self.connection.prepare(
             "SELECT id, title, body, color, pinned

@@ -22,6 +22,12 @@ Individual notes on both platforms resize between 300 × 280 and 640 × 720 logi
 
 On Windows, the existing hide-in-DND preference responds to explicit Presentation Mode only. `SHQueryUserNotificationState` does not expose the modern Windows DND switch here. First-login/upgrade quiet time no longer hides the strip. Fullscreen policy retains the existing polling heuristic and needs runtime verification.
 
+## Build variants
+
+The default standard ZIP includes the notes app without MCP dependencies, companion, listener or Settings row. Use `-Variant mcp` with `scripts/package-windows.ps1` for the MCP build; `-Variant standard` is the default. The selected feature also controls the Rust notice inventory and executable/symbol lists. Standard archives use the `stickies-windows-x86_64` prefix; MCP archives use `stickies-mcp-windows-x86_64`. Each variant includes matching source, symbols and checksums with the same prefix.
+
+Both variants use schema 5 and the same configuration/notes location, so users can switch without moving data. Close the app before switching and extract to a fresh folder so a stale companion from another variant is not retained. MCP access defaults to Off; an existing saved access selection is preserved but has no effect in the standard build. Playful with Clean edges is the default appearance. Windows MCP interaction remains unverified until exercised on Windows; a package build alone does not establish runtime behavior.
+
 ## Build prerequisites
 
 For routine builds, use the repository's [Packages workflow](../.github/workflows/packages.yml). It installs MSYS2 UCRT64 and the Rust GNU target on a Windows runner, fetches Cargo.lock dependencies, then invokes the same packaging script described below. Download the Windows artifact from a successful run in GitHub Actions. It contains runtime and source ZIPs, an optional symbols ZIP and SHA256SUMS. Keep the runtime and matching source available together; the symbols ZIP is for crash investigation and does not need extraction by users. This removes the need to transfer patches and compile manually on the Azure VM for each committed change. Runtime checks still require a Windows desktop.
@@ -60,14 +66,14 @@ CI runs [prepare-windows-notices.py](../scripts/prepare-windows-notices.py) befo
 
 ## Files to distribute together
 
-- `stickies-windows-x86_64.zip`, containing the executable/runtime (`bin\stickies.exe` and `bin\stickies-mcp.exe`), readable notices, this guide, `SOURCE-INFO.txt`, `SOURCE-MANIFEST.sha256`, `SOURCE-ARCHIVE.sha256`, `BUILD-INFO.txt` and `BUNDLE-MANIFEST.sha256`.
+- `stickies-windows-x86_64.zip`, containing the executable/runtime (`bin\stickies.exe`, plus `bin\stickies-mcp.exe` in the MCP variant), readable notices, this guide, `SOURCE-INFO.txt`, `SOURCE-MANIFEST.sha256`, `SOURCE-ARCHIVE.sha256`, `BUILD-INFO.txt` and `BUNDLE-MANIFEST.sha256`.
 - `stickies-windows-x86_64-source.zip`, containing the exact application snapshot built, its manifest, licence, build script and this guide.
 - `stickies-windows-x86_64-symbols.zip`, optional unstripped executables, an identity record, matching-source checksum and original notices for crash investigation. Users do not need to extract it.
 - `SHA256SUMS`, covering all three archives. The binary bundle also records its matching source archive's checksum.
 
 ## Model Context Protocol (MCP) companion
 
-The Windows portable bundle includes `bin\stickies-mcp.exe`. It communicates with MCP clients using JSON-RPC over standard I/O and relays requests to running Stickies via a local named pipe restricted to the process token user SID. The GUI receives request data on its main context; the worker handles only pipe I/O and reply channels. Messages are capped at 2 MiB and exchanges at ten seconds. After reading the complete response, the companion sends a one-byte acknowledgement before the server disconnects. The acknowledgement wait shares the exchange deadline and shutdown cancellation; no blocking pipe flush is used. Shutdown cancels outstanding waits and joins the worker.
+The MCP Windows portable bundle includes `bin\stickies-mcp.exe`. It communicates with MCP clients using JSON-RPC over standard I/O and relays requests to running Stickies via a local named pipe restricted to the process token user SID. The GUI receives request data on its main context; the worker handles only pipe I/O and reply channels. Messages are capped at 2 MiB and exchanges at ten seconds. After reading the complete response, the companion sends a one-byte acknowledgement before the server disconnects. The acknowledgement wait shares the exchange deadline and shutdown cancellation; no blocking pipe flush is used. Shutdown cancels outstanding waits and joins the worker.
 
 ### Configuration
 

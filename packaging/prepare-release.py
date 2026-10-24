@@ -35,7 +35,10 @@ def digest(data):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "target/packaging")
+    parser.add_argument("--variant", choices=("standard", "mcp"), default="standard")
     args = parser.parse_args()
+    features = ["--features", "mcp"] if args.variant == "mcp" else []
+    package_name = "stickies-mcp" if args.variant == "mcp" else "stickies"
     output = args.output.resolve()
     if output.exists():
         parser.error("output already exists; choose a new directory to preserve its contents")
@@ -64,9 +67,9 @@ def main():
     # Cargo metadata supplies source paths; cargo tree selects enabled Linux
     # normal/build dependencies, excluding inactive optional/platform packages.
     metadata = json.loads(run("cargo", "metadata", "--frozen", "--format-version", "1",
-                              "--filter-platform", TARGET))
+                              "--filter-platform", TARGET, *features))
     tree = run("cargo", "tree", "--frozen", "--target", TARGET, "-e", "normal,build",
-               "--prefix", "none", "--format", "{p}")
+               "--prefix", "none", "--format", "{p}", *features)
     selected = {(line.split()[0], line.split()[1].removeprefix("v"))
                 for line in tree.splitlines()}
     index = ["Rust normal/build dependency notices for " + TARGET,
@@ -114,11 +117,11 @@ def main():
         combined.extend(b"\n")
     files["packaging/THIRD-PARTY-NOTICES.txt"] = bytes(combined)
 
-    archive_name = f"stickies-{version}-src.tar.gz"
+    archive_name = f"{package_name}-{version}-src.tar.gz"
     icon_status = f"present; SHA-256 {digest(files[icon])}" if icon in files else "MISSING; package construction is blocked"
     source_info = (
         "Stickies packaging preparation, not a published release\n"
-        f"Manifest version: {version}\nGit baseline: {revision}\n"
+        f"Manifest version: {version}\nBuild variant: {args.variant}\nCargo features: {'mcp' if features else 'none'}\nGit baseline: {revision}\n"
         "Snapshot: current working-tree bytes of the selected inputs, not necessarily the Git baseline\n"
         f"SOURCE_DATE_EPOCH: {epoch}\nApproved application icon: {icon_status}\n"
         f"Matching source archive: {archive_name}\n"
@@ -147,6 +150,12 @@ def main():
                 tar.addfile(entry, io.BytesIO(data))
     recipe = files["packaging/arch/PKGBUILD"].decode().replace("@VERSION@", version)
     recipe = recipe.replace("@SOURCE_SHA256@", digest(archive.read_bytes()))
+    recipe = recipe.replace("@PACKAGE_NAME@", package_name)
+    relationships = 'provides=("stickies=$pkgver")\nconflicts=("stickies")' if features else ""
+    recipe = recipe.replace("@PACKAGE_RELATIONSHIPS@", relationships)
+    recipe = recipe.replace("@SOURCE_ARCHIVE@", archive_name)
+    recipe = recipe.replace("@MCP_ENABLED@", "1" if features else "0")
+    recipe = recipe.replace("@CARGO_FEATURES@", " ".join(features))
     (output / "PKGBUILD").write_text(recipe)
     (output / "SOURCE-INFO.txt").write_text(source_info)
     environment = ["Preparation environment only; no package build or runtime verification is implied.",

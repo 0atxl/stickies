@@ -575,6 +575,7 @@ impl NoteSession {
         self.notify();
     }
 
+    #[cfg(feature = "mcp")]
     pub fn live_note(&self) -> Note {
         let (start, end) = self.body.bounds();
         Note {
@@ -586,6 +587,7 @@ impl NoteSession {
         }
     }
 
+    #[cfg(feature = "mcp")]
     pub fn live_formatting(&self) -> Result<Vec<crate::text_editing::Span>, String> {
         if let Some(error) = &self.formatting_error {
             return Err(error.clone());
@@ -594,6 +596,7 @@ impl NoteSession {
     }
 
     /// The caller has already saved this content and its receipt atomically.
+    #[cfg(feature = "mcp")]
     pub fn apply_mcp_update(
         self: &Rc<Self>,
         new_title: Option<&str>,

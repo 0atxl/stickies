@@ -6,15 +6,17 @@ cd "$(dirname "$0")/.."
 export CARGO_HOME="/home/builder/.cargo"
 SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
 export SOURCE_DATE_EPOCH
-build_dir="$PWD/target/ci-arch"
-artifact_dir="$PWD/dist/arch"
+variant="${1:-standard}"
+case "$variant" in standard|mcp) ;; *) echo "Unknown variant: $variant" >&2; exit 1 ;; esac
+build_dir="$PWD/target/ci-arch-$variant"
+artifact_dir="$PWD/dist/arch/$variant"
 if [[ -e "$build_dir" || -e "$artifact_dir" ]]; then
     echo 'CI output already exists; use a fresh checkout.' >&2
     exit 1
 fi
 
 cargo fetch --locked --target x86_64-unknown-linux-gnu
-python3 packaging/prepare-release.py --output "$build_dir"
+python3 packaging/prepare-release.py --variant "$variant" --output "$build_dir"
 cd "$build_dir"
 makepkg --nocheck --nosign --log
 

@@ -143,7 +143,7 @@ Source: [config.rs](../src/config.rs); consumers are the modules above. Path: GL
 | `reduced_motion` | `false` | Boolean; suppresses application animations alongside system settings. |
 | `hide_in_fullscreen` | `true` | File-only Boolean; transient Top versus Overlay layer policy. |
 | `hide_in_dnd` | `true` | File-only Boolean; Omarchy DND visibility policy. |
-| `mcp_access` | `off` | `off`, `read-only`, `read-write`; permission for the four MCP tools. |
+| `mcp_access` | `off` | `off`, `read-only`, `read-write`; permission for the four MCP tools in the MCP build. Retained but inactive in the standard build. |
 | legacy `font_size` | absent | Optional unsigned integer accepted on input, ignored, omitted on save. |
 
 - Missing config creates/saves defaults. Missing keys in an existing file use these defaults. Unknown keys, invalid enums/types and invalid validated values are rejected.
@@ -217,3 +217,7 @@ Windows adds a tray-only `quit` action beyond the four CLI actions above. It flu
 Windows hide-in-DND currently follows explicit Presentation Mode only. First-login/upgrade quiet time is ignored; the modern DND switch is not detected by this implementation. Fullscreen detection and window/DPI/focus behavior remain subject to Windows verification.
 
 The [Windows ZIP guide](../packaging/windows.md) owns packaging and storage details. The ZIP is installation-free, with normal user-directory storage, normally `%LOCALAPPDATA%\stickies` for notes/configuration. There is no adjacent-data mode and no saved-format migration introduced by this port. Source/build manifests and original distribution notices accompany a newly packaged binary. The old repository-root ZIP has not been regenerated for these fixes.
+
+## Build variants
+
+The standard build is the Cargo default and excludes MCP dependencies, companion binary, listener and Settings row. `--features mcp` builds the four-tool companion integration. Both variants retain schema 5, owner locking, shared-session checklist focus repair and config compatibility. Playful/Clean and MCP Off remain defaults. The source retains both transports; Windows runtime acceptance remains separate from CI compilation/packaging.

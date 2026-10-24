@@ -13,7 +13,16 @@ env:
 
 jobs:
   check:
+    name: Linux (${{ matrix.variant }})
     runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: standard
+            cargo_args: ""
+          - variant: mcp
+            cargo_args: "--features mcp"
 
     steps:
       - name: Check out repository
@@ -34,13 +43,13 @@ jobs:
         run: desktop-file-validate data/dev.stickies.Stickies.desktop
 
       - name: Compile all targets
-        run: cargo check --locked --all-targets
+        run: cargo check --locked --all-targets ${{ matrix.cargo_args }}
 
       - name: Run Clippy
-        run: cargo clippy --locked --all-targets -- -D warnings -A deprecated
+        run: cargo clippy --locked --all-targets ${{ matrix.cargo_args }} -- -D warnings -A deprecated
 
       - name: Run tests
-        run: cargo test --locked
+        run: cargo test --locked ${{ matrix.cargo_args }}
 
       - name: Build release binary
-        run: cargo build --release --locked
+        run: cargo build --release --locked ${{ matrix.cargo_args }}

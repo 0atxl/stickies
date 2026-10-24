@@ -14,10 +14,13 @@ mod edge_surface;
 mod edit_history;
 mod editor;
 mod manager;
+#[cfg(feature = "mcp")]
 pub(crate) mod mcp_ipc;
+#[cfg(feature = "mcp")]
 mod mcp_limits;
+#[cfg(feature = "mcp")]
 mod mcp_server;
-#[cfg(target_os = "windows")]
+#[cfg(all(feature = "mcp", target_os = "windows"))]
 mod mcp_windows;
 mod motion;
 mod note_controls;
@@ -76,6 +79,7 @@ pub(crate) struct Ui {
     pub(crate) deck: RefCell<AppState>,
     pub(crate) separate: RefCell<HashMap<NoteId, SeparateNote>>,
     pub(crate) manager: RefCell<Option<manager::ManagerWindow>>,
+    #[cfg(feature = "mcp")]
     pub(crate) mcp_server: RefCell<Option<mcp_server::McpServer>>,
     pub(crate) owner_lock: RefCell<Option<owner_lock::OwnerLock>>,
 }
@@ -924,11 +928,15 @@ fn build(application: &gtk::Application, startup_error_pending: &Rc<Cell<bool>>)
         deck: RefCell::new(AppState::new(Vec::new())),
         separate: RefCell::new(HashMap::new()),
         manager: RefCell::new(None),
+        #[cfg(feature = "mcp")]
         mcp_server: RefCell::new(None),
         owner_lock: RefCell::new(Some(owner_lock)),
     });
-    let mcp_srv = mcp_server::McpServer::start(&ui);
-    ui.mcp_server.replace(mcp_srv);
+    #[cfg(feature = "mcp")]
+    {
+        let mcp_srv = mcp_server::McpServer::start(&ui);
+        ui.mcp_server.replace(mcp_srv);
+    }
     apply_motion_preference(ui.config.borrow().reduced_motion);
     ui.connect_edge();
     ui.register_actions();
@@ -951,6 +959,7 @@ fn build(application: &gtk::Application, startup_error_pending: &Rc<Cell<bool>>)
     let shutdown_ui = ui.clone();
     application.connect_shutdown(move |_| {
         let ui = &shutdown_ui;
+        #[cfg(feature = "mcp")]
         if let Some(mut server) = ui.mcp_server.borrow_mut().take() {
             server.stop(ui);
         }

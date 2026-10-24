@@ -524,75 +524,78 @@ pub fn build(
         });
         extras.push(Box::new(move || sync()));
     }
-    root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    let (mcp_box, mcp_buttons) = choices(
-        &["Off", "Read only", "Read/write"],
-        match current.borrow().mcp_access {
-            crate::config::McpAccess::Off => 0,
-            crate::config::McpAccess::ReadOnly => 1,
-            crate::config::McpAccess::ReadWrite => 2,
-        },
-    );
-    let mcp_desc = gtk::Label::new(Some(
-        "Clients can retrieve eligible notes and may send their contents to their model provider. Read/write allows immediate persisted changes without another app confirmation for each operation.",
-    ));
-    mcp_desc.set_wrap(true);
-    mcp_desc.set_xalign(0.0);
-    mcp_desc.add_css_class("setting-hint");
-    let mcp_container = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    mcp_container.append(&mcp_box);
-    mcp_container.append(&mcp_desc);
-    section(&root, "MCP access", &mcp_container);
-    let mcp_buttons = Rc::new(mcp_buttons);
-    for (index, button) in mcp_buttons.iter().enumerate() {
-        let current = current.clone();
-        let update = update.clone();
-        let syncing = syncing.clone();
-        let buttons = Rc::downgrade(&mcp_buttons);
-        button.connect_toggled(move |button| {
-            if !syncing.get() && button.is_active() {
-                let access = match index {
-                    0 => crate::config::McpAccess::Off,
-                    1 => crate::config::McpAccess::ReadOnly,
-                    2 => crate::config::McpAccess::ReadWrite,
-                    _ => crate::config::McpAccess::Off,
-                };
-                if current.borrow().mcp_access != access {
-                    let mut config = current.borrow().clone();
-                    config.mcp_access = access;
-                    update(config);
-                    syncing.set(true);
-                    let sel = match current.borrow().mcp_access {
-                        crate::config::McpAccess::Off => 0,
-                        crate::config::McpAccess::ReadOnly => 1,
-                        crate::config::McpAccess::ReadWrite => 2,
+    #[cfg(feature = "mcp")]
+    {
+        root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        let (mcp_box, mcp_buttons) = choices(
+            &["Off", "Read only", "Read/write"],
+            match current.borrow().mcp_access {
+                crate::config::McpAccess::Off => 0,
+                crate::config::McpAccess::ReadOnly => 1,
+                crate::config::McpAccess::ReadWrite => 2,
+            },
+        );
+        let mcp_desc = gtk::Label::new(Some(
+            "Clients can retrieve eligible notes and may send their contents to their model provider. Read/write allows immediate persisted changes without another app confirmation for each operation.",
+        ));
+        mcp_desc.set_wrap(true);
+        mcp_desc.set_xalign(0.0);
+        mcp_desc.add_css_class("setting-hint");
+        let mcp_container = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        mcp_container.append(&mcp_box);
+        mcp_container.append(&mcp_desc);
+        section(&root, "MCP access", &mcp_container);
+        let mcp_buttons = Rc::new(mcp_buttons);
+        for (index, button) in mcp_buttons.iter().enumerate() {
+            let current = current.clone();
+            let update = update.clone();
+            let syncing = syncing.clone();
+            let buttons = Rc::downgrade(&mcp_buttons);
+            button.connect_toggled(move |button| {
+                if !syncing.get() && button.is_active() {
+                    let access = match index {
+                        0 => crate::config::McpAccess::Off,
+                        1 => crate::config::McpAccess::ReadOnly,
+                        2 => crate::config::McpAccess::ReadWrite,
+                        _ => crate::config::McpAccess::Off,
                     };
-                    if let Some(buttons) = buttons.upgrade() {
-                        for (i, btn) in buttons.iter().enumerate() {
-                            btn.set_active(i == sel);
+                    if current.borrow().mcp_access != access {
+                        let mut config = current.borrow().clone();
+                        config.mcp_access = access;
+                        update(config);
+                        syncing.set(true);
+                        let sel = match current.borrow().mcp_access {
+                            crate::config::McpAccess::Off => 0,
+                            crate::config::McpAccess::ReadOnly => 1,
+                            crate::config::McpAccess::ReadWrite => 2,
+                        };
+                        if let Some(buttons) = buttons.upgrade() {
+                            for (i, btn) in buttons.iter().enumerate() {
+                                btn.set_active(i == sel);
+                            }
                         }
+                        syncing.set(false);
                     }
-                    syncing.set(false);
                 }
-            }
-        });
-    }
-    // Panel::extras owns this collection; button callbacks retain only Weak refs.
-    let buttons = mcp_buttons;
-    let current_mcp = current.clone();
-    let syncing_mcp = syncing.clone();
-    extras.push(Box::new(move || {
-        syncing_mcp.set(true);
-        let sel = match current_mcp.borrow().mcp_access {
-            crate::config::McpAccess::Off => 0,
-            crate::config::McpAccess::ReadOnly => 1,
-            crate::config::McpAccess::ReadWrite => 2,
-        };
-        for (i, btn) in buttons.iter().enumerate() {
-            btn.set_active(i == sel);
+            });
         }
-        syncing_mcp.set(false);
-    }));
+        // Panel::extras owns this collection; button callbacks retain only Weak refs.
+        let buttons = mcp_buttons;
+        let current_mcp = current.clone();
+        let syncing_mcp = syncing.clone();
+        extras.push(Box::new(move || {
+            syncing_mcp.set(true);
+            let sel = match current_mcp.borrow().mcp_access {
+                crate::config::McpAccess::Off => 0,
+                crate::config::McpAccess::ReadOnly => 1,
+                crate::config::McpAccess::ReadWrite => 2,
+            };
+            for (i, btn) in buttons.iter().enumerate() {
+                btn.set_active(i == sel);
+            }
+            syncing_mcp.set(false);
+        }));
+    }
 
     root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     let quit = gtk::Button::with_label("Quit Stickies");

@@ -1,13 +1,24 @@
 param(
     [string]$MsysRoot,
     [string]$OutputDirectory,
-    [string]$NativeNoticeRoot
+    [string]$NativeNoticeRoot,
+    [ValidateSet("standard", "mcp")]
+    [string]$Variant = "standard"
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Target = "x86_64-pc-windows-gnu"
+$WithMcp = $Variant -eq "mcp"
+$CargoFeatures = @()
+$Executables = @("stickies.exe")
+$BundleName = "stickies-windows-x86_64"
+if ($WithMcp) {
+    $CargoFeatures = @("--features", "mcp")
+    $Executables += "stickies-mcp.exe"
+    $BundleName = "stickies-mcp-windows-x86_64"
+}
 
 function Invoke-Checked([string]$Command, [string[]]$Arguments) {
     $Result = @(& $Command @Arguments)
@@ -117,7 +128,7 @@ try {
     if (Test-Path -LiteralPath $OutputDirectory) { throw "Output already exists. Pass a new -OutputDirectory to preserve previous artifacts." }
     $SourceRoot = Join-Path $OutputDirectory "source\stickies"
     $BuildRoot = Join-Path $OutputDirectory "build"
-    $DistRoot = Join-Path $OutputDirectory "stickies-windows-x86_64"
+    $DistRoot = Join-Path $OutputDirectory $BundleName
     $BinDir = Join-Path $DistRoot "bin"
     $ShareDir = Join-Path $DistRoot "share"
     $NoticeDir = Join-Path $OutputDirectory "notices"
@@ -143,7 +154,8 @@ try {
     $SourceInfo = @(
         "Stickies Windows working-tree snapshot; Git baseline $Revision is not an assertion of a clean checkout.",
         "Target: $Target", "Repository: https://github.com/0atxl/stickies",
-        "Matching application source: stickies-windows-x86_64-source.zip, supplied alongside the binary ZIP.",
+        "Build variant: $Variant; Cargo features: $($CargoFeatures -join ' ')",
+        "Matching application source: $BundleName-source.zip, supplied alongside the binary ZIP.",
         "SOURCE-MANIFEST.sha256 identifies the exact application inputs compiled from this snapshot.",
         "Application: MPL-2.0. Fonts and dependencies retain their original notices under licenses/.",
         "Rust sources are identified by Cargo.lock registry versions/checksums; obtain those versions from crates.io.",
@@ -159,13 +171,12 @@ try {
     Push-Location $SourceRoot
     try {
         # Frozen also prevents network access. Populate the locked Cargo cache separately.
-        Invoke-Checked $Cargo @("build", "--release", "--frozen", "--target", $Target, "--target-dir", $BuildRoot) | Out-Host
-        $Metadata = ((Invoke-Checked $Cargo @("metadata", "--frozen", "--format-version", "1", "--filter-platform", $Target)) -join "`n") | ConvertFrom-Json
-        $Tree = Invoke-Checked $Cargo @("tree", "--frozen", "--target", $Target, "-e", "normal,build", "--prefix", "none", "--format", "{p}")
+        Invoke-Checked $Cargo (@("build", "--release", "--frozen", "--target", $Target, "--target-dir", $BuildRoot) + $CargoFeatures) | Out-Host
+        $Metadata = ((Invoke-Checked $Cargo (@("metadata", "--frozen", "--format-version", "1", "--filter-platform", $Target) + $CargoFeatures)) -join "`n") | ConvertFrom-Json
+        $Tree = Invoke-Checked $Cargo (@("tree", "--frozen", "--target", $Target, "-e", "normal,build", "--prefix", "none", "--format", "{p}") + $CargoFeatures)
     } finally { Pop-Location }
-    Copy-Item -LiteralPath (Join-Path $BuildRoot "$Target\release\stickies.exe") -Destination $BinDir
-    Copy-Item -LiteralPath (Join-Path $BuildRoot "$Target\release\stickies-mcp.exe") -Destination $BinDir
-    foreach ($Executable in @("stickies.exe", "stickies-mcp.exe")) {
+    foreach ($Executable in $Executables) {
+        Copy-Item -LiteralPath (Join-Path $BuildRoot "$Target\release\$Executable") -Destination $BinDir
         Copy-Item -LiteralPath (Join-Path $BinDir $Executable) -Destination $SymbolsRoot
         Invoke-Checked $Strip @("--strip-all", (Join-Path $BinDir $Executable)) | Out-Host
     }
@@ -173,7 +184,7 @@ try {
         "Unstripped Stickies executables for crash investigation; not needed to run the app.",
         "Source commit: $Revision",
         "Runtime executable SHA-256: $((Get-FileHash -LiteralPath (Join-Path $BinDir 'stickies.exe') -Algorithm SHA256).Hash.ToLowerInvariant())"
-        "Runtime companion SHA-256: $((Get-FileHash -LiteralPath (Join-Path $BinDir 'stickies-mcp.exe') -Algorithm SHA256).Hash.ToLowerInvariant())"
+        if ($WithMcp) { "Runtime companion SHA-256: $((Get-FileHash -LiteralPath (Join-Path $BinDir 'stickies-mcp.exe') -Algorithm SHA256).Hash.ToLowerInvariant())" }
     )
     Copy-Item -LiteralPath (Join-Path $SourceRoot "LICENSE") -Destination (Join-Path $DistRoot "LICENSE")
     Copy-Item -LiteralPath (Join-Path $SourceRoot "packaging\windows.md") -Destination (Join-Path $DistRoot "README.md")
@@ -365,7 +376,7 @@ try {
     Write-NoticeBundle $NoticeDir (Join-Path $DistRoot "licenses\THIRD-PARTY-NOTICES.txt")
     Copy-Item -LiteralPath (Join-Path $DistRoot "LICENSE") -Destination $SymbolsRoot
     Copy-Item -LiteralPath (Join-Path $DistRoot "licenses\THIRD-PARTY-NOTICES.txt") -Destination $SymbolsRoot
-    $BuildInfo = @("UTC build time: $([DateTime]::UtcNow.ToString('o'))", "Target: $Target", "Command: cargo build --release --frozen --target $Target --target-dir <output>/build", "MSYS2 prefix: $MsysRoot", "Windows: $([Environment]::OSVersion.VersionString)")
+    $BuildInfo = @("UTC build time: $([DateTime]::UtcNow.ToString('o'))", "Target: $Target", "Build variant: $Variant", "Command: cargo build --release --frozen --target $Target --target-dir <output>/build $($CargoFeatures -join ' ')", "MSYS2 prefix: $MsysRoot", "Windows: $([Environment]::OSVersion.VersionString)")
     $BuildInfo += Invoke-Checked $Rustc @("--version", "--verbose")
     $BuildInfo += Invoke-Checked $Cargo @("--version")
     $BuildInfo += Invoke-Checked $Compiler @("--version")
@@ -373,7 +384,7 @@ try {
     $BuildInfo += "RUSTFLAGS: $env:RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS: $env:CARGO_ENCODED_RUSTFLAGS"
     $BuildInfo += $PackageVersions
     $BuildInfo += "ZIP timestamps: staged entries outside 1980-01-01 through 2107-12-31 23:59:58 use 2000-01-01; file bytes are unchanged."
-    $BuildInfo += "Runtime stickies.exe and stickies-mcp.exe: strip --strip-all; unstripped executables are in the separate symbols ZIP."
+    $BuildInfo += "Runtime $($Executables -join ', '): strip --strip-all; unstripped executables are in the separate symbols ZIP."
     $BuildInfo += "Stock Adwaita icons: $($Icons.Count) images in share/stickies-icons.gresource; cursors remain external."
     $BuildInfo += "Generated native resources; package ownership comes from bundled loader DLLs, icon theme files and the schema inputs below:"
     $BuildInfo += @($GeneratedNativeFiles | Sort-Object | ForEach-Object { "/ucrt64/" + $_.Substring($MsysRoot.Length + 1).Replace('\', '/') })
@@ -383,9 +394,9 @@ try {
     }
     Write-Text (Join-Path $DistRoot "BUILD-INFO.txt") $BuildInfo
 
-    $SourceZip = Join-Path $OutputDirectory "stickies-windows-x86_64-source.zip"
-    $BinaryZip = Join-Path $OutputDirectory "stickies-windows-x86_64.zip"
-    $SymbolsZip = Join-Path $OutputDirectory "stickies-windows-x86_64-symbols.zip"
+    $SourceZip = Join-Path $OutputDirectory "$BundleName-source.zip"
+    $BinaryZip = Join-Path $OutputDirectory "$BundleName.zip"
+    $SymbolsZip = Join-Path $OutputDirectory "$BundleName-symbols.zip"
     Set-ZipTimestamps $SourceRoot
     Compress-Archive -Path "$SourceRoot\*" -DestinationPath $SourceZip
     # Record the source archive checksum in the binary bundle before hashing it.
