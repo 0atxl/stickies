@@ -34,10 +34,18 @@ For a local update using actual metadata, download the public `/releases/latest`
 
 References: [GitHub release triggers](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release), [GITHUB_TOKEN event behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow), [Vercel Git deployment](https://vercel.com/docs/git), and [Vercel static build settings](https://vercel.com/docs/builds/configure-a-build).
 
+## Website analytics
+
+The owner requested Vercel Web Analytics on October 26. `index.html` initializes Vercel's queue and loads its deferred `/_vercel/insights/script.js` script. This is the plain-HTML integration, without a package, build step or environment variables. It collects website page views; there are no custom events or handlers that send demo titles or note text. The desktop application's no-telemetry behavior is unchanged.
+
+In the Vercel project, open **Analytics** and select **Enable** if it is not already enabled. Deploy after enabling so Vercel provisions its analytics routes. If the code was deployed before enabling, redeploy the latest commit. Visit the production site, then view traffic in the project's Analytics dashboard. See the [Vercel quickstart](https://vercel.com/docs/analytics/quickstart) and [troubleshooting guide](https://vercel.com/docs/analytics/troubleshooting).
+
+The integration has static HTML and inline JavaScript syntax checks only. Browser execution, event delivery and dashboard counts have not been tested. Suggested follow-up is to confirm the script loads on production and a page view appears after dashboard enablement.
+
 ## Demo behavior and simplifications
 
 - The demo begins with a marker. Hover reveals three tabs; click, tap or keyboard activation does the same. Tab buttons open notes. Close returns focus to the selected tab. Escape closes a popover first, then a note, then the tabs, only while focus is inside the preview.
-- Titles, text, checks, color and font changes remain in memory when switching notes. Reset or refresh restores the samples. The page has no content storage, cookies, analytics, backend or content transmission.
+- Titles, text, checks, color and font changes remain in memory when switching notes. Reset or refresh restores the samples. Demo content has no persistent storage or backend and is not sent to website analytics.
 - Editing uses one textarea per logical line. Enter splits a line and continues its checklist. Enter on an empty checklist item removes the checkbox. Backspace at the start removes checklist mode or joins a plain line to the preceding one. Shift+Enter and pasted line breaks stay inside the current item. The checklist control toggles the current or most recently focused line. Browser-native text editing is retained, but there is no full-note undo history or rich-text formatting.
 - The palette offers four actual app colors. Font choices are Virgil and Inter. The footer preserves Color, Aa, Checklist, Always open and More in that order. It omits native font sizes, other fonts, full palette, formatting, canvas styles and window management.
 - Always open disables a one-minute docked inactivity timeout. It applies to the open view and resets when closing or switching notes. It never changes note order. Pointer departure alone does not close an open note. Activity inside the preview restarts the idle interval.
