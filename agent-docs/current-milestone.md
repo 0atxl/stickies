@@ -4,6 +4,14 @@ The active milestone is reliability, Wayland verification and release finishing 
 
 [SPEC.md](SPEC.md) describes current behavior. [implementation.md](implementation.md) owns remaining roadmap work. The [detailed verification record](manual-testing.md) contains results, fixtures, evidence and the remaining checklist. Further test execution requires separate authorization under [AGENTS.md](../AGENTS.md).
 
+## v0.10.3 blur safeguard, November 10
+
+The owner authorized implementing the scoped CSS backdrop safeguard, committing/pushing it, running tests through GitHub Actions only, and publishing a patch to GitHub, both AUR packages and crates.io once online checks pass. The existing website release workflow will update the landing page. The selected version is `0.10.3`, tag `v0.10.3`. No local tests or app sessions are authorized.
+
+On Linux with GTK 4.22 or newer, startup installs one CSS provider above user priority with only `window.edge-window { backdrop-filter: none; }`. Both screen-sized layer hosts receive the override before creation. Older GTK skips the property; Windows behavior and system configuration are unchanged. The user could not reproduce the earlier full-screen blur with login startup either enabled or disabled. This is preventive hardening against theme-supplied window blur, not a confirmed repair of the original incident or a compositor bug.
+
+Online CI, package builds and publication are pending. Focused visual acceptance remains separate: at 1920x1080, scale 1.25, with compositor blur enabled, the desktop outside Stickies must stay sharp during startup, reveal, docking and collapse. An isolated compositor, disposable XDG directories and a private session bus are preferred. If the symptom returns, inspect effective styles and committed blur regions before quitting Stickies.
+
 ## v0.10.2 publication, October 23 and 24
 
 The owner authorized committing/pushing the extraction cleanup, building fresh Arch/Windows packages, publishing a GitHub patch release and updating crates.io and both AUR packages. The selected version is `0.10.2`, tag `v0.10.2`. This scope also included verifying the existing website release workflow and the resulting live download links.

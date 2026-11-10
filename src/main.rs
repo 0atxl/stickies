@@ -873,6 +873,18 @@ fn build(application: &gtk::Application, startup_error_pending: &Rc<Cell<bool>>)
         &edge_provider,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
     );
+    #[cfg(target_os = "linux")]
+    if gtk::check_version(4, 22, 0).is_none() {
+        // These transparent windows span the output. A theme's window blur
+        // must not turn their empty space into a desktop-sized blur request.
+        let backdrop_provider = gtk::CssProvider::new();
+        backdrop_provider.load_from_data("window.edge-window { backdrop-filter: none; }");
+        gtk::style_context_add_provider_for_display(
+            &gtk::gdk::Display::default().expect("GTK display"),
+            &backdrop_provider,
+            gtk::STYLE_PROVIDER_PRIORITY_USER + 1,
+        );
+    }
     let edge = edge::Strip::new(application);
     let ui = Rc::new(Ui {
         sessions: RefCell::new(HashMap::new()),
