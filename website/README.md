@@ -6,9 +6,9 @@ After browser verification is authorized, open `index.html` locally or serve thi
 
 ## Release and appearance
 
-On October 24, 2026, GitHub's public latest-release API confirmed [v0.10.2](https://github.com/0atxl/stickies/releases/tag/v0.10.2), neither a draft nor a prerelease. Its source commit is `48b20dbf672aac09be1e661c8ae1d5eb7846185e`, with package version `0.10.2`. The automatic release workflow updated the page to the API-returned URLs for `stickies-windows-x86_64.zip`, `stickies-0.10.2-1-x86_64.pkg.tar.zst`, and `SHA256SUMS`. Live HTML inspection confirmed all three links after Vercel deployed the bot commit. No required release assets are missing. File sizes are omitted.
+On November 10, 2026, GitHub's public latest-release API confirmed [v0.10.3](https://github.com/0atxl/stickies/releases/tag/v0.10.3), neither a draft nor a prerelease. Its source commit is `8234d5070663e54d1bf7c89d2e11a07de8763785`, with package version `0.10.3`. The automatic release workflow updated the page to the API-returned URLs for `stickies-windows-x86_64.zip`, `stickies-0.10.3-1-x86_64.pkg.tar.zst`, and `SHA256SUMS`. Vercel deployed bot commit `6b2c3f35b41f74147315a54c9dcbf34d6b2c5736` to production; live HTML inspection confirmed all three links. No required release assets are missing. File sizes are omitted.
 
-The demo depicts the optional Playful Clean appearance and Classic connector shipped in v0.10.1. Its disclosure now reads "Simplified demo of Playful Clean. Downloads are v0.10.2." Wavy remains the application's default. The browser demo's editing and layout simplifications are listed below.
+The demo depicts the optional Playful Clean appearance and Classic connector shipped in v0.10.1. Its disclosure now reads "Simplified demo of Playful Clean. Downloads are v0.10.3." Wavy remains the application's default. The browser demo's editing and layout simplifications are listed below.
 
 The `data-demo-since="v0.10.1"` attribute on the disclosure records the first release containing this appearance. It is an explicit editorial choice. When the demo changes to depict unpublished UI, set it to `unreleased`; set it to the new tag only after confirming that release contains the depicted appearance. The updater retains the preview warning until the baseline is satisfied.
 
@@ -53,6 +53,8 @@ The integration has static HTML and inline JavaScript syntax checks only. Browse
 - The bounded preview uses one right edge. Tabs retain 104px lengths, 8px gaps and 6px hover movement. Hit areas and note geometry adapt to the browser instead of recreating native multi-window placement. Native strip utility actions are omitted. Motion uses the app's 160ms reveal, 110ms collapse and 120ms note timing, with reduced-motion overrides.
 
 ## Verification
+
+For v0.10.3, [release run 42832824439](https://github.com/0atxl/stickies/actions/runs/42832824439) pushed bot commit `6b2c3f35b41f74147315a54c9dcbf34d6b2c5736`. [The second release event](https://github.com/0atxl/stickies/actions/runs/42832824739) completed without another change. Vercel reports production READY for that commit and the existing public domain; a direct live HTML read confirmed the new download/checksum links and version disclosure. The application CI and package jobs passed separately. No local tests or browser/app sessions ran.
 
 Static inspection covers release metadata, appearance differences, copied-asset provenance, in-memory state, text insertion through DOM values, focus handling and responsive CSS. JavaScript syntax, HTML references, local asset paths, release-asset URLs and whitespace are checked without executing the demo.
 
