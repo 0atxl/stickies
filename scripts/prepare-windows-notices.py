@@ -9,13 +9,13 @@ import tarfile
 import urllib.request
 
 
-RECIPE_REVISION = "dd1d7b24b44e2f6c2fd2bc33abfc810307bd10b9"
+RECIPE_REVISION = "d31c8313e4546f53a57c2f04902a8b88120fd945"
 # Reviewed MSYS2 package versions and the first source hash in their PKGBUILDs.
 # Stop on updates until the new upstream notices and recipe have been reviewed.
 SOURCES = {
     "gstreamer": ("gstreamer", "1.28.9-1", "6dbf744f583131a34845cc641e803843766a9ba80ce00378a9043fd6d8d5fb38"),
     "gst-plugins-base": ("gst-plugins-base", "1.28.9-1", "c1fda668b520e6aef763c0eb962c032c9fe52bce322e8b00c69b4e9e847bddc1"),
-    "gst-plugins-bad-libs": ("gst-plugins-bad", "1.28.9-1", "4a4e0b7bf84f868378c48f143a7ac3a98923b488a5b74f1a35ba46bc3c43f6b1"),
+    "gst-plugins-bad-libs": ("gst-plugins-bad", "1.28.9-2", "4a4e0b7bf84f868378c48f143a7ac3a98923b488a5b74f1a35ba46bc3c43f6b1"),
 }
 
 
