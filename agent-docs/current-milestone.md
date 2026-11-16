@@ -4,6 +4,12 @@ The active milestone is reliability, Wayland verification and release finishing 
 
 [SPEC.md](SPEC.md) describes current behavior. [implementation.md](implementation.md) owns remaining roadmap work. The [detailed verification record](manual-testing.md) contains results, fixtures, evidence and the remaining checklist. Further test execution requires separate authorization under [AGENTS.md](../AGENTS.md).
 
+## v0.10.3 MCP preview, November 16
+
+Keep `codex/mcp` as the source for an opt-in preview distributed through GitHub Releases. The standard app follows the existing stable release process. The preview uses package version `0.10.3` and prerelease tag `v0.10.3-mcp.1`. It brings over the Linux GTK backdrop safeguard from `3b61c0c` and the reviewed Windows GStreamer notice inputs from `8234d50` for packaging.
+
+The existing Packages workflow builds Arch and Windows artifacts. Verify the MCP binaries, source archives, manifests and checksums before attaching them to the prerelease. The owner approved packaging and publication through GitHub only. Test CI and local application sessions are outside this scope. See the [preview release notes](../packaging/releases/v0.10.3-mcp.1.md).
+
 ## Standard/MCP CI and package results, October 25
 
 The approved implementation is `6f6f181a1b700bc9ab0f845e70770356eb20a212` on `codex/mcp`. [CI 40137627778](https://github.com/0atxl/stickies/actions/runs/40137627778) passed both standard and MCP configurations: formatting, desktop validation, all-target compilation, the existing Clippy policy, 52 tests per configuration and release builds. Each kept the existing 23 display-dependent tests ignored. [Packages 40137634409](https://github.com/0atxl/stickies/actions/runs/40137634409) built and uploaded all four artifacts, including native Windows compilation and PowerShell packaging for both variants.
