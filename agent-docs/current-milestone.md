@@ -8,7 +8,11 @@ The active milestone is reliability, Wayland verification and release finishing 
 
 Keep `codex/mcp` as the source for an opt-in preview distributed through GitHub Releases. The standard app follows the existing stable release process. The preview uses package version `0.10.3` and prerelease tag `v0.10.3-mcp.1`. It brings over the Linux GTK backdrop safeguard from `3b61c0c` and the reviewed Windows GStreamer notice inputs from `8234d50` for packaging.
 
-The existing Packages workflow builds Arch and Windows artifacts. The Windows notice guard tracks MSYS2's November 15 OpenSSL rebuild of `gst-plugins-bad-libs` at `1.28.9-2`. The pinned recipes confirm unchanged upstream SHA-256 hashes for all three original sources. Verify the MCP binaries, source archives, manifests and checksums before attaching them to the prerelease. The owner approved packaging and publication through GitHub only. Test CI and local application sessions are outside this scope. See the [preview release notes](../packaging/releases/v0.10.3-mcp.1.md).
+The Windows notice guard tracks MSYS2's November 15 OpenSSL rebuild of `gst-plugins-bad-libs` at `1.28.9-2`. The pinned recipes confirm unchanged upstream SHA-256 hashes for all three original sources.
+
+[Packages run 43918166708](https://github.com/0atxl/stickies/actions/runs/43918166708) built both variants on Arch and Windows from `2257e278e5db6ca16858253086ee9e527e4bd7fc`. Both MCP packages contain the GUI and companion. Downloaded checksums and all 322 Arch source, 83 Windows source and 132 Windows bundle manifest entries passed verification. The [public GitHub prerelease](https://github.com/0atxl/stickies/releases/tag/v0.10.3-mcp.1) contains only the MCP build and its supporting files, and all 12 uploaded asset sizes and digests match. `v0.10.3` is still the latest stable release. Distribution for the preview is GitHub Releases only.
+
+No tests or app sessions ran. Windows MCP interaction and the focused Hyprland blur check remain open. The [preview release notes](../packaging/releases/v0.10.3-mcp.1.md) explain schema 5 migration and how to return to standard v0.10.3 using a pre-upgrade backup.
 
 ## Standard/MCP CI and package results, October 25
 
